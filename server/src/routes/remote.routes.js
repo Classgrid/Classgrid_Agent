@@ -1,7 +1,10 @@
 // Remote PC for the phone (owner, 2026-11-18; services/remote-pc.service.js). Only the person's own chats.
 //   GET    /api/remote/chats                 -> { chats: [{ sessionId, title, deviceName, online, answering, updatedAt }] }
-//   GET    /api/remote/chats/:id/live        -> { running, question, from, turnId, events }  the answer running now
-//   POST   /api/remote/chats/:id/messages    { question, permissionMode?, selectedModel?, effort? } -> { ok } or 409/503
+//   GET    /api/remote/chats/:id/live        -> { running, question, from, turnId, attachments?, events }  the answer running now
+//   GET    /api/remote/chats/:id/details     -> { deviceId, deviceName, deviceKind, online, connectedSince, totalConnectedMs,
+//                                                 project: { name, path } | null, mode, clientApp, turnedOnAt }
+//   POST   /api/remote/chats/:id/messages    { question, permissionMode?, selectedModel?, effort?, attachments? } -> { ok } or 409/503
+//                                             attachments: [{ url, name, mimeType }] as the chat sends them to the AI
 //   POST   /api/remote/chats/:id/stop        -> { ok }   stops the answer running in the chat (phone's or computer's)
 //   DELETE /api/remote/chats/:id             -> { ok }   Remote PC off for this chat (the computer keeps the chat)
 //   GET    /api/remote/devices/:deviceId     -> { allowed, defaultMode }   the computer's own settings (its app)
@@ -10,7 +13,7 @@
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
-import { deviceSettings, listRemoteChats, liveState, sendFromPhone, setDeviceAllowed, setRemoteChat, stopRemote } from "../services/remote-pc.service.js";
+import { deviceSettings, listRemoteChats, liveState, remoteChatDetails, sendFromPhone, setDeviceAllowed, setRemoteChat, stopRemote } from "../services/remote-pc.service.js";
 
 const router = express.Router();
 const CHAT_ID = /^[0-9a-f-]{36}$/i;
@@ -42,6 +45,21 @@ router.get("/chats/:id/live", isAuthenticated, async (req, res) => {
     res.json(await liveState(id));
 });
 
+// The phone's Details sheet: the computer, its connection (since when, how long in all), the project open there for this
+// chat, the chat's mode and app, and when Remote PC was turned on
+router.get("/chats/:id/details", isAuthenticated, async (req, res) => {
+    const id = await ownChat(req, res);
+    if (!id) return;
+    try {
+        const details = await remoteChatDetails(req.user, id);
+        if (!details) return res.status(404).json({ error: "Remote PC is off for this chat. Type /remote in it on your computer.", code: "not_remote" });
+        res.json(details);
+    } catch (e) {
+        console.error("[Remote PC] details failed:", e?.message || e);
+        res.status(500).json({ error: "Could not load this chat's details. Try again." });
+    }
+});
+
 router.post("/chats/:id/messages", isAuthenticated, async (req, res) => {
     const id = await ownChat(req, res);
     if (!id) return;
@@ -51,6 +69,7 @@ router.post("/chats/:id/messages", isAuthenticated, async (req, res) => {
         permissionMode: b.permissionMode,
         selectedModel: typeof b.selectedModel === "string" ? b.selectedModel : undefined,
         effort: ["low", "high"].includes(b.effort) ? b.effort : undefined,
+        attachments: Array.isArray(b.attachments) ? b.attachments : undefined,
     });
     if (out.ok) return res.json({ ok: true });
     const status = out.code === "offline" ? 503 : out.code === "busy" ? 409 : out.code === "not_remote" ? 404 : out.code === "not_allowed" ? 403 : 400;

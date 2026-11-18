@@ -43,6 +43,9 @@ async function activate(context) {
   const chats = require(path.join(DESKTOP_DIR, "chats.js"));
   const memory = require(path.join(DESKTOP_DIR, "memory.js"));
   runner.init(userData);
+  // Remote PC: the runner's connection says which computer it is (the same id as the Classgrid app's) and which app
+  // (an older desktop/runner.js copy has no setIdentity)
+  runner.setIdentity?.({ deviceId: computerId, app: /classgrid/i.test(vscode.env.appName || "") ? "code" : "extension" });
   chats.init(userData);
   if (process.platform === "win32") clipboardHost(); // ready before the first image paste
   memory.init(userData);

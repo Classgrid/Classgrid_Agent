@@ -13,7 +13,11 @@ const remoteChatSchema = new mongoose.Schema({
     // How the chat runs, so a message from the phone runs it the same way (the desktop chat's own settings)
     clientApp: { type: String, default: "desktop" },
     appMode: { type: String, default: null },
+    // What kind of app it was turned on from ("desktop": the Classgrid app; "editor": Classgrid Code or the extension)
+    deviceKind: { type: String, default: null },
     on: { type: Boolean, default: true },
+    // When Remote PC was last turned on for this chat (the phone's Details; older rows have only createdAt)
+    turnedOnAt: { type: Date, default: null },
 }, { timestamps: true });
 
 remoteChatSchema.index({ userId: 1, sessionId: 1 }, { unique: true });
@@ -30,6 +34,13 @@ const remoteDeviceSchema = new mongoose.Schema({
     allowed: { type: Boolean, default: true },
     // The permission mode the phone starts with for this computer's chats (the app's Settings; the phone can change it)
     defaultMode: { type: String, enum: ["review", "default", "auto", "turbo"], default: "default" },
+    // How long this computer has been connected (the phone's Details: "connected since", "total connected time"), kept
+    // by services/remote-device.service.js from the apps' runner connections: connectedSince is the start of the
+    // connection now (null while none is open), totalConnectedMs every earlier connection added up, and lastSeenAt the
+    // last sign of life (a beat every minute while connected), which ends a connection the server never saw close.
+    connectedSince: { type: Date, default: null },
+    lastSeenAt: { type: Date, default: null },
+    totalConnectedMs: { type: Number, default: 0 },
 }, { timestamps: true });
 remoteDeviceSchema.index({ userId: 1, deviceId: 1 }, { unique: true });
 export const RemoteDevice = mongoose.models.RemoteDevice || mongoose.model("RemoteDevice", remoteDeviceSchema);

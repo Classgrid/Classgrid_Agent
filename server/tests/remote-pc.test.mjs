@@ -4,8 +4,9 @@ import test, { mock } from "node:test";
 import assert from "node:assert/strict";
 
 // ---- a small Redis in memory (only what the service uses) ----
-const kv = new Map(); const lists = new Map(); const sets = new Map();
+const kv = new Map(); const lists = new Map(); const sets = new Map(); const hashes = new Map();
 const redis = {
+    async hexists(k, f) { return hashes.get(k)?.has(String(f)) ? 1 : 0; },
     async get(k) { return kv.has(k) ? kv.get(k) : null; },
     async set(k, v, ...opts) { if (opts.includes("NX") && kv.has(k)) return null; kv.set(k, String(v)); return "OK"; },
     async del(...ks) { for (const k of ks) { kv.delete(k); lists.delete(k); sets.delete(k); } return 1; },
@@ -53,8 +54,16 @@ mock.module("../src/models/User.js", { defaultExport: { findById: () => ({ selec
 mock.module("../src/config/supabaseClient.js", { namedExports: { primarySupabaseClient: {} } });
 const pushes = [];
 mock.module("../src/services/user-push.service.js", { namedExports: { pushRemoteQuestion: async (p) => { pushes.push(p); } } });
-mock.module("../src/services/local-runner.service.js", { namedExports: { runnerOnline: async () => online } });
-mock.module("../src/services/chat-wake.service.js", { namedExports: { chatAnswering: async () => answering } });
+const onlineAsked = [];
+mock.module("../src/services/remote-device.service.js", {
+    namedExports: {
+        deviceOnline: async (userId, deviceId) => { onlineAsked.push(deviceId); return online; },
+        deviceConnection: async () => ({ online, connectedSince: online ? "2026-11-18T06:00:00.000Z" : null, totalConnectedMs: 5400000 }),
+    },
+});
+mock.module("../src/services/ide-project.service.js", { namedExports: { projectForChat: async () => ({ name: "classgrid_marketting", location: "local", localPath: "c:\\classgrid_marketting" }) } });
+let answeringFn = null; // (a test that needs the real check: the working mark or the run key)
+mock.module("../src/services/chat-wake.service.js", { namedExports: { chatAnswering: async () => (answeringFn ? answeringFn() : answering) } });
 mock.module("../src/services/whatsapp-call.service.js", {
     namedExports: {
         runAgentTask: async (user, question, projectId, onSession, sessionId, onStep, extraBody, signal, onData) => {
@@ -74,9 +83,27 @@ const tick = () => new Promise((r) => setTimeout(r, 20));
 test("only the events the phone shows go out, and a step's result is cut", () => {
     assert.equal(svc.liveEventOf({ type: "pc_tool_call" }), null);
     assert.equal(svc.liveEventOf({ type: "round_end" }), null);
+    assert.equal(svc.liveEventOf({ type: "tool_done" }), null);
+    assert.equal(svc.liveEventOf({ type: "turn_info", turnId: "t" }), null);
     assert.deepEqual(svc.liveEventOf({ type: "token", token: "a" }), { type: "token", token: "a" });
-    assert.equal(svc.liveEventOf({ type: "tool_result", result: "x".repeat(9000) }).result.length, 4000);
+    assert.equal(svc.liveEventOf({ type: "tool_result", result: "x".repeat(30000) }).result.length, svc.LIVE_RESULT_CHARS);
+    assert.equal(svc.liveEventOf({ type: "tool_result", result: "x".repeat(9000) }).result.length, 9000, "a command's output of 9,000 characters reaches the phone whole");
+    assert.deepEqual(svc.liveEventOf({ type: "tool_result", tool: "spotify_connector", result: { tracks: [1] } }).result, { tracks: [1] }, "a card's data stays as it is");
     assert.ok(svc.liveEventOf({ type: "permission_request", id: "p" }));
+    // everything else the computer's chat shows of an answer goes too
+    for (const type of ["sources", "checkpoint", "file_update", "plan_step_update", "helper_progress", "generated_image", "title_updated", "limit_ended", "chat_ended"]) {
+        assert.ok(svc.liveEventOf({ type }), type);
+    }
+    // a file edit's whole change (the phone draws its diff from the step's input)
+    const edit = { type: "tool_start", tool: "edit_project_file", args: { path: "src/a.ts", edits: [{ old_text: "a", new_text: "b".repeat(50000) }] } };
+    assert.deepEqual(svc.liveEventOf(edit), edit);
+});
+
+test("a phone message's files: web links only, at most 10, with a name", () => {
+    assert.deepEqual(svc.cleanAttachments(null), []);
+    assert.deepEqual(svc.cleanAttachments([{ url: "javascript:alert(1)" }, { url: "data:image/png;base64,AAA" }, { url: "http://x.y/a.png" }]), []);
+    assert.deepEqual(svc.cleanAttachments([{ url: "https://cdn.classgrid.in/u/photo.jpg?x=1", mimeType: "image/jpeg" }]), [{ url: "https://cdn.classgrid.in/u/photo.jpg?x=1", name: "photo.jpg", mimeType: "image/jpeg" }]);
+    assert.equal(svc.cleanAttachments(Array.from({ length: 14 }, (_, i) => ({ url: `https://a.b/${i}.png`, name: `${i}.png` }))).length, 10);
 });
 
 test("/remote turns a chat on; a phone message is refused when it can't run, with a clear reason", async () => {
@@ -85,6 +112,7 @@ test("/remote turns a chat on; a phone message is refused when it can't run, wit
     assert.equal(await svc.remoteChatOn("u1", S), true);
     online = false;
     assert.equal((await svc.sendFromPhone({ _id: "u1" }, S, { question: "hi" })).code, "offline");
+    assert.equal(onlineAsked.at(-1), null, "the chat's own computer is asked about (none known for this chat)");
     online = true; answering = true;
     assert.equal((await svc.sendFromPhone({ _id: "u1" }, S, { question: "hi" })).code, "busy");
     answering = false;
@@ -133,6 +161,67 @@ test("a phone that opens the chat mid-answer gets what it missed; the end clears
     await redis.set(`chat:run:u1:${S}`, "run-1");
     assert.equal((await svc.stopRemote("u1", S)).ok, true);
     assert.match(await redis.get(`chat:run:u1:${S}`), /^stopped-/);
+});
+
+test("a phone message carries its photos and files, and runs on the chat's own computer", async () => {
+    remoteRows = remoteRows.map((r) => (r.sessionId === S ? { ...r, deviceId: "abcdef0123456789abcdef" } : r));
+    emitted.length = 0;
+    const out = await svc.sendFromPhone({ _id: "u1" }, S, { question: "", attachments: [{ url: "https://cdn.classgrid.in/u/shot.png", name: "shot.png", mimeType: "image/png" }, { url: "file:///c:/x" }] });
+    assert.deepEqual(out, { ok: true }, "a photo alone is a message");
+    await tick();
+    const body = runs.at(-1).extraBody;
+    assert.deepEqual(body.attachments, [{ url: "https://cdn.classgrid.in/u/shot.png", name: "shot.png", mimeType: "image/png" }]);
+    assert.deepEqual(body.fileUrls, ["https://cdn.classgrid.in/u/shot.png"]);
+    assert.equal(body.deviceId, "abcdef0123456789abcdef", "the chat's computer: its folder project is used, as when typed there");
+    assert.equal(onlineAsked.at(-1), "abcdef0123456789abcdef");
+    const start = emitted.find((e) => e.name === "remote:turn" && e.data.phase === "start");
+    assert.equal(start.data.attachments[0].name, "shot.png", "the phone shows the photo above the answer");
+    assert.equal(emitted.find((e) => e.name === "chat:woke" && e.data.phase === "start").data.attachments.length, 1);
+});
+
+test("a message sent right after Stop waits for the stopped answer to end instead of being refused", async () => {
+    // (the owner's phone, 2026-11-18: Stop, then a message a second later, got "This chat is answering right now")
+    // The stopped answer is still saving (the chat is marked working); Stop's mark stays 8 seconds after it
+    answering = true;
+    await redis.set(`chat:run:u1:${S}`, "stopped-1");
+    hashes.set("ai:working:u1", new Set([S]));
+    setTimeout(() => { hashes.delete("ai:working:u1"); }, 300);
+    // (chat-wake.service.js chatAnswering: the working mark or the run key)
+    answeringFn = async () => (await redis.hexists("ai:working:u1", S)) === 1 || (await redis.exists(`chat:run:u1:${S}`)) === 1;
+    const out = await svc.sendFromPhone({ _id: "u1" }, S, { question: "next" }, { stopWaitMs: 3000 });
+    answeringFn = null;
+    assert.deepEqual(out, { ok: true });
+    assert.equal(await redis.get(`chat:run:u1:${S}`), null, "Stop's mark no longer holds the chat once the answer has ended");
+    await tick();
+    // an answer that was not stopped: refused at once, as before
+    answering = true;
+    await redis.set(`chat:run:u1:${S}`, "run-2");
+    const started = Date.now();
+    assert.equal((await svc.sendFromPhone({ _id: "u1" }, S, { question: "next" }, { stopWaitMs: 3000 })).code, "busy");
+    assert.ok(Date.now() - started < 1000);
+    // a stopped answer that doesn't end in time: still refused, and Stop's mark stays for it
+    await redis.set(`chat:run:u1:${S}`, "stopped-2");
+    hashes.set("ai:working:u1", new Set([S]));
+    assert.equal((await svc.sendFromPhone({ _id: "u1" }, S, { question: "next" }, { stopWaitMs: 300 })).code, "busy");
+    assert.equal(await redis.get(`chat:run:u1:${S}`), "stopped-2");
+    answering = false;
+    hashes.clear();
+    await redis.del(`chat:run:u1:${S}`);
+});
+
+test("Details: the computer, its connection, the project open there, the mode and when it was turned on", async () => {
+    online = true;
+    const d = await svc.remoteChatDetails({ _id: "u1" }, S);
+    assert.deepEqual(Object.keys(d).sort(), ["clientApp", "connectedSince", "deviceId", "deviceKind", "deviceName", "mode", "online", "project", "totalConnectedMs", "turnedOnAt"].sort());
+    assert.equal(d.deviceName, "Classgrid desktop app on Windows");
+    assert.equal(d.deviceKind, "desktop");
+    assert.equal(d.online, true);
+    assert.equal(d.connectedSince, "2026-11-18T06:00:00.000Z");
+    assert.equal(d.totalConnectedMs, 5400000);
+    assert.deepEqual(d.project, { name: "classgrid_marketting", path: "c:\\classgrid_marketting" });
+    assert.equal(d.clientApp, "desktop");
+    assert.match(d.turnedOnAt, /^\d{4}-\d\d-\d\dT/, "turned on with /remote: its time is kept");
+    assert.equal(await svc.remoteChatDetails({ _id: "u1" }, "99999999-2222-3333-4444-555555555555"), null);
 });
 
 test("a computer whose own Remote PC switch is off: the phone's message is refused", async () => {

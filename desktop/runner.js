@@ -21,6 +21,9 @@ const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".t
 let socket = null;
 let foldersFile = null;
 let currentToken = null;
+// Which computer and app this connection is (setIdentity): the server tells the person's phone which computer is
+// connected and for how long (Remote PC Details, server remote-device.service.js). deviceId is read when connecting.
+let identity = { deviceId: null, app: null };
 const jobs = new Map(); // job id -> { proc, command, log, startedAt, exitCode }
 let browserStep = null; // the app's browser (browser.js), once the window is open
 
@@ -1173,7 +1176,9 @@ function killTree(proc) {
 function connect(token) {
   if (socket) { socket.disconnect(); socket = null; }
   if (!token) return;
-  socket = io(API, { auth: { token, runner: true }, transports: ["websocket"], reconnection: true });
+  let deviceId = null;
+  try { deviceId = typeof identity.deviceId === "function" ? identity.deviceId() : identity.deviceId; } catch { deviceId = null; }
+  socket = io(API, { auth: { token, runner: true, ...(deviceId ? { deviceId } : {}), ...(identity.app ? { app: identity.app } : {}) }, transports: ["websocket"], reconnection: true });
   socket.on("connect", () => console.log("[runner] connected to", API));
   // socket.io gives up for good when the server refuses a reconnect (its login check, e.g. while it restarts) or
   // closes the connection itself: the AI then couldn't reach this computer ("the Classgrid desktop app isn't open")
@@ -1549,6 +1554,9 @@ module.exports = {
     connect(token);
   },
   allowFolder,
+  // The computer's own id (the scrambled one the chat sends as deviceId; a function is read when connecting) and the
+  // app ("desktop", "code", "extension"), sent with the connection for Remote PC
+  setIdentity({ deviceId = null, app = null } = {}) { identity = { deviceId, app }; },
   setBrowser(fn) { browserStep = fn; },
   isAllowed: (folder) => isAllowedRoot(folder),
   stopAll() { for (const job of jobs.values()) killTree(job.proc); jobs.clear(); socket?.disconnect(); },

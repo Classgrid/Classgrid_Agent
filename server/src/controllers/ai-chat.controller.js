@@ -2025,6 +2025,11 @@ export const streamAskAi = async (req, res) => {
     // Desktop app: the computer this account uses (the free limit counts per computer). Noted alongside the checks
     // below, not in front of them (answers must start at once, owner 2026-11-09)
     const deviceNoted = body.clientApp === "desktop" && body.deviceId ? rememberDevice(userId, body.deviceId).catch((e) => console.error("rememberDevice:", e?.message)) : null;
+    // Remote PC: this sign-in is on that computer, so its runner connection is known to be that computer's (an app from
+    // before 2026-11-18 doesn't say it on the connection; remote-device.service.js)
+    if (body.clientApp === "desktop" && typeof body.deviceId === "string" && req.authSid && userId) {
+        import("../services/remote-device.service.js").then((m) => m.learnDevice(String(userId), req.authSid, body.deviceId)).catch(() => {});
+    }
     // The chat's row is read while the usage check runs (it is needed right after it), not after it
     // Sonnet for a longer or harder message, Haiku for a short simple one (the same split Auto makes between its two
     // Cloudflare models). After the plan checks above on purpose: they are about what the person picked.
@@ -2262,6 +2267,7 @@ export const streamAskAi = async (req, res) => {
                         userId, sessionId: String(sessionId), on,
                         deviceId: typeof body.deviceId === "string" ? body.deviceId.slice(0, 100) : null,
                         deviceName: deviceNameOf({ kind, userAgent: String(req.headers["user-agent"] || "") }),
+                        deviceKind: kind,
                         clientApp: "desktop", // (Classgrid Code and the extension run the chat the desktop app's way too)
                         appMode: typeof body.appMode === "string" ? body.appMode : null,
                     });

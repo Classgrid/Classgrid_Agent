@@ -299,7 +299,7 @@ const machineId = () => {
   }
   return undefined;
 };
-ipcMain.on("cg:deviceId", (e) => {
+const computerId = () => {
   if (deviceId === undefined) {
     deviceId = null;
     try {
@@ -307,8 +307,9 @@ ipcMain.on("cg:deviceId", (e) => {
       if (id) deviceId = require("node:crypto").createHash("sha256").update(`classgrid-device:${id.toLowerCase()}`).digest("hex");
     } catch { /* the ID can't be read: no computer known, so the free limit is per account */ }
   }
-  e.returnValue = deviceId;
-});
+  return deviceId;
+};
+ipcMain.on("cg:deviceId", (e) => { e.returnValue = computerId(); });
 // A file on this computer shown in a Studio tab: its address for our screens, and its size
 ipcMain.on("cg:fileUrl", (e, file) => { e.returnValue = APP_URL + FILE_PREFIX + encodeURIComponent(path.resolve(String(file || ""))); });
 ipcMain.handle("cg:fileInfo", (_e, file) => {
@@ -548,6 +549,8 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
     runner.init(app.getPath("userData"));
+    // Remote PC: the runner's connection says which computer it is (read when it connects, after the login arrives)
+    runner.setIdentity({ deviceId: computerId, app: "desktop" });
     chats.init(app.getPath("userData"));
     uploads.init(app.getPath("userData"));
     memory.init(app.getPath("userData"));

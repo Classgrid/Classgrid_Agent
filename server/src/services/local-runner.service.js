@@ -123,8 +123,25 @@ export function registerRunnerSocket(socket) {
         // A background command finished on the user's computer: its chat is woken with the result
         const userId = String(socket.userId);
         socket.on("local-job-done", (d) => { import("./chat-wake.service.js").then((m) => m.onLocalJobDone(userId, d)).catch(() => {}); });
+        // Remote PC: which computer this is, and how long it has been connected (remote-device.service.js)
+        import("./remote-device.service.js").then((m) => {
+            m.runnerConnected(socket).catch((e) => console.warn("[Remote PC] connection not noted:", e?.message));
+            socket.on("disconnect", () => { m.runnerDisconnected(socket).catch((e) => console.warn("[Remote PC] disconnection not noted:", e?.message)); });
+        }).catch(() => {});
         console.log(`[Local runner] desktop app connected for user ${socket.userId}`);
     }
+}
+
+/**
+ * The user's runner connections now, on every server process: [{ id, sid, data, handshake }] (data.remoteDevice: the
+ * computer it said it is, remote-device.service.js). The other processes answer through the Redis adapter, at most 4 s.
+ */
+export async function runnerSockets(userId) {
+    const io = getIO();
+    const room = runnerRoom(String(userId));
+    const local = await io.local.in(room).fetchSockets().catch(() => []);
+    const anywhere = await Promise.race([io.in(room).fetchSockets(), new Promise((r) => setTimeout(() => r(null), 4000))]).catch(() => null);
+    return Array.isArray(anywhere) ? anywhere : local;
 }
 
 // Commands may run for a while; file tools are quick

@@ -32,19 +32,48 @@ const LIVE_TTL_S = 6 * 60 * 60;
 const CHAT_ID = /^[0-9a-f-]{36}$/i;
 const PERMISSION_MODES = new Set(["review", "default", "auto", "turbo"]);
 
-// The events of an answer the phone shows (the words, the thinking, the steps, questions, pictures, the end)
+// The events of an answer the phone shows: everything the computer's chat shows of it (the words, the thinking, every
+// step with what it read, wrote and ran, helpers, the plan, the web pages it cited, questions, pictures, the end).
+// Only what drives the computer's own loop (turn_info, round_end, tool_done, pc_tool_call, local_loop) stays there.
 const LIVE_TYPES = new Set([
     "token", "thought", "status", "tool_start", "tool_result", "generated_image", "answer", "error",
     "permission_request", "permission_resolved", "helper_progress", "plan_step_update", "chat_ended", "limit_ended",
+    "sources", "checkpoint", "file_update", "title_updated",
 ]);
+// A step's result as the phone gets it: a command's whole output up to this (the computer's chat shows it all; a
+// longer one is cut, as the events are also kept in Redis for a phone that opens the chat later)
+export const LIVE_RESULT_CHARS = 20000;
+// A file a phone message sends along (the same shape the chat sends to the AI: streamAskAi's body.attachments)
+const MAX_ATTACHMENTS = 10;
 
 const emit = (userId, name, data) => { try { getIO().to(String(userId)).emit(name, data); } catch { /* no socket server */ } };
 
-/** The event as the phone gets it: a step's result is cut (the phone shows a line, not the whole output). */
+/** The event as the phone gets it: a step's result is cut at LIVE_RESULT_CHARS. */
 export function liveEventOf(event) {
     if (!event || !LIVE_TYPES.has(event.type)) return null;
-    if (event.type === "tool_result") return { ...event, result: String(event.result ?? "").slice(0, 4000) };
+    if (event.type === "tool_result") {
+        // (a result that is an object, a tool's own card data, goes as it is; text is cut)
+        const r = event.result;
+        return typeof r === "string" || r === undefined || r === null ? { ...event, result: String(r ?? "").slice(0, LIVE_RESULT_CHARS) } : event;
+    }
     return event;
+}
+
+/** The files a phone message sends along: [{ url, name, mimeType }] (web links only, at most 10), else [] */
+export function cleanAttachments(list) {
+    if (!Array.isArray(list)) return [];
+    const out = [];
+    for (const a of list) {
+        const url = typeof a?.url === "string" ? a.url.trim() : "";
+        if (!/^https:\/\/\S+$/i.test(url) || url.length > 4000) continue;
+        out.push({
+            url,
+            name: (typeof a.name === "string" && a.name.trim() ? a.name.trim() : url.split(/[?#]/)[0].split("/").pop() || "file").slice(0, 200),
+            mimeType: typeof a.mimeType === "string" && a.mimeType ? a.mimeType.slice(0, 120) : "application/octet-stream",
+        });
+        if (out.length >= MAX_ATTACHMENTS) break;
+    }
+    return out;
 }
 
 /** Whether this chat is a Remote PC chat that is on (cached per person in Redis; MongoDB holds it). */
@@ -89,10 +118,12 @@ export async function setDeviceAllowed(userId, deviceId, allowed, defaultMode = 
 }
 
 /** Turns Remote PC on or off for a chat. Returns the chat's record. */
-export async function setRemoteChat({ userId, sessionId, on, deviceId = null, deviceName = null, clientApp = "desktop", appMode = null }) {
+export async function setRemoteChat({ userId, sessionId, on, deviceId = null, deviceName = null, deviceKind = null, clientApp = "desktop", appMode = null }) {
+    // (turned on again while it is on: it keeps the time it was turned on)
+    const before = on ? await RemoteChat.findOne({ userId, sessionId: String(sessionId), on: true }).lean().catch(() => null) : null;
     const row = await RemoteChat.findOneAndUpdate(
         { userId, sessionId: String(sessionId) },
-        { $set: { on: !!on, ...(on ? { deviceId, deviceName, clientApp: clientApp || "desktop", appMode } : {}) } },
+        { $set: { on: !!on, ...(on ? { deviceId, deviceName, deviceKind, clientApp: clientApp || "desktop", appMode, ...(before ? {} : { turnedOnAt: new Date() }) } : {}) } },
         { upsert: true, new: true },
     ).lean();
     await redis.del(ON_SET(userId)).catch(() => {});
@@ -107,9 +138,11 @@ export async function listRemoteChats(user) {
     const ids = rows.map((r) => r.sessionId);
     const { data } = await primarySupabaseClient.from("ai_chat_sessions").select("id, title, created_at").in("id", ids).eq("user_email", user.email);
     const byId = new Map((data || []).map((c) => [c.id, c]));
-    const { runnerOnline } = await import("./local-runner.service.js");
+    const { deviceOnline } = await import("./remote-device.service.js");
     const { chatAnswering } = await import("./chat-wake.service.js");
-    const online = await runnerOnline(String(user._id));
+    // Each chat's own computer (a connection that did not say its computer counts for any of them)
+    const onlineOf = new Map();
+    for (const d of new Set(rows.map((r) => r.deviceId || null))) onlineOf.set(d, await deviceOnline(String(user._id), d).catch(() => false));
     const devices = await RemoteDevice.find({ userId: user._id }).select("deviceId allowed defaultMode").lean().catch(() => []);
     const deviceOf = new Map((devices || []).map((d) => [d.deviceId, d]));
     return Promise.all(rows.filter((r) => byId.has(r.sessionId)).map(async (r) => ({
@@ -117,7 +150,7 @@ export async function listRemoteChats(user) {
         title: byId.get(r.sessionId)?.title || "New chat",
         deviceName: r.deviceName || "Your computer",
         deviceId: r.deviceId || null,
-        online,
+        online: !!onlineOf.get(r.deviceId || null),
         allowed: deviceOf.get(r.deviceId)?.allowed !== false,
         defaultMode: deviceOf.get(r.deviceId)?.defaultMode || "default",
         answering: await chatAnswering(String(user._id), r.sessionId).catch(() => false),
@@ -129,10 +162,12 @@ export async function listRemoteChats(user) {
  * An answer started in a remote chat: what the phone has of the last one is cleared, and the phone is told.
  * turnId: the computer's own answer (its durable turn), which the phone's Stop ends.
  */
-export async function remoteTurnStarted(userId, sessionId, { question = "", from = "computer", turnId = null } = {}) {
-    const m = redis.multi().del(LIVE(sessionId)).set(TURN_OF(sessionId), JSON.stringify({ question: String(question || "").slice(0, 20000), from, turnId }), "EX", LIVE_TTL_S);
+export async function remoteTurnStarted(userId, sessionId, { question = "", from = "computer", turnId = null, attachments = [] } = {}) {
+    const files = cleanAttachments(attachments);
+    const turn = { question: String(question || "").slice(0, 20000), from, turnId, ...(files.length ? { attachments: files } : {}) };
+    const m = redis.multi().del(LIVE(sessionId)).set(TURN_OF(sessionId), JSON.stringify(turn), "EX", LIVE_TTL_S);
     await m.exec().catch(() => {});
-    emit(userId, "remote:turn", { sessionId, phase: "start", question: String(question || "").slice(0, 20000), from, turnId });
+    emit(userId, "remote:turn", { sessionId, phase: "start", ...turn });
 }
 
 /** The answer ended: the phone reads the saved chat again. Its live events are kept a little while for a late phone. */
@@ -173,7 +208,7 @@ export async function liveState(sessionId) {
     try { t = turn ? JSON.parse(turn) : null; } catch { t = null; }
     const events = [];
     for (const s of t ? raw || [] : []) { try { events.push(JSON.parse(s)); } catch { /* skip */ } }
-    return { running: !!t, question: t?.question || "", from: t?.from || null, turnId: t?.turnId || null, events };
+    return { running: !!t, question: t?.question || "", from: t?.from || null, turnId: t?.turnId || null, ...(t?.attachments?.length ? { attachments: t.attachments } : {}), events };
 }
 
 /**
@@ -182,27 +217,50 @@ export async function liveState(sessionId) {
  * { ok } at once, or { error, code } when it can't run now: not a remote chat, the computer is offline, or the chat is
  * answering already.
  */
-export async function sendFromPhone(user, sessionId, { question, permissionMode, selectedModel, effort } = {}) {
+export async function sendFromPhone(user, sessionId, { question, permissionMode, selectedModel, effort, attachments } = {}, { stopWaitMs = 6000 } = {}) {
     const userId = String(user._id);
     const text = String(question || "").trim();
-    if (!text) return { error: "Write a message first.", code: "empty" };
+    const files = cleanAttachments(attachments);
+    if (!text && !files.length) return { error: "Write a message first.", code: "empty" };
     const row = await RemoteChat.findOne({ userId: user._id, sessionId: String(sessionId), on: true }).lean();
     if (!row) return { error: "Remote PC is off for this chat. Type /remote in it on your computer.", code: "not_remote" };
     if (!(await deviceAllowed(user._id, row.deviceId))) return { error: "Remote PC is turned off on that computer (Settings, General, Remote PC in the Classgrid app there).", code: "not_allowed" };
-    const { runnerOnline } = await import("./local-runner.service.js");
-    if (!(await runnerOnline(userId))) return { error: "Your computer is offline. Open Classgrid on it and try again.", code: "offline" };
+    // (that chat's own computer: another computer of the person being on doesn't make this one reachable)
+    const { deviceOnline } = await import("./remote-device.service.js");
+    if (!(await deviceOnline(userId, row.deviceId || null))) return { error: "Your computer is offline. Open Classgrid on it and try again.", code: "offline" };
     const { chatAnswering } = await import("./chat-wake.service.js");
+    // An answer that was just stopped is still ending (it saves what it wrote, up to a few seconds): the message waits
+    // for it instead of being refused as busy (the owner's phone, 2026-11-18 09:24 IST: Stop, then a message a second
+    // later, was refused with "This chat is answering right now")
+    if (await chatAnswering(userId, sessionId)) await stoppedAnswerEnded(userId, sessionId, stopWaitMs);
     if (await chatAnswering(userId, sessionId)) return { error: "This chat is answering right now. Wait for it to finish, or stop it.", code: "busy" };
     const took = await redis.set(RUNNING(sessionId), "1", "EX", 6 * 60 * 60, "NX").catch(() => null);
     if (!took) return { error: "This chat is answering right now. Wait for it to finish, or stop it.", code: "busy" };
     await redis.del(STOP(sessionId)).catch(() => {});
-    runFromPhone(user, row, text, { permissionMode, selectedModel, effort })
+    runFromPhone(user, row, text, { permissionMode, selectedModel, effort, attachments: files })
         .catch((e) => console.error("[Remote PC] a message from the phone failed:", e?.message || e))
         .finally(() => redis.del(RUNNING(sessionId)).catch(() => {}));
     return { ok: true };
 }
 
-async function runFromPhone(user, row, question, { permissionMode, selectedModel, effort }) {
+// Waits (up to waitMs) for an answer that Stop ended to finish ending (it saves what it wrote, up to 3 seconds). Returns
+// at once when the answer running was not stopped (its run key is that answer's own id, not Stop's "stopped-" mark, and
+// no Stop of the phone's own run is pending). Once it has ended, Stop's mark is taken away: it was only there to stop
+// that answer, and it held the chat as "answering" for its 8 seconds.
+async function stoppedAnswerEnded(userId, sessionId, waitMs) {
+    const runKey = `chat:run:${userId}:${sessionId}`;
+    const mark = String((await redis.get(runKey).catch(() => null)) || "");
+    const phoneStopped = (await redis.exists(STOP(sessionId)).catch(() => 0)) === 1;
+    if (!mark.startsWith("stopped-") && !phoneStopped) return;
+    const working = async () => (await redis.hexists(`ai:working:${userId}`, String(sessionId)).catch(() => 0)) === 1
+        || (await redis.exists(RUNNING(sessionId)).catch(() => 0)) === 1;
+    const until = Date.now() + waitMs;
+    while (Date.now() < until && (await working())) await new Promise((r) => setTimeout(r, 250));
+    if (await working()) return;
+    if (mark.startsWith("stopped-") && (await redis.get(runKey).catch(() => null)) === mark) await redis.del(runKey).catch(() => {});
+}
+
+async function runFromPhone(user, row, question, { permissionMode, selectedModel, effort, attachments = [] }) {
     const userId = String(user._id);
     const sessionId = row.sessionId;
     // The chat's own model and effort when the phone picked none (how the computer last used it: chatwake meta)
@@ -213,10 +271,10 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
         if (await redis.exists(STOP(sessionId)).catch(() => 0)) stop.abort();
     }, 1000);
     stopCheck.unref?.();
-    await remoteTurnStarted(userId, sessionId, { question, from: "phone" });
+    await remoteTurnStarted(userId, sessionId, { question, from: "phone", attachments });
     // The computer's app shows it like a woken chat: the start, the live answer, then the saved chat at the end
     // (with the question, so the computer's chat shows it at once above the answer; an app from before shows it at the end)
-    emit(userId, "chat:woke", { sessionId, phase: "start", question });
+    emit(userId, "chat:woke", { sessionId, phase: "start", question, ...(attachments.length ? { attachments } : {}) });
     const fullUser = await User.findById(user._id).select("-password -verificationToken");
     try {
         const { runAgentTask } = await import("./whatsapp-call.service.js");
@@ -226,6 +284,10 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
             permissionMode: PERMISSION_MODES.has(permissionMode) ? permissionMode : (meta.permissionMode || "default"),
             ...(selectedModel || meta.selectedModel ? { selectedModel: selectedModel || meta.selectedModel } : {}),
             ...(effort || meta.effort ? { effort: effort || meta.effort } : {}),
+            // the chat's computer: its folder project and its copy of a cloud project are used, as when typed there
+            ...(row.deviceId ? { deviceId: row.deviceId } : {}),
+            // a photo or file sent from the phone reaches the AI like one attached on the computer
+            ...(attachments.length ? { attachments, fileUrls: attachments.map((a) => a.url) } : {}),
             remoteFrom: "phone",
         }, stop.signal, (data) => {
             mirrorRemoteEvent(userId, sessionId, data);
@@ -257,4 +319,45 @@ export async function stopRemote(userId, sessionId) {
     if (await redis.exists(runKey).catch(() => 0)) await redis.set(runKey, `stopped-${Date.now()}`, "EX", 8).catch(() => {});
     const { turnId } = await liveState(sessionId);
     return { ok: true, turnId };
+}
+
+/**
+ * The phone's Details of a Remote PC chat (GET /api/remote/chats/:id/details): the computer, whether it is connected,
+ * since when and for how long in all, the project (folder) the chat works in on it, the chat's mode and app, and when
+ * Remote PC was turned on. null when Remote PC is off for the chat.
+ */
+export async function remoteChatDetails(user, sessionId) {
+    const userId = String(user._id);
+    const row = await RemoteChat.findOne({ userId: user._id, sessionId: String(sessionId), on: true }).lean();
+    if (!row) return null;
+    const { deviceConnection } = await import("./remote-device.service.js");
+    const [conn, project] = await Promise.all([
+        deviceConnection(userId, row.deviceId || null).catch(() => ({ online: false, connectedSince: null, totalConnectedMs: 0 })),
+        chatProject(sessionId),
+    ]);
+    const turnedOn = row.turnedOnAt || row.createdAt || null;
+    return {
+        deviceId: row.deviceId || null,
+        deviceName: row.deviceName || "Your computer",
+        deviceKind: row.deviceKind || (!row.deviceName || /^Classgrid desktop app/.test(String(row.deviceName)) ? "desktop" : "editor"),
+        online: conn.online,
+        connectedSince: conn.connectedSince,
+        totalConnectedMs: conn.totalConnectedMs,
+        project,
+        mode: row.appMode || "agent",
+        clientApp: row.clientApp || "desktop",
+        turnedOnAt: turnedOn ? new Date(turnedOn).toISOString() : null,
+    };
+}
+
+// The project the chat works in: { name, path } (path: its folder on the computer; null for a project on our servers)
+async function chatProject(sessionId) {
+    try {
+        const { projectForChat } = await import("./ide-project.service.js");
+        const p = await projectForChat(String(sessionId));
+        if (!p) return null;
+        return { name: p.name || null, path: p.location === "local" ? p.localPath || null : null };
+    } catch {
+        return null;
+    }
 }

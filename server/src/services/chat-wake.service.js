@@ -63,6 +63,7 @@ async function runWake(userId, sessionId) {
     const got = await redis.set(LOCK(sessionId), "1", "EX", 15 * 60, "NX").catch(() => null);
     if (!got) return; // another wake-up of this chat is running: it takes what is pending when it ends
     let ran = false;
+    let remote = null; // a Remote PC chat: the woken answer is followed on the phone too
     try {
         const notes = [];
         for (let n; (n = await redis.lpop(PENDING(sessionId)).catch(() => null)); ) notes.push(n);
@@ -73,6 +74,16 @@ async function runWake(userId, sessionId) {
         try { meta = JSON.parse((await redis.get(META(sessionId))) || "{}"); } catch { /* none */ }
         ran = true;
         tell(userId, { sessionId, phase: "start" });
+        // Remote PC (owner, 2026-11-18: the phone shows everything the computer's chat shows, live): the answer the
+        // finished work wakes reaches the phone like any other answer in that chat (its question is Classgrid's own, so
+        // the phone shows none)
+        try {
+            const pc = await import("./remote-pc.service.js");
+            if (await pc.remoteChatOn(String(userId), sessionId)) {
+                remote = pc;
+                await pc.remoteTurnStarted(String(userId), sessionId, { question: "", from: "computer" });
+            }
+        } catch { /* not followed on the phone */ }
         const question = `[SYSTEM: background work you started in this chat has finished while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nTell the user the result now, the way you would mention it in the middle of a conversation: what finished, whether it worked and what it means. If the user's task needs a next step, do it; otherwise don't start new long work.`;
         const { runAgentTask } = await import("./whatsapp-call.service.js");
         await runAgentTask(user, question, null, null, sessionId, null, {
@@ -85,6 +96,7 @@ async function runWake(userId, sessionId) {
             ...(meta.effort ? { effort: meta.effort } : {}),
             wakeUp: true,
         }, null, (data) => {
+            if (remote) { try { remote.mirrorRemoteEvent(String(userId), sessionId, data); } catch { /* the phone's own problem */ } }
             // The answer streams into the open chat as it is written (its thinking, steps and words), like any other
             // answer, instead of the whole message appearing at once when it ends
             if (!LIVE_EVENTS.has(data?.type)) return;
@@ -95,6 +107,7 @@ async function runWake(userId, sessionId) {
     } finally {
         await redis.del(LOCK(sessionId)).catch(() => {});
         if (ran) tell(userId, { sessionId, phase: "end" });
+        if (remote) await remote.remoteTurnEnded(String(userId), sessionId).catch(() => {});
         // More finished while this turn ran (or while the lock was held): wake again
         wakeIfPending(userId, sessionId).catch(() => {});
     }
