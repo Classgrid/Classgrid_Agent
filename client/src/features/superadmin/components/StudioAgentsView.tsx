@@ -1,6 +1,6 @@
 // Studio's Agents tab: every chat the agent is working in right now, across all projects, and the latest chats of
 // each project, so many agents can be watched from one place. Click a chat to open it.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bot, Cloud, Folder, Laptop, Users } from "lucide-react";
 import { Spinner } from "@/components/marketing_ui/spinner";
@@ -27,11 +27,15 @@ export function StudioAgentsView() {
   // Where each project is (This PC or Cloud); the saved project list stands in until it loads
   const [places, setPlaces] = useState<Map<string, Project>>(new Map());
   const [, tick] = useState(0);
+  // Reads the chat list again (set while the tab is open); and the working chats the list was already asked about
+  const reloadChats = useRef<() => void>(() => {});
+  const askedFor = useRef(new Set<string>());
 
   useEffect(() => {
     let off = false;
     const loadChats = () => fetchWithRescue(`${API}/api/ai/sessions?project=all&studio=1`, { credentials: "include" })
       .then((r) => r.json()).then((d) => { if (!off && Array.isArray(d?.sessions)) setChats(d.sessions); }).catch(() => { if (!off) setChats((c) => c ?? []); });
+    reloadChats.current = loadChats;
     const loadWorking = () => fetchWithRescue(`${API}/api/ai/working`, { credentials: "include" })
       .then((r) => r.json()).then((d) => { if (!off && Array.isArray(d?.working)) setWorking(d.working); }).catch(() => {});
     loadChats();
@@ -53,7 +57,20 @@ export function StudioAgentsView() {
   const hidden = (c: Chat | undefined) => !onDesktop() && !!c?.project_id && projectOf(c.project_id)?.location === "local";
   const byId = useMemo(() => new Map((chats || []).map((c) => [c.id, c])), [chats]);
   const busy = new Set(working.map((w) => w.sessionId));
-  const shownWorking = working.filter((w) => !hidden(byId.get(w.sessionId)) && (onDesktop() || byId.has(w.sessionId)));
+  // "Working now" lists only chats of this app's own list (owner, 2026-11-04: the desktop app shows its chats, the
+  // website its own, never each other's). The server's working list is every chat of the account that is answering,
+  // anywhere: the desktop app used to show them all, so a chat answering on the website or the phone sat here as
+  // "New chat" (owner, 2026-11-18: "it mixes").
+  const shownWorking = working.filter((w) => byId.has(w.sessionId) && !hidden(byId.get(w.sessionId)));
+  // A chat that began after the list was last read (it is read every 20 seconds): the list is read again at once,
+  // one time for each such chat, so a chat started here shows as working right away
+  useEffect(() => {
+    if (!chats) return;
+    const unknown = working.filter((w) => !byId.has(w.sessionId) && !askedFor.current.has(w.sessionId));
+    if (!unknown.length) return;
+    for (const w of unknown) askedFor.current.add(w.sessionId);
+    reloadChats.current();
+  }, [working, chats, byId]);
   const projects = useMemo(() => {
     const groups = new Map<string, { id: string | null; name: string; logo?: string | null; chats: Chat[] }>();
     for (const c of chats || []) {
