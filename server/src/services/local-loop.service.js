@@ -8,21 +8,31 @@
 // Commands come in over HTTP: POST /api/ai/turn/:id/cmd.
 import { StreamChatError } from "./llm-stream.js";
 
-const ROUND_WAIT_MS = 15 * 60 * 1000; // an app that never drives a round: the server runs what is left itself
+// An app that is on the answer's stream but never drives a round (an older app, its commands not getting through):
+// the server runs what is left itself, so the answer doesn't wait for ever. A stopped answer never gets here (below).
+const ROUND_WAIT_MS = 15 * 60 * 1000;
 const loops = new Map(); // turnId -> { userId, rounds: Map<roundId, Round>, nextRound, emit, onStop, stopped }
 
 /**
  * Makes the driver for one answer. `driver(calls, { run, text })` is what the model loops call after a round with
  * tool calls; it resolves with a Map(callId -> { content, isError }) once the app has driven the round.
+ * `signal`: the answer's own stop (streamAbort in streamAskAi). Every way an answer is stopped aborts it: the app's
+ * Stop, the durable turn's grace running out with no app on the stream, a newer message in the chat. Each of them
+ * ends a round's wait at once and its steps never run (found during the owner's Remote PC work, 2026-11-18: only the
+ * app's Stop command did; after the other stops the answer hung on the round until the 15-minute timer, which then
+ * ran the steps on the user's PC through the runner socket, after the answer had stopped).
  */
-export function makeLocalLoopDriver({ turnId, userId, emit, onStop }) {
+export function makeLocalLoopDriver({ turnId, userId, emit, onStop, signal = null }) {
     const state = { userId: String(userId), rounds: new Map(), nextRound: 0, emit, onStop, stopped: false, disposed: false };
     loops.set(turnId, state);
+    const onAbort = () => stopLoop(state);
+    if (signal?.aborted) stopLoop(state);
+    else signal?.addEventListener?.("abort", onAbort, { once: true });
     // `helper`: which helper's round this is (helpers are driven by the app too, each round on its own); the main
     // answer's rounds carry none. Once the answer has ended (dispose), a helper still working gets null back and its
     // loop runs the calls itself, as the app's stream is gone.
     const driverFor = (helper) => async (calls, { run, text }) => {
-        if (state.stopped) throw new StreamChatError("Request aborted");
+        if (state.stopped || signal?.aborted) { stopLoop(state); throw new StreamChatError("Request aborted"); }
         if (state.disposed) return null;
         const roundId = ++state.nextRound;
         return new Promise((resolve, reject) => {
@@ -41,6 +51,7 @@ export function makeLocalLoopDriver({ turnId, userId, emit, onStop }) {
     const driver = driverFor(null);
     const dispose = () => {
         state.disposed = true;
+        signal?.removeEventListener?.("abort", onAbort);
         if (loops.get(turnId) === state) loops.delete(turnId);
         // Rounds still open when the answer ends (a helper's): the server finishes them itself
         for (const [roundId] of state.rounds) finishRound(state, roundId, "the answer ended, so the server ran the rest").catch(() => {});
@@ -52,11 +63,15 @@ async function runOne(state, roundId, round, id) {
     if (round.outcomes.has(id)) return;
     const call = round.calls.find((c) => c.id === id);
     if (!call) return;
+    // A run the app asked for that had not started when the answer stopped: it never starts
+    if (state.stopped) { round.outcomes.set(id, { ...NOT_RUN }); return; }
     let out;
     try { out = await round.run(id); } catch (e) { out = { content: `Tool error: ${e?.message || e}`, isError: true }; }
     round.outcomes.set(id, out || { content: "", isError: false });
     state.emit({ type: "tool_done", roundId, id, name: call.name, isError: !!out?.isError });
 }
+
+const NOT_RUN = { content: "Not run: the app skipped this call.", isError: true };
 
 // Closes a round: whatever the app didn't ask for is run by the server when the app went quiet (`ranByServer`), or
 // marked "not run" when the app closed the round on purpose
@@ -69,10 +84,27 @@ async function finishRound(state, roundId, ranByServer) {
     for (const c of round.calls) {
         if (round.outcomes.has(c.id)) continue;
         if (ranByServer && !state.stopped) await runOne(state, roundId, round, c.id);
-        else round.outcomes.set(c.id, { content: "Not run: the app skipped this call.", isError: true });
+        else round.outcomes.set(c.id, { ...NOT_RUN });
     }
     state.rounds.delete(roundId);
     round.resolve(round.outcomes);
+}
+
+// The answer is stopped (any way): every open round ends now, without waiting for a step still running on the PC
+// (the app stops that one itself), and nothing of it runs afterwards: not the app's queued runs (runOne), not the
+// server after the round's timer (cleared here), not a round closed by the timer or dispose a moment before (its
+// remaining calls are marked not run in finishRound, as `stopped` is set)
+function stopLoop(state) {
+    if (state.stopped) return;
+    state.stopped = true;
+    for (const [roundId, round] of state.rounds) {
+        round.closed = true;
+        clearTimeout(round.timer);
+        const outcomes = new Map(round.outcomes);
+        for (const c of round.calls) if (!outcomes.has(c.id)) outcomes.set(c.id, { ...NOT_RUN });
+        state.rounds.delete(roundId);
+        round.resolve(outcomes);
+    }
 }
 
 /** One command from the app for an answer in progress. Returns { ok: true } or { error } */
@@ -81,8 +113,7 @@ export async function handleTurnCommand(turnId, userId, cmd) {
     if (!state || state.userId !== String(userId)) return { error: "unknown_turn" };
     const type = String(cmd?.type || "");
     if (type === "stop") {
-        state.stopped = true;
-        for (const [roundId] of state.rounds) finishRound(state, roundId, false).catch(() => {});
+        stopLoop(state);
         try { state.onStop?.(); } catch { /* nothing to stop */ }
         return { ok: true };
     }

@@ -1004,6 +1004,9 @@ export async function streamClaudeChat({
             // One call: the checks, then the handler. With a toolDriver (the desktop app driving the loop,
             // local-loop.service.js) the app says which calls run and in what order; otherwise they run here in turn.
             const runCall = async (call) => {
+                // A stopped answer starts no more steps: the rest of this round never reaches the user's PC (owner's
+                // Remote PC work, 2026-11-18; the step already running is stopped by the app)
+                if (signal?.aborted) throw new StreamChatError("Request aborted");
                 const inputKey = JSON.stringify(call.input ?? {});
                 let content;
                 let isError = false;

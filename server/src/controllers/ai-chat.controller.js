@@ -6903,6 +6903,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 userId: String(userId),
                 emit: (ev) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`); },
                 onStop: () => { requestAborted = true; streamAbort.abort(); },
+                // (every other stop aborts streamAbort too: the durable turn's grace running out, a newer message)
+                signal: streamAbort.signal,
             });
             res.write(`data: ${JSON.stringify({ type: "local_loop", on: true })}\n\n`);
         }
