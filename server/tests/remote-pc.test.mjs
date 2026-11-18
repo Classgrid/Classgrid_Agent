@@ -44,6 +44,8 @@ mock.module("../src/models/RemoteChat.js", {
 });
 mock.module("../src/models/User.js", { defaultExport: { findById: () => ({ select: async () => ({ _id: "u1", email: "a@b.c" }) }) } });
 mock.module("../src/config/supabaseClient.js", { namedExports: { primarySupabaseClient: {} } });
+const pushes = [];
+mock.module("../src/services/user-push.service.js", { namedExports: { pushRemoteQuestion: async (p) => { pushes.push(p); } } });
 mock.module("../src/services/local-runner.service.js", { namedExports: { runnerOnline: async () => online } });
 mock.module("../src/services/chat-wake.service.js", { namedExports: { chatAnswering: async () => answering } });
 mock.module("../src/services/whatsapp-call.service.js", {
@@ -93,6 +95,7 @@ test("a phone message runs the chat the computer's way, live to the phone and to
     const names = emitted.map((e) => e.name);
     assert.ok(names.includes("remote:turn"));
     assert.ok(emitted.some((e) => e.name === "remote:live" && e.data.event.type === "permission_request"), "the question reaches the phone");
+    assert.equal(pushes.at(-1)?.sessionId, S, "and as a push: nobody is at the computer for a message sent from the phone");
     assert.ok(!emitted.some((e) => e.name === "remote:live" && e.data.event.type === "pc_tool_call"));
     assert.ok(emitted.some((e) => e.name === "chat:woke-live" && e.data.event.type === "token"), "the computer's app shows it live");
     assert.deepEqual(emitted.filter((e) => e.name === "chat:woke").map((e) => e.data.phase), ["start", "end"]);
@@ -106,12 +109,15 @@ test("a phone that opens the chat mid-answer gets what it missed; the end clears
     await svc.remoteTurnStarted("u1", S, { question: "build it", from: "computer", turnId: "t1" });
     svc.mirrorRemoteEvent("u1", S, { type: "token", token: "Work" });
     svc.mirrorRemoteEvent("u1", S, { type: "pc_tool_call", id: "nope" });
+    const before = pushes.length;
+    svc.mirrorRemoteEvent("u1", S, { type: "permission_request", id: "q", title: "Run it?" }, { computerOnStream: true });
+    assert.equal(pushes.length, before, "no push while the computer's app is on the answer");
     await tick();
     const live = await svc.liveState(S);
     assert.equal(live.running, true);
     assert.equal(live.turnId, "t1");
     assert.equal(live.question, "build it");
-    assert.deepEqual(live.events, [{ type: "token", token: "Work" }]);
+    assert.deepEqual(live.events, [{ type: "token", token: "Work" }, { type: "permission_request", id: "q", title: "Run it?" }]);
     await svc.remoteTurnEnded("u1", S);
     const after = await svc.liveState(S);
     assert.equal(after.running, false);

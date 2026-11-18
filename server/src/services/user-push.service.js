@@ -41,9 +41,11 @@ export const PUSH_TYPES = {
     shared: { channel: "shared", pref: "sharedChats" },
     account: { channel: "account", pref: null },
     update: { channel: "account", pref: "productUpdates" },
+    // Remote PC: the computer asks before a step runs (owner, 2026-11-18: "needs your OK" on the phone)
+    remote: { channel: "remote", pref: "remotePc" },
 };
 // The switches under User.pushNotifications (besides the master switch "global")
-export const PUSH_PREF_KEYS = ["answers", "images", "schedules", "calls", "sharedChats", "productUpdates"];
+export const PUSH_PREF_KEYS = ["answers", "images", "schedules", "calls", "sharedChats", "productUpdates", "remotePc"];
 
 // The errors FCM gives for a token that will never work again (the app was removed, or the token was replaced)
 const DEAD_TOKEN = new Set(["messaging/registration-token-not-registered", "messaging/invalid-registration-token"]);
@@ -222,6 +224,7 @@ function dataFor(type, data) {
 // One notification per chat (or schedule, or call): a newer push for the same one replaces the older
 function groupKey(type, data) {
     if (data?.sessionId) return `chat_${data.sessionId}`;
+    if (data?.remoteSessionId) return `remote_${data.remoteSessionId}`;
     if (data?.scheduleId) return `schedule_${data.scheduleId}`;
     if (data?.callId) return `call_${data.callId}`;
     return `classgrid_${type}`;
@@ -407,4 +410,24 @@ export async function pushCallSummary({ userId, callId, name, summary, url = "" 
         body: plainPreview(summary) || "Your call's summary is ready.",
         data: { callId: String(callId), url },
     });
+}
+
+/**
+ * Remote PC (owner, 2026-11-18): the computer's answer asks before a step runs ("may I run npm install?") and nobody is
+ * at the computer to answer: the phone gets "needs your OK", which opens the Remote PC chat (data.remoteSessionId).
+ */
+export async function pushRemoteQuestion({ userId, sessionId, title, detail = "" }) {
+    try {
+        if (!userId || !sessionId) return null;
+        const chat = await deps.chatTitle(sessionId).catch(() => "");
+        return await sendUserPush(userId, {
+            type: "remote",
+            title: "Your computer needs your OK",
+            body: plainPreview([title, detail].filter(Boolean).join(": ")) || chat || "Open Remote PC to answer.",
+            data: { remoteSessionId: sessionId, ...(chat ? { chatTitle: chat } : {}) },
+        });
+    } catch (e) {
+        console.error("[push] remote question push failed:", e.message);
+        return null;
+    }
 }

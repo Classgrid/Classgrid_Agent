@@ -491,7 +491,8 @@ const userSchema = new mongoose.Schema(
       schedules: { type: Boolean, default: true },      // a schedule that ran
       calls: { type: Boolean, default: true },          // a call's summary
       sharedChats: { type: Boolean, default: true },    // a message or an answer in a chat shared with the user
-      productUpdates: { type: Boolean, default: true }  // news about Classgrid AI
+      productUpdates: { type: Boolean, default: true }, // news about Classgrid AI
+      remotePc: { type: Boolean, default: true }        // Remote PC: the computer needs the person's OK for a step
     },
 
     fcmTokens: {

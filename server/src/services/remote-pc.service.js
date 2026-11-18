@@ -112,12 +112,23 @@ export async function remoteTurnEnded(userId, sessionId) {
     emit(userId, "remote:turn", { sessionId, phase: "end" });
 }
 
-/** One event of an answer in a remote chat: to the phone, and kept for a phone that opens the chat later. */
-export function mirrorRemoteEvent(userId, sessionId, event) {
+/**
+ * One event of an answer in a remote chat: to the phone, and kept for a phone that opens the chat later.
+ * computerOnStream: the computer's app is on the answer's stream (someone may be at the computer). A question asked
+ * while it is not ("may I run this?", from a message sent from the phone, or with the computer's app gone) also goes
+ * to the phone as a push, "Your computer needs your OK" (owner, 2026-11-18; Claude Code sends none while the person
+ * is at the computer either).
+ */
+export function mirrorRemoteEvent(userId, sessionId, event, { computerOnStream = false } = {}) {
     const ev = liveEventOf(event);
     if (!ev || !userId || !sessionId) return;
     emit(userId, "remote:live", { sessionId, event: ev });
     redis.multi().rpush(LIVE(sessionId), JSON.stringify(ev)).ltrim(LIVE(sessionId), -LIVE_KEEP, -1).expire(LIVE(sessionId), LIVE_TTL_S).exec().catch(() => {});
+    if (ev.type === "permission_request" && !computerOnStream) {
+        import("./user-push.service.js")
+            .then((m) => m.pushRemoteQuestion({ userId, sessionId, title: ev.title, detail: ev.detail }))
+            .catch(() => {});
+    }
 }
 
 /**

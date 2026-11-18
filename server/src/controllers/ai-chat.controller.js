@@ -2124,7 +2124,8 @@ export const streamAskAi = async (req, res) => {
         if (remoteChat) {
             const remoteUser = String(userId), remoteSession = String(body.sessionId), turnId = durableTurn.id;
             await remotePc.remoteTurnStarted(remoteUser, remoteSession, { question: body.question, from: "computer", turnId }).catch(() => {});
-            durableTurn.mirror = (ev) => remotePc.mirrorRemoteEvent(remoteUser, remoteSession, ev);
+            const turnHere = durableTurn;
+            durableTurn.mirror = (ev) => remotePc.mirrorRemoteEvent(remoteUser, remoteSession, ev, { computerOnStream: turnHere.watched });
             res.on("close", () => { remotePc.remoteTurnEnded(remoteUser, remoteSession).catch(() => {}); });
         }
         const { registerPcExecutor } = await import("../services/local-runner.service.js");

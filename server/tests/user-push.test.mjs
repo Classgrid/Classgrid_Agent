@@ -142,9 +142,10 @@ test("a kind that is off is not sent; the other kinds still are", async () => {
 });
 
 test("settings are on until the user turns them off", () => {
-    assert.deepEqual(pushPreferencesOf({}), { enabled: true, answers: true, images: true, schedules: true, calls: true, sharedChats: true, productUpdates: true });
+    // (remotePc: Remote PC's "needs your OK", 2026-11-18)
+    assert.deepEqual(pushPreferencesOf({}), { enabled: true, answers: true, images: true, schedules: true, calls: true, sharedChats: true, productUpdates: true, remotePc: true });
     assert.deepEqual(pushPreferencesOf({ pushNotifications: { global: false, images: false } }),
-        { enabled: false, answers: true, images: false, schedules: true, calls: true, sharedChats: true, productUpdates: true });
+        { enabled: false, answers: true, images: false, schedules: true, calls: true, sharedChats: true, productUpdates: true, remotePc: true });
 });
 
 test("nothing to send to, an unknown kind, Firebase not set up or failing: no throw, and the reason is said", async () => {
