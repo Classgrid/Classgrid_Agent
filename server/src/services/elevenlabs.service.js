@@ -30,6 +30,15 @@ export function imageSize(value, fallback = "1K") {
     const v = String(value ?? "").trim().toUpperCase();
     return IMAGE_SIZES.includes(v) ? v : fallback;
 }
+/**
+ * The quality a picture is made at, by the person's plan (owner, 2026-11-18: "Free normal, Pro and Max get better"):
+ * a new picture on Free is made at medium; on Pro, Max and Enterprise at high. An edit (a picture made from given
+ * pictures) is made at high on every plan, as it was before: faces and details from the given pictures are kept
+ * better. `planKey` is the plan row's key; with none (plans switched off, Classgrid staff) the quality is high.
+ */
+export function imageQuality(planKey, isEdit = false) {
+    return planKey === "free" && !isEdit ? "medium" : "high";
+}
 // Classgrid's voice (owner, 2026-11-14), when ELEVENLABS_VOICE_ID is not set
 const DEFAULT_VOICE_ID = "Ms9OTvWb99V6DwRHZn6q";
 

@@ -8928,6 +8928,8 @@ export const generateImage = async (req, res) => {
         const userEmail = req.user?.email || '';
 
         let authUserForImage = null;
+        // The plan's key, for the picture's quality (elevenlabs.service.js imageQuality); "" = no plan row
+        let imagePlanKey = "";
 
         if (!userEmail) {
             return res.status(401).json({ error: "Unauthorized" });
@@ -8948,6 +8950,7 @@ export const generateImage = async (req, res) => {
             const imageOrg = imageOrgId ? await Organization.findById(imageOrgId).select('ai_config').lean() : null;
             const imageGlobalConfig = await GlobalAiConfig.findOne({ key: 'singleton' }).lean();
             const imagePlan = await planOf(authUserForImage);
+            imagePlanKey = imagePlan?.key || "";
             const imageLimit = resolveFeatureLimit('image', imageOrg, imageGlobalConfig, imageOrgId, imagePlan);
             const imagePeriod = resolveResetPeriod('image', imageOrg, imageGlobalConfig, imageOrgId, imagePlan);
             const tokenPeriodMs = resolveResetPeriod('tokens', imageOrg, imageGlobalConfig, imageOrgId).ms;
@@ -9048,10 +9051,11 @@ export const generateImage = async (req, res) => {
                     if (!src.ok) throw new Error(`A picture to edit could not be fetched (${src.status})`);
                     references.push({ buffer: Buffer.from(await src.arrayBuffer()), mimeType: src.headers.get("content-type") || "" });
                 }
-                // Every picture, a new one or an edit, is made at high quality (owner, 2026-11-17: "make it realistic and
-                // high"); new pictures were made at medium and came out plainer than ChatGPT's
+                // The quality goes by the plan (owner, 2026-11-18: "Free normal, Pro and Max get better"): a new picture
+                // on Free at medium, on Pro, Max and Enterprise at high; an edit at high on every plan. From 2026-11-17
+                // to 2026-11-18 every picture was made at high.
                 // (a bigger picture takes longer to make)
-                const made = await eleven.generateImage(prompt, { references, quality: "high", aspectRatio: imageShape, resolution: imageSize, timeoutMs: imageSize === "4K" ? 240000 : imageSize === "2K" ? 180000 : 120000 });
+                const made = await eleven.generateImage(prompt, { references, quality: eleven.imageQuality(imagePlanKey, references.length > 0), aspectRatio: imageShape, resolution: imageSize, timeoutMs: imageSize === "4K" ? 240000 : imageSize === "2K" ? 180000 : 120000 });
                 madeShape = imageShape;
                 madeSize = imageSize;
                 imageBuffer = made.buffer;
