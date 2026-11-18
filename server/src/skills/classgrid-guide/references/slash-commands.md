@@ -57,6 +57,7 @@ You can also type the whole command yourself without the list, for example `/goa
 | `/boost`         | Thinks harder for this message                   | Project, Studio   |
 | `/learn`         | Saves what you say as a skill for future chats   | Project, Studio   |
 | `/compact`       | Shrinks the chat's memory now                    | Project, Studio   |
+| `/remote`        | Follow and answer this chat from your phone (`/remote off` turns it off; see remote-pc.md) | Desktop app, Classgrid Code, extension |
 
 --------------------------------------------------------------------------------
 

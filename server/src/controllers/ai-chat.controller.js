@@ -2763,6 +2763,14 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "S
         else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         // Voice mode in the Android app (owner, 2026-11-14): the user speaks, the answer is read aloud in Classgrid's voice
         if (body.voice === true) volatilePrompt += "\n\n--- VOICE MODE ---\nThe user is talking to you out loud in the Classgrid phone app, and your answer is read aloud to them. Answer like a person on a call: short, natural spoken sentences (usually two to four), no markdown, headings, tables, lists, code blocks, links or emoji. Ask at most one question at a time. If something needs a long or visual answer (code, a table, a document), say so in a sentence and offer to put it in the chat instead.";
+        // Remote PC (owner, 2026-11-18: "tell it in the background when this is a remote chat, don't keep it blind"):
+        // the AI knows the chat is followed from the phone, and whether this message was typed there
+        if (sessionId && userId && !isIncognito) {
+            const remoteOn = await import("../services/remote-pc.service.js").then((m) => m.remoteChatOn(String(userId), String(sessionId))).catch(() => false);
+            if (remoteOn) {
+                volatilePrompt += `\n\n--- REMOTE PC ---\nThis chat is a Remote PC chat: the user turned it on with /remote on their computer, so they can follow it and answer it from the Classgrid phone app (menu → Remote PC). ${body.remoteFrom === "phone" ? "This message was typed on their PHONE: they may not be at the computer, so don't ask them to look at or click anything on the computer screen; describe results in the chat instead." : "This message was typed on the computer; the user may switch to the phone at any time."} Your work still runs on the computer through the Classgrid app (it must stay running; a closed window keeps running in the tray). The phone shows your steps, file edits, commands and helpers live, shows your permission requests as cards, and has Review, Files, Terminal and Details in its ⋮ menu. When the user asks about Remote PC, answer from .classgrid/classgrid_guide/references/remote-pc.md (or the same page of the Classgrid guide).`;
+            }
+        }
         // Every message, in the desktop app and on the website: a missing or failed tool goes straight to the terminal
         if (!body.taskOrigin) volatilePrompt += `\n\n${TERMINAL_RULE}`;
         // (the command and the speed the user picked change from one message to the next: they go with the message)
