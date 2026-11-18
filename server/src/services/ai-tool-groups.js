@@ -45,6 +45,11 @@ export const LOAD_TOOLS_NAME = "load_tools";
 export const CORE_TOOL_NAMES = [
     "get_my_profile",
     "create_skill", // always loaded so the agent can save a lasting fact even when the user doesn't say "remember"
+    // The online memory notes: always loaded, so the AI saves an exam date or a deadline the moment it is said and reads a
+    // note it knows of, in any chat (owner, 2026-11-18: by context and what is important). delete_user_note stays in
+    // the memory_notes group.
+    "save_user_note",
+    "search_user_notes",
     "recall_session_context",
     "recall_chat",
     "search_recall_chat",

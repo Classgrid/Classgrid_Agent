@@ -1,17 +1,19 @@
 // The AI's online memory notes (owner, 2026-11-18): exam dates, deadlines, functions and lasting facts a person
 // mentions in a chat are kept in MongoDB (models/AiMemoryNote.js), so every later chat knows them, on the website, the
 // phone and the desktop app.
-//   - notesFromChat: after an answer is saved, once a chat has 10 new messages, a small model reads only those new
-//     messages and the person's saved notes, and saves, updates or deletes notes. It runs in the background, never
-//     before the answer ends, and nobody is charged for it.
-//   - the note tools (tool group memory_notes): the AI saves, searches and deletes a note itself in a chat.
+//   - the AI in the chat saves a note itself the moment the person says something worth keeping (save_user_note and
+//     search_user_notes are always loaded; delete_user_note is in the tool group memory_notes).
+//   - notesFromChat: after every answer, the chat's new messages are looked at; when the person wrote something worth
+//     keeping (an exam, a date, a deadline, an event, their studies or work, "remember"), a small model reads those new
+//     messages (with a few earlier ones only to understand them) and saves, updates or deletes notes. It goes by what
+//     was said, never by how many messages there are (owner, 2026-11-18: "not per 10 messages, by context and what
+//     is important"). In the background, after the answer is saved; nobody is charged for it.
 //   - savedNotesBlock: the notes are added to the prompt of every chat.
 // A note is deleted by MongoDB 4 months after its last update (or a week after its date when that is later).
 // Incognito chats and shared chats are never read (the caller skips them).
 import AiMemoryNote, { MEMORY_NOTE_TYPES } from "../models/AiMemoryNote.js";
 
-export const NOTES_EVERY = 10;          // new messages in a chat before the reader runs again
-export const NOTES_QUIET_MS = 10 * 60 * 1000; // ...or this long after the chat's last message, even with fewer (short chats)
+const CONTEXT_BEFORE = 6;               // earlier messages given to the reader only to understand the new ones
 export const NOTE_KEEP_DAYS = 120;      // 4 months
 export const MAX_NOTES_PER_USER = 200;
 const MAX_NOTES_IN_PROMPT = 50;         // notes listed in the prompt (name, type, date and a few words only)
@@ -99,7 +101,7 @@ export async function searchNotes({ userId, query }) {
 }
 
 // What a chat's prompt says when the user has no note yet, so the AI knows the notebook exists and when to write in it
-export const SAVED_NOTES_GUIDE = `\n<saved_notes>\nYou keep online notes about this user, known in every chat on every device (each note is deleted by itself 4 months after its last update). There are none yet. When the user tells an exam (subject, date, syllabus), a deadline, a function or event with its date, or a lasting fact about their studies, work or projects, save it by yourself with save_user_note, without being asked and without announcing it (load the memory_notes tools first when they are not loaded). Never save passwords, codes, keys, card or account numbers.\n</saved_notes>\n`;
+export const SAVED_NOTES_GUIDE = `\n<saved_notes>\nYou keep online notes about this user, known in every chat on every device (each note is deleted by itself 4 months after its last update). There are none yet. When the user tells an exam (subject, date, syllabus), a deadline, a function or event with its date, or a lasting fact about their studies, work or projects, save it by yourself with save_user_note right away, in the same answer, without being asked and without announcing it. Never save passwords, codes, keys, card or account numbers.\n</saved_notes>\n`;
 
 /**
  * The notes as a block of the chat's prompt ("" when there are none). Only a short list goes in (name, type, date and
@@ -116,7 +118,7 @@ export function savedNotesBlock(notes, now = Date.now()) {
         const words = all.slice(0, INDEX_WORDS).join(" ");
         return `- ${n.name} [${n.type || "fact"}]${n.date ? ` (${day(n.date)})` : ""}: ${words}${all.length > INDEX_WORDS ? "..." : ""}`;
     };
-    return `\n<saved_notes>\nYour notes about this user, kept online from their earlier chats and known in every chat on every device (each note is deleted by itself 4 months after its last update). This is only the list: each line is the note's name, its type, its date and the first few words. Read a note in full with search_user_notes (load the memory_notes tools first when they are not loaded) before you answer anything it may cover, and never guess what the rest of it says. Treat them as things you remember: use them without being asked, and compare their dates with today's date (a date that has passed is over). They are what was true when written; the user's newest message wins. When the user tells a new exam, deadline, function or event with its date, or a lasting fact about their studies, work or projects, or changes one you have, save it by yourself, without being asked and without announcing it. To add or correct a note use save_user_note (the same name updates it), to remove one delete_user_note.\n${sorted.map(indexLine).join("\n")}\n</saved_notes>\n`;
+    return `\n<saved_notes>\nYour notes about this user, kept online from their earlier chats and known in every chat on every device (each note is deleted by itself 4 months after its last update). This is only the list: each line is the note's name, its type, its date and the first few words. Read a note in full with search_user_notes before you answer anything it may cover, and never guess what the rest of it says. Treat them as things you remember: use them without being asked, and compare their dates with today's date (a date that has passed is over). They are what was true when written; the user's newest message wins. When the user tells a new exam, deadline, function or event with its date, or a lasting fact about their studies, work or projects, or changes one you have, save it by yourself right away, in the same answer, without being asked and without announcing it. To add or correct a note use save_user_note (the same name updates it), to remove one delete_user_note (load the memory_notes tools first when it is not loaded).\n${sorted.map(indexLine).join("\n")}\n</saved_notes>\n`;
 }
 
 // ── The AI's own tools (tool group memory_notes in ai-tool-groups.js) ──
@@ -189,7 +191,7 @@ Save: exams and tests (subject, date, syllabus, marks), deadlines and submission
 Never save: one-off questions, code or debugging details, what the assistant did, guesses, anything about other people's private lives, and never passwords, codes, keys, card, bank or ID numbers.
 
 Rules:
-- Take facts only from what the USER wrote. The assistant's messages are only there to understand them.
+- Take facts only from what the USER wrote in the NEW MESSAGES. The assistant's messages and the EARLIER MESSAGES are only there to understand them.
 - Turn relative dates ("tomorrow", "next Monday", "on the 25th") into real dates with TODAY, written YYYY-MM-DD.
 - If a SAVED note already covers the same thing, reuse its exact name and write the full updated content, not only the change. Do not save a note again when nothing in it changed.
 - Delete a SAVED note only when the messages say it is wrong, cancelled or finished.
@@ -225,11 +227,34 @@ function messageText(content) {
     return text;
 }
 
-/** What the reader is given. */
-export function readerInput({ notes, messages, now = Date.now() }) {
+// What a person writes when it is worth keeping: an exam or study detail, a date or day, a deadline, an event, their
+// studies or work, or "remember". Only the person's own messages are looked at. A match only means the small model reads
+// the messages; it decides what (if anything) is saved. Words that are everyday in code (test, function, class,
+// project, submit, ticket, result, 1.0) count only in their exam or event sense.
+const WORTH_KEEPING = new RegExp([
+    String.raw`\b(exams?|examination|quiz\w*|viva|papers?|mid-?terms?|finals|semesters?|sem\s*\d|syllabus|marks|grades?|cgpa|sgpa|backlogs?|(class|unit|weekly|monthly|mock|practice|entrance|board|internal|online)\s+tests?|tests?\s+(on|is|date|tomorrow|kal)|deadlines?|due\s+(date|on|by)|submission|submit\s+(by|before|on|till|until)|assignments?|practicals?|lab\s+(exam|record|file)|presentations?|seminar|interviews?|meetings?|appointments?|wedding|marriage|shaadi|engagement|birthday|anniversary|(family|college|office)\s+function|function\s+(on|at|is)|festival|diwali|holi|eid|christmas|trip|travel\w*|flights?|train\s+(on|at|ticket)|holidays?|vacation|admissions?|counsell?ing|internship|placements?|joining|lectures?|time\s*-?table|routine|subjects?|courses?|degree|branch|college|university|hostel|coaching|preparing|preparation|padhai|revision|revise)\b`,
+    String.raw`\b(remember|yaad|note\s+(it|this|that|down)|don'?t\s+forget|bhool\w*|forget)\b`,
+    String.raw`\b(today|tonight|tomorrow|day\s+after|yesterday|next\s+(week|month|year|mon|tue|wed|thu|fri|sat|sun)\w*|this\s+(week|month|weekend)|aaj|kal|parso|agle|agla|agli|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|april|june|july|august|september|october|november|december|jan|feb|aug|sept?|oct|nov|dec)\b`,
+    String.raw`\b\d{1,2}\s*(st|nd|rd|th)\b|\b\d{1,2}\s+(march|may)\b|\b(march|may)\s+\d{1,2}\b|\b\d{1,2}[/-]\d{1,2}([/-]\d{2,4})?\b|\b20\d\d-\d\d-\d\d\b`,
+    String.raw`\b(my\s+name\s+is|i\s+am\s+(a|an|in|from|studying|working|preparing|doing)|i'?m\s+(a|an|in|from|studying|working|preparing|doing)|i\s+(study|work|teach)\b|my\s+(college|course|branch|job|company|office|exams?|subjects?|class|semester|teacher|school|boss|team|project|startup|business|wife|husband|sister|brother|mother|father|son|daughter))\b`,
+].join("|"), "i");
+const WORTH_KEEPING_HI = /परीक्षा|पेपर|एग्जाम|तारीख|कल|परसों|शादी|जन्मदिन|याद|छुट्टी|विषय|सिलेबस|सेमेस्टर|इंटरव्यू|मीटिंग/;
+
+/** True when one of the person's own messages holds something worth keeping (see WORTH_KEEPING). */
+export function worthKeeping(messages) {
+    return (Array.isArray(messages) ? messages : []).some((m) => {
+        if (m?.role !== "user") return false;
+        const text = messageText(m.content).normalize("NFC");
+        return WORTH_KEEPING.test(text) || WORTH_KEEPING_HI.test(text);
+    });
+}
+
+/** What the reader is given: the new messages, and a few earlier ones only to understand them. */
+export function readerInput({ notes, messages, earlier = [], now = Date.now() }) {
     const saved = notes.length ? notes.map(noteLine).join("\n") : "(none)";
-    const lines = messages.map((m) => `${m.role === "user" ? "USER" : "ASSISTANT"}: ${messageText(m.content).slice(0, MESSAGE_CHARS)}`);
-    return `TODAY: ${new Date(now + 5.5 * 3600 * 1000).toISOString().slice(0, 10)} (India)\n\nSAVED:\n${saved}\n\nNEW MESSAGES:\n${lines.join("\n\n")}`;
+    const line = (m) => `${m.role === "user" ? "USER" : "ASSISTANT"}: ${messageText(m.content).slice(0, MESSAGE_CHARS)}`;
+    const before = earlier.length ? `\n\nEARLIER MESSAGES (already read before; only to understand the new ones):\n${earlier.map(line).join("\n\n")}` : "";
+    return `TODAY: ${new Date(now + 5.5 * 3600 * 1000).toISOString().slice(0, 10)} (India)\n\nSAVED:\n${saved}${before}\n\nNEW MESSAGES:\n${messages.map(line).join("\n\n")}`;
 }
 
 async function askReader(input) {
@@ -265,10 +290,11 @@ async function askReader(input) {
 }
 
 /**
- * Background: read only the chat's new messages and keep the person's notes up to date. It runs once the chat has
- * NOTES_EVERY new messages since the last run, or once it has gone quiet for NOTES_QUIET_MS (so a short chat of 4-6
- * messages is read too, not only a long one). Returns true when a note changed. Never throws.
- * (ask is the model call; tests pass their own.)
+ * Background, after every answer: the chat's messages since the last run are looked at, and when the person wrote
+ * something worth keeping (worthKeeping) the small model reads them, with up to CONTEXT_BEFORE earlier messages only to
+ * understand them, and keeps the person's notes up to date. It goes by what was said, not by how many messages there
+ * are: one message with an exam date is read at once, and messages with nothing to keep cost no model call. Returns
+ * true when a note changed. Never throws. (ask is the model call; tests pass their own.)
  */
 export async function notesFromChat({ sessionId, userId, ask = askReader, now = Date.now() }) {
     if (!sessionId || !userId) return false;
@@ -281,16 +307,7 @@ export async function notesFromChat({ sessionId, userId, ask = askReader, now = 
             .from("ai_chat_messages").select("id", { count: "exact", head: true }).eq("session_id", sessionId);
         if (error || !count) return false;
         const covered = Math.min(Number(await redis.get(coveredKey)) || 0, count);
-        if (count - covered < 1) return false;
-        if (count - covered < NOTES_EVERY) {
-            // Few new messages: read them only once the chat has gone quiet, so a short chat is not read after every
-            // answer and a chat still going on is read when it stops (the next answer after that reads the rest).
-            const { data: last } = await primarySupabaseClient
-                .from("ai_chat_messages").select("created_at").eq("session_id", sessionId)
-                .order("created_at", { ascending: false }).limit(1).maybeSingle();
-            const lastAt = last?.created_at ? new Date(last.created_at).getTime() : 0;
-            if (!lastAt || now - lastAt < NOTES_QUIET_MS) return false;
-        }
+        if (count <= covered) return false;
         // One run at a time per chat. A run that fails leaves the lock to run out, so it is tried again 10 minutes
         // later at the earliest, not after every answer.
         if (!(await redis.set(lockKey, "1", "EX", 600, "NX"))) return false;
@@ -302,10 +319,15 @@ export async function notesFromChat({ sessionId, userId, ask = askReader, now = 
         if (readError || !messages?.length) return false;
 
         let changed = false;
-        // (a chat where the person wrote nothing new has nothing to remember: no model call)
-        if (messages.some((m) => m.role === "user" && String(m.content || "").trim())) {
+        // (nothing worth keeping in what the person wrote: no model call, and these messages are not looked at again)
+        if (worthKeeping(messages)) {
+            const start = Math.max(0, from - CONTEXT_BEFORE);
+            const earlier = from > start
+                ? ((await primarySupabaseClient.from("ai_chat_messages").select("role, content, created_at")
+                    .eq("session_id", sessionId).order("created_at", { ascending: true }).range(start, from - 1)).data || [])
+                : [];
             const notes = await savedNotesOf(userId);
-            const plan = parseReaderAnswer(await ask(readerInput({ notes, messages, now })));
+            const plan = parseReaderAnswer(await ask(readerInput({ notes, messages, earlier, now })));
             const known = new Set(notes.map((n) => n.name));
             for (const name of plan.delete) {
                 if (known.has(name) && !plan.save.some((n) => n.name === name) && await deleteNote({ userId, name })) changed = true;

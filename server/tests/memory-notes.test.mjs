@@ -3,9 +3,11 @@
 //   - names, dates and the 4-month expiry (a week after the note's date when that is later)
 //   - save / update by name, search, delete, the 200-note limit, and that secrets are refused
 //   - the prompt block, with dated notes still ahead first
-//   - the background reader: runs only after 10 new messages, reads only the new ones, saves, updates and deletes,
-//     and survives an answer that is not JSON
-//   - the tools are in their own group (memory_notes), loaded for exam and "remember" messages
+//   - the background reader goes by what was said, not by how many messages (owner, 2026-11-18): a single message with
+//     an exam date is read at once, messages with nothing worth keeping cost no model call; it reads only the new
+//     messages (a few earlier ones only to understand them), saves, updates and deletes, and survives an answer that is
+//     not JSON and a model that fails
+//   - save_user_note and search_user_notes are always loaded; delete_user_note is in the memory_notes group
 // The notes collection, Redis and the chat messages are stand-ins: nothing is read from or written to a database.
 // Run: node --experimental-test-module-mocks --test tests/memory-notes.test.mjs
 import test, { mock } from "node:test";
@@ -137,68 +139,71 @@ test("the reader's answer: JSON is read, anything else saves nothing", () => {
     assert.deepEqual(notes.parseReaderAnswer('{"save":"no"}'), { save: [], delete: [] });
 });
 
-test("the background reader runs only after 10 new messages and reads only the new ones", async () => {
+test("what is worth keeping: exams, dates, deadlines, events, studies and work, never everyday code words", () => {
+    const user = (content) => [{ role: "user", content }];
+    for (const text of [
+        "my DSA exam is next Wednesday", "physics paper on 25th", "remember my viva is on 3 December", "assignment submission by Friday",
+        "meri sister ki shaadi 12/12 ko hai", "kal mera test hai", "my time table: Monday maths, Tuesday physics", "I am studying B.Tech CSE at VIT",
+        "interview on 2026-12-02", "मेरी परीक्षा कल है", "semester 5 subjects are DBMS, OS and CN", "don't forget my birthday",
+    ]) assert.ok(notes.worthKeeping(user(text)), text);
+    for (const text of [
+        "write a function to reverse a string", "run the tests and fix the failing one", "add a class to the button", "hello", "what is 2+2",
+        "update the version to 1.0.32", "submit the form with fetch", "create a new project in Studio",
+    ]) assert.ok(!notes.worthKeeping(user(text)), text);
+    assert.ok(!notes.worthKeeping([{ role: "assistant", content: "Your exam is on Monday" }]), "only the person's own messages count");
+    assert.ok(notes.worthKeeping([{ role: "user", content: JSON.stringify({ classgrid_ai_message: true, content: "exam on Monday" }) }]));
+});
+
+test("one message with an exam date is read right after the answer, with no count of messages", async () => {
     reset();
-    let asked = [];
+    const asked = [];
     const ask = async (input) => { asked.push(input); return '{"save":[{"name":"dsa-exam","type":"exam","date":"2026-11-25","content":"DSA exam on 2026-11-25."}],"delete":[]}'; };
-    for (let i = 0; i < 4; i++) { say("user", `question ${i}`); say("assistant", JSON.stringify({ classgrid_ai_message: true, content: `answer ${i}`, steps: [] })); }
-    assert.equal(await notes.notesFromChat({ sessionId: "s1", userId: USER._id, ask, now: NOW }), false);
-    assert.equal(asked.length, 0, "8 messages: not yet");
-    say("user", "my DSA exam is next Wednesday"); say("assistant", "Good luck!");
+    say("user", "my DSA exam is next Wednesday"); say("assistant", JSON.stringify({ classgrid_ai_message: true, content: "Good luck!", steps: [] }));
     assert.equal(await notes.notesFromChat({ sessionId: "s1", userId: USER._id, ask, now: NOW }), true);
-    assert.equal(asked.length, 1);
+    assert.equal(asked.length, 1, "two messages are enough when one holds an exam");
     assert.match(asked[0], /^TODAY: 2026-11-18 \(India\)/);
     assert.match(asked[0], /SAVED:\n\(none\)/);
     assert.match(asked[0], /USER: my DSA exam is next Wednesday/);
-    assert.match(asked[0], /ASSISTANT: answer 0/, "a saved answer's text is read, not its JSON");
+    assert.match(asked[0], /ASSISTANT: Good luck!/, "a saved answer's text is read, not its JSON");
     assert.doesNotMatch(asked[0], /classgrid_ai_message/);
+    assert.doesNotMatch(asked[0], /EARLIER MESSAGES/, "nothing earlier in this chat");
     assert.equal(rows.length, 1);
     assert.equal(rows[0].source, "auto");
     assert.equal(rows[0].session_id, "s1");
     assert.equal(kv.has("ai:memnotes:lock:s1"), false, "the lock is released after a good run");
-
-    say("user", "one more"); say("assistant", "ok");
+    // nothing new since: not read again
     assert.equal(await notes.notesFromChat({ sessionId: "s1", userId: USER._id, ask, now: NOW }), false);
-    assert.equal(asked.length, 1, "2 new messages: not yet");
-
-    for (let i = 0; i < 4; i++) { say("user", `later ${i}`); say("assistant", `reply ${i}`); }
-    const second = async (input) => { asked.push(input); return '{"save":[],"delete":["dsa-exam","not-a-note"]}'; };
-    assert.equal(await notes.notesFromChat({ sessionId: "s1", userId: USER._id, ask: second, now: NOW }), true);
-    assert.match(asked[1], /SAVED:\n- \[exam\] dsa-exam \(2026-11-25\)/);
-    assert.doesNotMatch(asked[1], /question 0/, "messages already read are not sent again");
-    assert.match(asked[1], /USER: one more/);
-    assert.equal(rows.length, 0, "the reader deleted the note that is over");
+    assert.equal(asked.length, 1);
 });
 
-test("a short chat is read once it has gone quiet for 10 minutes", async () => {
+test("messages with nothing worth keeping cost no model call; the next important one is read with them only as context", async () => {
     reset();
     const asked = [];
-    const ask = async (input) => { asked.push(input); return '{"save":[{"name":"dsa-exam","type":"exam","date":"2026-11-25","content":"DSA exam on 2026-11-25."}],"delete":[]}'; };
-    // 4 messages (2 from the person), the last one 3 minutes ago: still going on, not read
-    say("user", "my DSA exam is on 25 November"); say("assistant", "Noted, good luck!");
-    say("user", "syllabus is stacks and trees"); say("assistant", "Understood.");
-    assert.equal(await notes.notesFromChat({ sessionId: "s3", userId: USER._id, ask, now: NOW - 3 * 60 * 1000 }), false);
-    assert.equal(asked.length, 0, "a chat still going on is not read after every answer");
-    // the same chat, 10 minutes after its last message: read, even with fewer than 10 messages
-    assert.equal(await notes.notesFromChat({ sessionId: "s3", userId: USER._id, ask, now: NOW + 10 * 60 * 1000 }), true);
+    const ask = async (input) => { asked.push(input); return '{"save":[],"delete":["dsa-exam","not-a-note"]}'; };
+    rows.push({ userId: USER._id, name: "dsa-exam", type: "exam", content: "DSA exam on 2026-11-25.", date: new Date("2026-11-25"), updatedAt: ++clock });
+    for (let i = 0; i < 12; i++) { say("user", `write a function number ${i}`); say("assistant", `here is code ${i}`); }
+    assert.equal(await notes.notesFromChat({ sessionId: "s2", userId: USER._id, ask, now: NOW }), false);
+    assert.equal(asked.length, 0, "24 messages of code: no model call, whatever the count");
+    say("user", "my DSA exam got cancelled"); say("assistant", "Oh, okay.");
+    assert.equal(await notes.notesFromChat({ sessionId: "s2", userId: USER._id, ask, now: NOW }), true);
     assert.equal(asked.length, 1);
-    assert.match(asked[0], /USER: my DSA exam is on 25 November/);
-    assert.equal(rows.length, 1);
-    // nothing new since: never read again
-    assert.equal(await notes.notesFromChat({ sessionId: "s3", userId: USER._id, ask, now: NOW + 60 * 60 * 1000 }), false);
-    assert.equal(asked.length, 1);
+    assert.match(asked[0], /NEW MESSAGES:\nUSER: my DSA exam got cancelled/);
+    assert.match(asked[0], /EARLIER MESSAGES \(already read before; only to understand the new ones\):\n[\s\S]*here is code 11/);
+    assert.doesNotMatch(asked[0], /write a function number 0\b/, "only a few earlier messages, not the whole chat");
+    assert.match(asked[0], /SAVED:\n- \[exam\] dsa-exam \(2026-11-25\)/);
+    assert.equal(rows.length, 0, "the reader deleted the note that is over");
 });
 
 test("the reader survives an answer that is not JSON and a model that fails", async () => {
     reset();
-    for (let i = 0; i < 5; i++) { say("user", `q ${i}`); say("assistant", `a ${i}`); }
-    assert.equal(await notes.notesFromChat({ sessionId: "s2", userId: USER._id, ask: async () => "nothing to save", now: NOW }), false);
+    say("user", "my maths exam is on 5 December"); say("assistant", "Noted.");
+    assert.equal(await notes.notesFromChat({ sessionId: "s4", userId: USER._id, ask: async () => "nothing to save", now: NOW }), false);
     assert.equal(rows.length, 0);
-    for (let i = 0; i < 5; i++) { say("user", `q2 ${i}`); say("assistant", `a2 ${i}`); }
+    say("user", "and physics on 8 December"); say("assistant", "Okay.");
     let calls = 0;
     const broken = async () => { calls++; throw new Error("model down"); };
-    assert.equal(await notes.notesFromChat({ sessionId: "s2", userId: USER._id, ask: broken, now: NOW }), false);
-    assert.equal(await notes.notesFromChat({ sessionId: "s2", userId: USER._id, ask: broken, now: NOW }), false);
+    assert.equal(await notes.notesFromChat({ sessionId: "s4", userId: USER._id, ask: broken, now: NOW }), false);
+    assert.equal(await notes.notesFromChat({ sessionId: "s4", userId: USER._id, ask: broken, now: NOW }), false);
     assert.equal(calls, 1, "after a failure it waits for the lock to run out instead of trying after every answer");
     assert.equal(await notes.notesFromChat({ sessionId: "", userId: USER._id, ask: broken }), false);
 });
@@ -220,21 +225,22 @@ test("the AI's tools: save, search, delete, and no signed-in user", async () => 
     assert.equal(await nobody.save_user_note({ name: "x", content: "y" }), "Error: sign in first.");
 });
 
-test("the tools are in the memory_notes group, loaded for exam and remember messages", () => {
+test("save and search are always loaded; delete is in the memory_notes group, loaded for exam and remember messages", () => {
     const names = notes.SAVED_NOTE_TOOLS.map((t) => t.function.name);
     assert.deepEqual(names, ["save_user_note", "search_user_notes", "delete_user_note"]);
     assert.deepEqual(groups.TOOL_GROUPS.find((g) => g.id === "memory_notes").tools, names);
-    for (const name of names) {
-        assert.ok(!groups.CORE_TOOL_NAMES.includes(name));
-        assert.equal(groups.groupOfTool(name), "memory_notes");
-    }
+    for (const name of names) assert.equal(groups.groupOfTool(name), "memory_notes");
+    assert.ok(groups.CORE_TOOL_NAMES.includes("save_user_note") && groups.CORE_TOOL_NAMES.includes("search_user_notes"));
+    assert.ok(!groups.CORE_TOOL_NAMES.includes("delete_user_note"));
     const allTools = [...notes.SAVED_NOTE_TOOLS, { type: "function", function: { name: "search_web" } }];
     const plan = (text) => groups.planToolsForMessage({ allTools, text, role: "user", email: USER.email });
     for (const text of ["my exam is on Monday", "remember that my viva is on the 3rd", "forget my old deadline", "meri परीक्षा kal hai"]) {
-        assert.ok(plan(text).loadedNames.has("save_user_note"), text);
+        assert.ok(plan(text).loadedNames.has("delete_user_note"), text);
     }
     for (const text of ["hello", "write a function to reverse a string", "run the tests"]) {
-        assert.ok(!plan(text).loadedNames.has("save_user_note"), text);
+        assert.ok(plan(text).loadedNames.has("save_user_note"), `${text}: save is always there`);
+        assert.ok(plan(text).loadedNames.has("search_user_notes"), `${text}: search is always there`);
+        assert.ok(!plan(text).loadedNames.has("delete_user_note"), text);
     }
-    assert.ok(plan("hello").allowedToolNames.has("save_user_note"), "always offered through load_tools");
+    assert.ok(plan("hello").allowedToolNames.has("delete_user_note"), "always offered through load_tools");
 });
