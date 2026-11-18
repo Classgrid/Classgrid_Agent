@@ -1788,6 +1788,8 @@ module.exports = {
   setWindowOpen(open) {
     if (windowOpen === !!open) return;
     windowOpen = !!open;
+    // (a reconnect sends the connection's auth again: it carries the window as it is now, not as it was at the start)
+    if (socket?.auth) socket.auth.windowOpen = windowOpen;
     if (socket?.connected) socket.emit("runner-state", { windowOpen });
   },
   setBrowser(fn) { browserStep = fn; },

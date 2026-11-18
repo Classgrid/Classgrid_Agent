@@ -127,9 +127,18 @@ export function registerRunnerSocket(socket) {
         import("./remote-device.service.js").then((m) => {
             m.runnerConnected(socket).catch((e) => console.warn("[Remote PC] connection not noted:", e?.message));
             socket.on("disconnect", () => { m.runnerDisconnected(socket).catch((e) => console.warn("[Remote PC] disconnection not noted:", e?.message)); });
-            // The Classgrid app's window closed (it runs on in the tray) or opened again: the phone's dot is yellow or green
-            socket.on("runner-state", (d) => { try { m.runnerState(socket, d); } catch { /* a bad message */ } });
         }).catch(() => {});
+        // The Classgrid app's window closed (it runs on in the tray) or opened again: the phone's dot is yellow or green.
+        // Listened to at once: the app says it right after it connects, and that came before the listener above (added once
+        // remote-device.service.js has loaded), so it was lost and the connection's first word (the window as it was when the
+        // app first connected, closed while the app started) stood: "App closed, still working" with the app open
+        // (owner's phone, 2026-11-18, after a server restart). A word said here wins over that first one.
+        socket.data = socket.data || {};
+        socket.on("runner-state", (d) => {
+            if (!d || typeof d.windowOpen !== "boolean") return;
+            socket.data.windowStateSaid = true;
+            import("./remote-device.service.js").then((m) => m.runnerState(socket, d)).catch(() => {});
+        });
         console.log(`[Local runner] desktop app connected for user ${socket.userId}`);
     }
 }

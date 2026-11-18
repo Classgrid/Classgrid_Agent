@@ -142,7 +142,8 @@ export async function runnerConnected(socket, { now = Date.now() } = {}) {
     socket.data = socket.data || {};
     socket.data.connectedAt = now;
     if (APPS.has(auth.app)) socket.data.runnerApp = auth.app;
-    if (typeof auth.windowOpen === "boolean") socket.data.windowOpen = auth.windowOpen;
+    // (the window as the app said it when it first connected; a later "runner-state" from this connection wins)
+    if (typeof auth.windowOpen === "boolean" && !socket.data.windowStateSaid) socket.data.windowOpen = auth.windowOpen;
     let deviceId = validDeviceId(auth.deviceId);
     if (!deviceId && socket.sid) deviceId = validDeviceId(await redis.get(SID_DEVICE(socket.sid)).catch(() => null));
     if (!deviceId) { tellPhone(userId, null); return null; }
