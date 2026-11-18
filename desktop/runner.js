@@ -1416,6 +1416,13 @@ async function runToolStep(req) {
     // The AI's browser steps go to the app's own browser (browser.js)
     // The AI using any app on this computer: screen pictures, the real mouse and keyboard (computer.js)
     if (tool === "computer") {
+      // Classgrid Code and the editor extension run this file too, but not inside the Classgrid app: there Electron's
+      // screen tools are missing ("Cannot read properties of undefined (reading 'getPrimaryDisplay')", seen from a
+      // Remote PC chat, 2026-11-18). This connection says it can't, so the server asks the Classgrid app's own
+      // connection next (local-runner.service.js askRunnerOnce)
+      let electron = null;
+      try { electron = require("electron"); } catch { electron = null; }
+      if (!electron || typeof electron !== "object" || !electron.screen || !electron.desktopCapturer) return { text: "Error: computer can't run on this computer." };
       console.log("[runner] computer", args.action);
       const r = await require("./computer").act(args);
       return capReply({ text: r.text, computer: { image: r.image } });
