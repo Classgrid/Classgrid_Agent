@@ -4,11 +4,12 @@
 //   POST   /api/remote/chats/:id/messages    { question, permissionMode?, selectedModel?, effort? } -> { ok } or 409/503
 //   POST   /api/remote/chats/:id/stop        -> { ok }   stops the answer running in the chat (phone's or computer's)
 //   DELETE /api/remote/chats/:id             -> { ok }   Remote PC off for this chat (the computer keeps the chat)
+//   PUT    /api/remote/devices/:deviceId     { allowed?, defaultMode? } -> { ok }   the computer's own settings (its app)
 // The live answer itself comes over the person's socket: "remote:live", "remote:turn", "remote:chats".
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
-import { listRemoteChats, liveState, sendFromPhone, setRemoteChat, stopRemote } from "../services/remote-pc.service.js";
+import { listRemoteChats, liveState, sendFromPhone, setDeviceAllowed, setRemoteChat, stopRemote } from "../services/remote-pc.service.js";
 
 const router = express.Router();
 const CHAT_ID = /^[0-9a-f-]{36}$/i;
@@ -51,7 +52,7 @@ router.post("/chats/:id/messages", isAuthenticated, async (req, res) => {
         effort: ["low", "high"].includes(b.effort) ? b.effort : undefined,
     });
     if (out.ok) return res.json({ ok: true });
-    const status = out.code === "offline" ? 503 : out.code === "busy" ? 409 : out.code === "not_remote" ? 404 : 400;
+    const status = out.code === "offline" ? 503 : out.code === "busy" ? 409 : out.code === "not_remote" ? 404 : out.code === "not_allowed" ? 403 : 400;
     res.status(status).json({ error: out.error, code: out.code });
 });
 
@@ -71,6 +72,14 @@ router.delete("/chats/:id", isAuthenticated, async (req, res) => {
     const id = await ownChat(req, res);
     if (!id) return;
     await setRemoteChat({ userId: req.user._id, sessionId: id, on: false });
+    res.json({ ok: true });
+});
+
+router.put("/devices/:deviceId", isAuthenticated, async (req, res) => {
+    const deviceId = String(req.params.deviceId || "");
+    const b = req.body || {};
+    if (!/^[0-9a-f]{16,128}$/i.test(deviceId) || (typeof b.allowed !== "boolean" && typeof b.defaultMode !== "string")) return res.status(400).json({ error: "allowed (true or false) or defaultMode is needed" });
+    await setDeviceAllowed(req.user._id, deviceId, typeof b.allowed === "boolean" ? b.allowed : undefined, b.defaultMode);
     res.json({ ok: true });
 });
 

@@ -35,7 +35,14 @@ const runs = [];
 
 mock.module("../src/config/redis.js", { defaultExport: redis });
 mock.module("../src/services/socket.service.js", { namedExports: { getIO: () => ({ to: (room) => ({ emit: (name, data) => emitted.push({ room, name, data }) }) }) } });
+let devices = {};
 mock.module("../src/models/RemoteChat.js", {
+    namedExports: {
+        RemoteDevice: {
+            findOne: (q) => ({ select: () => ({ lean: async () => (q.deviceId in devices ? { allowed: devices[q.deviceId] } : null) }) }),
+            updateOne: async (q, u) => { devices[q.deviceId] = u.$set.allowed; },
+        },
+    },
     defaultExport: {
         find: () => ({ select: () => ({ lean: async () => remoteRows.filter((r) => r.on) }), sort: () => ({ limit: () => ({ lean: async () => remoteRows.filter((r) => r.on) }) }) }),
         findOne: (q) => ({ lean: async () => remoteRows.find((r) => r.sessionId === q.sessionId && r.on) || null }),
@@ -123,6 +130,15 @@ test("a phone that opens the chat mid-answer gets what it missed; the end clears
     assert.equal(after.running, false);
     assert.deepEqual(after.events, []);
     assert.equal((await svc.stopRemote("u1", S)).ok, true);
+});
+
+test("a computer whose own Remote PC switch is off: the phone's message is refused", async () => {
+    remoteRows = remoteRows.map((r) => (r.sessionId === S ? { ...r, on: true, deviceId: "abcdef0123456789" } : r));
+    await svc.setDeviceAllowed("u1", "abcdef0123456789", false);
+    assert.equal(await svc.deviceAllowed("u1", "abcdef0123456789"), false);
+    assert.equal((await svc.sendFromPhone({ _id: "u1" }, S, { question: "hi" })).code, "not_allowed");
+    await svc.setDeviceAllowed("u1", "abcdef0123456789", true);
+    assert.equal(await svc.deviceAllowed("u1", null), true, "no computer known: allowed");
 });
 
 test("/remote off: the chat is no longer remote", async () => {

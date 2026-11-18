@@ -2252,6 +2252,8 @@ export const streamAskAi = async (req, res) => {
                 let text;
                 if (!own) {
                     text = "Only the person who started this chat can turn on Remote PC for it.";
+                } else if (on && !(await (await import("../services/remote-pc.service.js")).deviceAllowed(userId, typeof body.deviceId === "string" ? body.deviceId : null))) {
+                    text = "Remote PC is turned off on this computer. Turn it on in Settings, General, Remote PC, then type /remote again.";
                 } else {
                     const { setRemoteChat } = await import("../services/remote-pc.service.js");
                     const { deviceKindOf, deviceNameOf } = await import("../services/user-session.service.js");
@@ -7869,6 +7871,13 @@ export const getChatSessions = async (req, res) => {
             } else {
                 const ps = await IdeProject.find({ owner: req.user._id }).select("chatSessionIds").lean();
                 const ids = new Set([...ps.flatMap((x) => x.chatSessionIds || []), ...studioIds, ...callIds]);
+                // The phone: a Remote PC chat is listed under Remote PC, not with the normal chats (owner, 2026-11-18)
+                const { isPhoneAppRequest } = await import("../services/user-session.service.js");
+                if (isPhoneAppRequest(req)) {
+                    const RemoteChat = (await import("../models/RemoteChat.js")).default;
+                    const remote = await RemoteChat.find({ userId: req.user._id, on: true }).select("sessionId").lean().catch(() => []);
+                    for (const r of remote) ids.add(r.sessionId);
+                }
                 sessions = (sessions || []).filter((s) => !ids.has(s.id));
             }
         }

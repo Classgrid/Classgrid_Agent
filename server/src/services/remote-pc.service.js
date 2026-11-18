@@ -17,7 +17,7 @@
 //   - Questions ("may I run this?") go to the phone with the other live events; it answers them with
 //     POST /api/ai/permission/:id like the computer does (the first answer wins).
 import redis from "../config/redis.js";
-import RemoteChat from "../models/RemoteChat.js";
+import RemoteChat, { RemoteDevice } from "../models/RemoteChat.js";
 import User from "../models/User.js";
 import { getIO } from "./socket.service.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
@@ -30,6 +30,7 @@ const TURN_OF = (sessionId) => `remote:turn:${sessionId}`;
 const LIVE_KEEP = 5000; // events kept for a phone that opens the chat mid-answer
 const LIVE_TTL_S = 6 * 60 * 60;
 const CHAT_ID = /^[0-9a-f-]{36}$/i;
+const PERMISSION_MODES = new Set(["review", "default", "auto", "turbo"]);
 
 // The events of an answer the phone shows (the words, the thinking, the steps, questions, pictures, the end)
 const LIVE_TYPES = new Set([
@@ -64,6 +65,23 @@ export async function remoteChatOn(userId, sessionId) {
     return ids.includes(String(sessionId));
 }
 
+/** This computer allows Remote PC (its app's switch; no switch saved = allowed). */
+export async function deviceAllowed(userId, deviceId) {
+    if (!deviceId) return true;
+    const row = await RemoteDevice.findOne({ userId, deviceId: String(deviceId) }).select("allowed").lean().catch(() => null);
+    return row?.allowed !== false;
+}
+
+/** The computer's app saved its Remote PC settings: its switch (allowed) and the phone's starting mode. */
+export async function setDeviceAllowed(userId, deviceId, allowed, defaultMode = undefined) {
+    const set = {};
+    if (typeof allowed === "boolean") set.allowed = allowed;
+    if (PERMISSION_MODES.has(defaultMode)) set.defaultMode = defaultMode;
+    if (!Object.keys(set).length) return;
+    await RemoteDevice.updateOne({ userId, deviceId: String(deviceId) }, { $set: set }, { upsert: true });
+    emit(userId, "remote:chats", { deviceId: String(deviceId), ...set });
+}
+
 /** Turns Remote PC on or off for a chat. Returns the chat's record. */
 export async function setRemoteChat({ userId, sessionId, on, deviceId = null, deviceName = null, clientApp = "desktop", appMode = null }) {
     const row = await RemoteChat.findOneAndUpdate(
@@ -86,11 +104,16 @@ export async function listRemoteChats(user) {
     const { runnerOnline } = await import("./local-runner.service.js");
     const { chatAnswering } = await import("./chat-wake.service.js");
     const online = await runnerOnline(String(user._id));
+    const devices = await RemoteDevice.find({ userId: user._id }).select("deviceId allowed defaultMode").lean().catch(() => []);
+    const deviceOf = new Map((devices || []).map((d) => [d.deviceId, d]));
     return Promise.all(rows.filter((r) => byId.has(r.sessionId)).map(async (r) => ({
         sessionId: r.sessionId,
         title: byId.get(r.sessionId)?.title || "New chat",
         deviceName: r.deviceName || "Your computer",
+        deviceId: r.deviceId || null,
         online,
+        allowed: deviceOf.get(r.deviceId)?.allowed !== false,
+        defaultMode: deviceOf.get(r.deviceId)?.defaultMode || "default",
         answering: await chatAnswering(String(user._id), r.sessionId).catch(() => false),
         updatedAt: r.updatedAt,
     })));
@@ -159,6 +182,7 @@ export async function sendFromPhone(user, sessionId, { question, permissionMode,
     if (!text) return { error: "Write a message first.", code: "empty" };
     const row = await RemoteChat.findOne({ userId: user._id, sessionId: String(sessionId), on: true }).lean();
     if (!row) return { error: "Remote PC is off for this chat. Type /remote in it on your computer.", code: "not_remote" };
+    if (!(await deviceAllowed(user._id, row.deviceId))) return { error: "Remote PC is turned off on that computer (Settings, General, Remote PC in the Classgrid app there).", code: "not_allowed" };
     const { runnerOnline } = await import("./local-runner.service.js");
     if (!(await runnerOnline(userId))) return { error: "Your computer is offline. Open Classgrid on it and try again.", code: "offline" };
     const { chatAnswering } = await import("./chat-wake.service.js");
@@ -171,8 +195,6 @@ export async function sendFromPhone(user, sessionId, { question, permissionMode,
         .finally(() => redis.del(RUNNING(sessionId)).catch(() => {}));
     return { ok: true };
 }
-
-const PERMISSION_MODES = new Set(["review", "default", "auto", "turbo"]);
 
 async function runFromPhone(user, row, question, { permissionMode, selectedModel, effort }) {
     const userId = String(user._id);
