@@ -7824,6 +7824,13 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 export const getChatHelpers = async (req, res) => {
     const userId = req.user?._id || req.user?.id;
     const board = HELPER_BOARDS.get(String(req.params.id || ""));
+    // The chat's answer ran in the other copy of this server (sent to the rescue copy while the main one restarted for
+    // a deploy), so its helpers live there: the list comes from that copy (owner, 2026-11-18: five helpers working and
+    // no "5 agents" button, no times on their cards). sibling-process.js; a request from that copy is never sent back.
+    if (userId && !board) {
+        const { forwardToSibling } = await import("../services/sibling-process.js");
+        if (await forwardToSibling(req, res)) return;
+    }
     if (!userId || !board || board.userId !== String(userId)) return res.json({ helpers: [] });
     res.json({
         helpers: board.helpers.map((h) => ({
