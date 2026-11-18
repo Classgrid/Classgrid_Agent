@@ -224,7 +224,7 @@ export async function liveState(sessionId) {
  * { ok } at once, or { error, code } when it can't run now: not a remote chat, the computer is offline, or the chat is
  * answering already.
  */
-export async function sendFromPhone(user, sessionId, { question, permissionMode, selectedModel, effort, attachments, command } = {}, { stopWaitMs = 6000 } = {}) {
+export async function sendFromPhone(user, sessionId, { question, permissionMode, selectedModel, effort, attachments, command, isEdit = false } = {}, { stopWaitMs = 6000 } = {}) {
     const userId = String(user._id);
     const text = String(question || "").trim();
     const files = cleanAttachments(attachments);
@@ -244,7 +244,7 @@ export async function sendFromPhone(user, sessionId, { question, permissionMode,
     const took = await redis.set(RUNNING(sessionId), "1", "EX", 6 * 60 * 60, "NX").catch(() => null);
     if (!took) return { error: "This chat is answering right now. Wait for it to finish, or stop it.", code: "busy" };
     await redis.del(STOP(sessionId)).catch(() => {});
-    runFromPhone(user, row, text, { permissionMode, selectedModel, effort, attachments: files, command })
+    runFromPhone(user, row, text, { permissionMode, selectedModel, effort, attachments: files, command, isEdit: isEdit === true })
         .catch((e) => console.error("[Remote PC] a message from the phone failed:", e?.message || e))
         .finally(() => redis.del(RUNNING(sessionId)).catch(() => {}));
     return { ok: true };
@@ -267,7 +267,7 @@ async function stoppedAnswerEnded(userId, sessionId, waitMs) {
     if (mark.startsWith("stopped-") && (await redis.get(runKey).catch(() => null)) === mark) await redis.del(runKey).catch(() => {});
 }
 
-async function runFromPhone(user, row, question, { permissionMode, selectedModel, effort, attachments = [], command } = {}) {
+async function runFromPhone(user, row, question, { permissionMode, selectedModel, effort, attachments = [], command, isEdit = false } = {}) {
     const userId = String(user._id);
     const sessionId = row.sessionId;
     // The chat's own model and effort when the phone picked none (how the computer last used it: chatwake meta)
@@ -300,6 +300,8 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
             ...(attachments.length ? { attachments, fileUrls: attachments.map((a) => a.url) } : {}),
             // (the chat checks it is one of its "/" commands for this mode, as for the computer's own box)
             ...(command ? { command } : {}),
+            // (an edited question sent again: the chat adds its edit note, as for the phone's and the website's chats)
+            ...(isEdit ? { isEdit: true } : {}),
             remoteFrom: "phone",
             // the answer's checkpoint on the computer (the app keeps its before-copies under it): Review and Undo of
             // what it changed there, on the phone and in the app, as for an answer typed on the computer

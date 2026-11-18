@@ -193,3 +193,18 @@ test("helpers: an answer that changed files, job ids in a step's text", () => {
     assert.equal(tabs.stepsChangedFiles([{ tool: "edit_project_file", args: { path: "x" }, result: "Error: old_text was not found (+1 -1)." }]), false);
     assert.deepEqual(tabs.jobIdsIn('Wait with check_background_command (job_id "job3-zz9", wait_seconds up to 120) job_id: job3-zz9'), ["job3-zz9"]);
 });
+
+test("Download File: the file's bytes as the Files tab has them", async () => {
+    reset();
+    sockets = [sock({ remoteDevice: row.deviceId }, (p) => (p.tool === "files_read"
+        ? { text: "ok", file: p.args.path.endsWith(".png") ? { path: p.args.path, binary: true, image: true, mime: "image/png", data: Buffer.from("PNG").toString("base64") } : { path: p.args.path, binary: false, content: "héllo" } }
+        : null))];
+    const text = await tabs.fileDownload(user, S, "src/a.txt");
+    assert.equal(text.name, "a.txt");
+    assert.equal(text.buf.toString("utf8"), "héllo");
+    assert.match(text.mime, /^text\/plain/);
+    const pic = await tabs.fileDownload(user, S, "img/b.png");
+    assert.equal(pic.mime, "image/png");
+    assert.equal(pic.buf.toString(), "PNG");
+    await assert.rejects(tabs.fileDownload(user, S, "../x"), (e) => e.status === 404);
+});

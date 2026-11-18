@@ -3,7 +3,7 @@
 //   GET    /api/remote/chats/:id/live        -> { running, question, from, turnId, attachments?, events }  the answer running now
 //   GET    /api/remote/chats/:id/details     -> { deviceId, deviceName, deviceKind, online, connectedSince, totalConnectedMs,
 //                                                 project: { name, path } | null, mode, clientApp, turnedOnAt }
-//   POST   /api/remote/chats/:id/messages    { question, permissionMode?, selectedModel?, effort?, attachments?, command? } -> { ok } or 409/503
+//   POST   /api/remote/chats/:id/messages    { question, permissionMode?, selectedModel?, effort?, attachments?, command?, isEdit? } -> { ok } or 409/503
 //                                             attachments: [{ url, name, mimeType }] as the chat sends them to the AI
 //   POST   /api/remote/chats/:id/stop        -> { ok }   stops the answer running in the chat (phone's or computer's)
 //   DELETE /api/remote/chats/:id             -> { ok }   Remote PC off for this chat (the computer keeps the chat)
@@ -17,12 +17,13 @@
 //   GET    /api/remote/chats/:id/files               -> { place, projectId, name, listing? }
 //   GET    /api/remote/chats/:id/file?path=          -> { path, binary, image?, mime?, data?, content?, size?, truncated? }
 //   GET    /api/remote/chats/:id/jobs                -> { jobs: [{ id, command, running, exitCode, startedAt, output }] }
+//   GET    /api/remote/chats/:id/file/download?path= -> the file's bytes (Download File)
 // The live answer itself comes over the person's socket: "remote:live", "remote:turn", "remote:chats".
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
 import { deviceSettings, listRemoteChats, liveState, remoteChatDetails, sendFromPhone, setDeviceAllowed, setRemoteChat, stopRemote } from "../services/remote-pc.service.js";
-import { RemoteTabError, chatJobs, fileRead, filesList, reviewList, reviewPutBack, reviewShow } from "../services/remote-pc-tabs.service.js";
+import { RemoteTabError, chatJobs, fileDownload, fileRead, filesList, reviewList, reviewPutBack, reviewShow } from "../services/remote-pc-tabs.service.js";
 
 const router = express.Router();
 const CHAT_ID = /^[0-9a-f-]{36}$/i;
@@ -81,6 +82,8 @@ router.post("/chats/:id/messages", isAuthenticated, async (req, res) => {
         attachments: Array.isArray(b.attachments) ? b.attachments : undefined,
         // a "/" command picked in the phone's box (/plan, /review...), as the computer's box sends it
         command: typeof b.command === "string" && /^[a-z_-]{1,40}$/.test(b.command) ? b.command : undefined,
+        // a question edited and sent again (Edit, Retry), as the phone's and the website's own chat send it
+        isEdit: b.isEdit === true,
     });
     if (out.ok) return res.json({ ok: true });
     const status = out.code === "offline" ? 503 : out.code === "busy" ? 409 : out.code === "not_remote" ? 404 : out.code === "not_allowed" ? 403 : 400;
@@ -125,6 +128,21 @@ router.post("/chats/:id/review/:cp/undo", isAuthenticated, (req, res) => tab(req
 router.get("/chats/:id/files", isAuthenticated, (req, res) => tab(req, res, (id) => filesList(req.user, id)));
 router.get("/chats/:id/file", isAuthenticated, (req, res) => tab(req, res, (id) => fileRead(req.user, id, req.query.path)));
 router.get("/chats/:id/jobs", isAuthenticated, (req, res) => tab(req, res, (id) => chatJobs(req.user, id)));
+// (Download File: the file's bytes, for the phone's download with the person's sign-in)
+router.get("/chats/:id/file/download", isAuthenticated, async (req, res) => {
+    const id = await ownChat(req, res);
+    if (!id) return;
+    try {
+        const { name, mime, buf } = await fileDownload(req.user, id, req.query.path, req.headers.authorization);
+        res.setHeader("Content-Type", mime);
+        res.setHeader("Content-Disposition", `attachment; filename*=UTF-8''${encodeURIComponent(name)}`);
+        res.send(buf);
+    } catch (e) {
+        if (e instanceof RemoteTabError) return res.status(e.status).json({ error: e.message, code: e.code });
+        console.error("[Remote PC] download failed:", e?.message || e);
+        res.status(500).json({ error: "Could not download the file. Try again." });
+    }
+});
 
 router.get("/devices/:deviceId", isAuthenticated, async (req, res) => {
     const deviceId = String(req.params.deviceId || "");

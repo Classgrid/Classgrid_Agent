@@ -179,6 +179,17 @@ test("a phone message carries its photos and files, and runs on the chat's own c
     assert.equal(emitted.find((e) => e.name === "chat:woke" && e.data.phase === "start").data.attachments.length, 1);
 });
 
+test("a phone message has its own checkpoint on the computer, and an edited question says so", async () => {
+    assert.deepEqual(await svc.sendFromPhone({ _id: "u1" }, S, { question: "change it", isEdit: true }), { ok: true });
+    await tick();
+    const body = runs.at(-1).extraBody;
+    assert.match(body.localCheckpoint, /^\d{13}$/, "the app keeps this answer's before-copies under it (Review, Undo)");
+    assert.equal(body.isEdit, true);
+    assert.equal((await svc.sendFromPhone({ _id: "u1" }, S, { question: "again" })).ok, true);
+    await tick();
+    assert.equal(runs.at(-1).extraBody.isEdit, undefined);
+});
+
 test("a message sent right after Stop waits for the stopped answer to end instead of being refused", async () => {
     // (the owner's phone, 2026-11-18: Stop, then a message a second later, got "This chat is answering right now")
     // The stopped answer is still saving (the chat is marked working); Stop's mark stays 8 seconds after it

@@ -334,3 +334,28 @@ export async function chatJobs(user, sessionId) {
     }
     return { jobs };
 }
+
+/**
+ * Download File (Studio's Files tab, its More menu): the file as the Files tab has it, as bytes: { name, mime, buf }.
+ * On the computer, what it sent (a text file's first 512 KB, a picture up to 600 KB); a cloud project's file through
+ * its own Files route, with the person's own sign-in (authorization: the request's header).
+ */
+export async function fileDownload(user, sessionId, rel, authorization = "") {
+    const p = String(rel || "").replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!p || p.length > 2000 || p.split("/").some((x) => x === "..")) throw new RemoteTabError("File not found", "not_found", 404);
+    await remoteChatRow(user, sessionId);
+    const { place, project } = await chatPlace(sessionId);
+    let file = null;
+    if (place === "computer") file = await fileRead(user, sessionId, p);
+    else if (place === "cloud") {
+        const port = process.env.PORT || 3000;
+        const r = await fetch(`http://127.0.0.1:${port}/api/ide/projects/${encodeURIComponent(String(project._id))}/file?path=${encodeURIComponent(p)}`, { headers: { authorization: String(authorization || "") } });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok) throw new RemoteTabError(data.error || "Could not open the file", "cloud_error", r.status === 404 ? 404 : 400);
+        file = data;
+    } else throw new RemoteTabError("File not found", "not_found", 404);
+    const name = p.split("/").pop() || "file";
+    if (file?.data) return { name, mime: file.mime || "application/octet-stream", buf: Buffer.from(String(file.data), "base64") };
+    if (typeof file?.content === "string") return { name, mime: "text/plain; charset=utf-8", buf: Buffer.from(file.content, "utf8") };
+    throw new RemoteTabError("This file can't be shown as text.", "binary", 415);
+}
