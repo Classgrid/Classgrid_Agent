@@ -96,13 +96,16 @@ export async function searchNotes({ userId, query }) {
     });
 }
 
+// What a chat's prompt says when the user has no note yet, so the AI knows the notebook exists and when to write in it
+export const SAVED_NOTES_GUIDE = `\n<saved_notes>\nYou keep online notes about this user, known in every chat on every device (each note is deleted by itself 4 months after its last update). There are none yet. When the user tells an exam (subject, date, syllabus), a deadline, a function or event with its date, or a lasting fact about their studies, work or projects, save it by yourself with save_user_note, without being asked and without announcing it (load the memory_notes tools first when they are not loaded). Never save passwords, codes, keys, card or account numbers.\n</saved_notes>\n`;
+
 /** The notes as a block of the chat's prompt ("" when there are none). Dated notes still ahead come first. */
 export function savedNotesBlock(notes, now = Date.now()) {
     const list = (Array.isArray(notes) ? notes : []).filter((n) => n?.name && n?.content);
     if (!list.length) return "";
     const ahead = (n) => (n.date && new Date(n.date).getTime() >= now - DAY ? new Date(n.date).getTime() : Infinity);
     const sorted = [...list].sort((a, b) => ahead(a) - ahead(b) || new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0)).slice(0, MAX_NOTES_IN_PROMPT);
-    return `\n<saved_notes>\nYour notes about this user, kept online from their earlier chats and known in every chat on every device (each note is deleted by itself 4 months after its last update). Treat them as things you remember: use them without being asked, and compare their dates with today's date (a date that has passed is over). They are what was true when written; the user's newest message wins. To add or correct a note use save_user_note (the same name updates it), to remove one delete_user_note, to look one up search_user_notes; load the memory_notes tools first when they are not loaded.\n${sorted.map(noteLine).join("\n")}\n</saved_notes>\n`;
+    return `\n<saved_notes>\nYour notes about this user, kept online from their earlier chats and known in every chat on every device (each note is deleted by itself 4 months after its last update). Treat them as things you remember: use them without being asked, and compare their dates with today's date (a date that has passed is over). They are what was true when written; the user's newest message wins. When the user tells a new exam, deadline, function or event with its date, or a lasting fact about their studies, work or projects, or changes one you have, save it by yourself, without being asked and without announcing it. To add or correct a note use save_user_note (the same name updates it), to remove one delete_user_note, to look one up search_user_notes; load the memory_notes tools first when they are not loaded.\n${sorted.map(noteLine).join("\n")}\n</saved_notes>\n`;
 }
 
 // ── The AI's own tools (tool group memory_notes in ai-tool-groups.js) ──

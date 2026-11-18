@@ -111,7 +111,7 @@ import AiUsageLog from "../models/AiUsageLog.js";
 import { LIVE_DOC_TOOLS, LIVE_DOC_PROMPT, buildLiveDocHandlers } from "../services/live-doc-tools.js";
 import { APP_HISTORY_TOOLS, buildAppHistoryHandlers } from "../mcp/mcp-extra-tools.js";
 import { PLAN_INFO_TOOLS, buildPlanInfoHandlers } from "../services/plan-info-tools.js";
-import { SAVED_NOTE_TOOLS, buildSavedNoteHandlers, savedNotesOf, savedNotesBlock, notesFromChat } from "../services/ai-memory-notes.js";
+import { SAVED_NOTE_TOOLS, buildSavedNoteHandlers, savedNotesOf, savedNotesBlock, SAVED_NOTES_GUIDE, notesFromChat } from "../services/ai-memory-notes.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
@@ -3076,7 +3076,7 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                 }
 
                 // The AI's online memory notes, known in every chat (never in an incognito chat)
-                if (!isIncognito) volatilePrompt += savedNotesBlock(savedNotesResult);
+                if (!isIncognito && userId) volatilePrompt += savedNotesBlock(savedNotesResult) || SAVED_NOTES_GUIDE;
 
                 // Desktop app: what the same person saved in their other Classgrid accounts on this computer
                 // (the app keeps each account's memory locally), so switching accounts keeps the memory

@@ -214,7 +214,7 @@ export const TOOL_GROUPS = [
         id: "memory_notes",
         description: "Your online memory notes about the user (exam dates, deadlines, events, lasting facts), known in every chat: save, search and delete a note.",
         tools: ["save_user_note", "search_user_notes", "delete_user_note"],
-        pattern: /\b(remember\w*|memor(y|ies|ise|ize)\w*|forget|forgot|exams?|deadlines?|viva|wedding|birthday|yaad\s*rakh\w*|bhool\w*)\b|याद|परीक्षा/i,
+        pattern: /\b(remember\w*|memor(y|ies|ise|ize)\w*|forget|forgot|exams?|deadlines?|viva|quiz\w*|semester|submission|assignment|interview|wedding|birthday|anniversary|yaad\s*rakh\w*|bhool\w*)\b|याद|परीक्षा/i,
     },
     // Staff-only groups (database role super_admin / co_super_admin).
     {
