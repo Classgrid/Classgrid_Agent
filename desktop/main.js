@@ -13,6 +13,7 @@ const chats = require("./chats");
 const uploads = require("./uploads");
 const memory = require("./memory");
 const editors = require("./editors"); // the Classgrid extension in VS Code, Cursor, Windsurf, VSCodium
+const remotepc = require("./remotepc"); // Remote PC: the tray, keeping the computer awake while the AI works, its settings
 
 // The release's start test (scripts/release.mjs): started with --smoke-test, the packed app ends here with code 0
 // once every part above has loaded. A part left out of the installer (electron-builder.yml lists the files one by
@@ -242,8 +243,12 @@ function createWindow() {
   });
   // The welcome screen is at the top of the page, so the window can show as soon as the page is read (the black
   // background matches it). ready-to-show comes too late here.
-  win.webContents.once("dom-ready", () => { if (!codeOnly) win.show(); });
-  setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible() && !codeOnly) win.show(); }, 4000);
+  // (started by Windows at sign-in, Remote PC's "Start Classgrid with Windows": no window, the tray only)
+  const hidden = remotepc.startHidden();
+  if (hidden) remotepc.showInTray();
+  win.webContents.once("dom-ready", () => { if (!codeOnly && !hidden) win.show(); });
+  setTimeout(() => { if (win && !win.isDestroyed() && !win.isVisible() && !codeOnly && !hidden) win.show(); }, 4000);
+  remotepc.attachWindow(win); // the close button hides to the tray (Remote PC), the work goes on
   // (--code: the page sends its login as soon as it starts; none a few seconds after it loaded means the user has to
   // sign in first)
   if (codeOnly) win.webContents.once("did-finish-load", () => setTimeout(() => { if (codeWaiting && !codeEditor.hasLogin()) showMain(); }, 4000));
@@ -254,6 +259,9 @@ function createWindow() {
 }
 
 ipcMain.on("cg:version", (e) => { e.returnValue = app.getVersion(); });
+// Settings > General > Remote PC (remotepc.js)
+ipcMain.handle("cg:remotePcSettings", () => remotepc.get());
+ipcMain.handle("cg:saveRemotePcSettings", (_e, patch) => remotepc.save(patch || {}));
 // Notification settings: one file on this computer, shared with Classgrid Code (%APPDATA%\Classgrid)
 const NOTIFY_FILE = path.join(process.env.APPDATA || app.getPath("appData"), "Classgrid", "notification-settings.json");
 ipcMain.handle("cg:getNotificationSettings", () => { try { return JSON.parse(fs.readFileSync(NOTIFY_FILE, "utf8")); } catch { return null; } });
@@ -528,7 +536,7 @@ if (!app.requestSingleInstanceLock()) {
     if (argv.includes("--code")) return void startCodeEditor();
     // The app opened again: bring its window forward. The window may already be gone (the app is closing, or it is
     // installing an update), so it is only touched while it exists.
-    if (win && !win.isDestroyed()) { if (codeOnly) showMain(); if (win.isMinimized()) win.restore(); win.focus(); }
+    if (win && !win.isDestroyed()) { if (codeOnly) showMain(); if (win.isMinimized()) win.restore(); if (!win.isVisible()) win.show(); win.focus(); }
     handleDeepLink(argv.find((a) => a.startsWith("classgrid://")));
   });
   app.whenReady().then(async () => {
@@ -537,6 +545,7 @@ if (!app.requestSingleInstanceLock()) {
     chats.init(app.getPath("userData"));
     uploads.init(app.getPath("userData"));
     memory.init(app.getPath("userData"));
+    remotepc.init(app.getPath("userData"), { getWindow: () => win, runner, icon: path.join(__dirname, "build", "icon.png") });
     if (!fs.existsSync(path.join(APP_DIR, "index.html"))) {
       dialog.showErrorBox("Classgrid", "The app's screens are missing. Run: npm run build:client");
       return app.quit();
@@ -552,7 +561,8 @@ if (!app.requestSingleInstanceLock()) {
     editors.init(app.getPath("appData"));
     if (app.isPackaged) setTimeout(() => editors.check({ ask: askAddToEditors }), 30000);
   });
-  app.on("window-all-closed", () => app.quit());
+  // (the window hidden in the tray is not closed; a window closed for good with the tray off ends the app)
+  app.on("window-all-closed", () => { if (!remotepc.keepsRunning()) app.quit(); });
   app.on("before-quit", () => { runner.stopAll(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
 }
 
@@ -588,7 +598,8 @@ function startUpdates() {
       defaultId: 0,
       cancelId: 1,
     });
-    if (response === 0) autoUpdater.quitAndInstall();
+    // (a task running on this computer stops with the restart: asked first, Remote PC)
+    if (response === 0 && (await remotepc.okToStop("Restarting to update stops it."))) { remotepc.markQuitting(); autoUpdater.quitAndInstall(); }
   });
   autoUpdater.on("error", (err) => console.log("[updates]", err.message));
   const check = () => autoUpdater.checkForUpdates().catch((err) => console.log("[updates]", err.message));

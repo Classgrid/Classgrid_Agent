@@ -4,12 +4,13 @@
 //   POST   /api/remote/chats/:id/messages    { question, permissionMode?, selectedModel?, effort? } -> { ok } or 409/503
 //   POST   /api/remote/chats/:id/stop        -> { ok }   stops the answer running in the chat (phone's or computer's)
 //   DELETE /api/remote/chats/:id             -> { ok }   Remote PC off for this chat (the computer keeps the chat)
-//   PUT    /api/remote/devices/:deviceId     { allowed?, defaultMode? } -> { ok }   the computer's own settings (its app)
+//   GET    /api/remote/devices/:deviceId     -> { allowed, defaultMode }   the computer's own settings (its app)
+//   PUT    /api/remote/devices/:deviceId     { allowed?, defaultMode? } -> { ok }
 // The live answer itself comes over the person's socket: "remote:live", "remote:turn", "remote:chats".
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
-import { listRemoteChats, liveState, sendFromPhone, setDeviceAllowed, setRemoteChat, stopRemote } from "../services/remote-pc.service.js";
+import { deviceSettings, listRemoteChats, liveState, sendFromPhone, setDeviceAllowed, setRemoteChat, stopRemote } from "../services/remote-pc.service.js";
 
 const router = express.Router();
 const CHAT_ID = /^[0-9a-f-]{36}$/i;
@@ -73,6 +74,12 @@ router.delete("/chats/:id", isAuthenticated, async (req, res) => {
     if (!id) return;
     await setRemoteChat({ userId: req.user._id, sessionId: id, on: false });
     res.json({ ok: true });
+});
+
+router.get("/devices/:deviceId", isAuthenticated, async (req, res) => {
+    const deviceId = String(req.params.deviceId || "");
+    if (!/^[0-9a-f]{16,128}$/i.test(deviceId)) return res.status(400).json({ error: "Unknown computer" });
+    res.json(await deviceSettings(req.user._id, deviceId));
 });
 
 router.put("/devices/:deviceId", isAuthenticated, async (req, res) => {

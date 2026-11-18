@@ -72,6 +72,12 @@ export async function deviceAllowed(userId, deviceId) {
     return row?.allowed !== false;
 }
 
+/** A computer's Remote PC settings, as its app shows them: { allowed, defaultMode } (on and Default until saved). */
+export async function deviceSettings(userId, deviceId) {
+    const row = await RemoteDevice.findOne({ userId, deviceId: String(deviceId) }).select("allowed defaultMode").lean().catch(() => null);
+    return { allowed: row?.allowed !== false, defaultMode: row?.defaultMode || "default" };
+}
+
 /** The computer's app saved its Remote PC settings: its switch (allowed) and the phone's starting mode. */
 export async function setDeviceAllowed(userId, deviceId, allowed, defaultMode = undefined) {
     const set = {};

@@ -85,6 +85,7 @@ import { SettingsUsageSection } from "../components/settings/SettingsUsageSectio
 import { SettingsBillingSection } from "../components/settings/SettingsBillingSection";
 import { SettingsDevicesSection } from "../components/settings/SettingsDevicesSection";
 import { SettingsEditorExtensionCard } from "../components/settings/SettingsEditorExtensionCard";
+import { SettingsRemotePcCard } from "../components/settings/SettingsRemotePcCard";
 import { settingsSections, useSettingsSection } from "../settings/settingsSections";
 
 export function SharedSettingsPage() {
@@ -192,6 +193,7 @@ export function SharedSettingsPage() {
         <>
           <SettingsAppearanceCard />
           <SettingsEditorExtensionCard />
+          <SettingsRemotePcCard />
           {role === "org_admin" && (
             <>
               <OrgBrandingCard />

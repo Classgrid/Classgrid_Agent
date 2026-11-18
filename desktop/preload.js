@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   // Settings → General: the Classgrid extension in VS Code, Cursor, Windsurf, VSCodium on this computer
   editorExtension: () => ipcRenderer.invoke("cg:editorExtension"),
   setEditorExtension: (on) => ipcRenderer.invoke("cg:setEditorExtension", !!on),
+  // Settings → General → Remote PC (remotepc.js): { allow, keepAwake, trayOnClose, openAtLogin, defaultMode }
+  remotePcSettings: () => ipcRenderer.invoke("cg:remotePcSettings"),
+  saveRemotePcSettings: (patch) => ipcRenderer.invoke("cg:saveRemotePcSettings", patch),
   // A Windows notification (a Grids message while the window is in the background)
   notify: (title, body) => ipcRenderer.invoke("cg:notify", { title, body }),
   // A file on this computer shown in a Studio tab

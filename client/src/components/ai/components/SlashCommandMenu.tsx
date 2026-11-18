@@ -1,9 +1,11 @@
 // The "/" commands of the chat box (Project Mode and Studio): typed at the start of a message, sent as body.command
 import { motion, AnimatePresence } from "framer-motion";
-import { AppWindow, BookOpen, CalendarClock, CodeXml, Globe, GraduationCap, LayoutGrid, ListChecks, MessageCircleQuestion, Minimize2, Puzzle, Target, Users, Zap, type LucideIcon, ClipboardCheck, ShieldCheck, Sparkles, Telescope, FileText, Play, Download } from "lucide-react";
+import { AppWindow, BookOpen, CalendarClock, CodeXml, Globe, GraduationCap, LayoutGrid, ListChecks, MessageCircleQuestion, Minimize2, Puzzle, Target, Users, Zap, type LucideIcon, ClipboardCheck, ShieldCheck, Sparkles, Telescope, FileText, Play, Download, MonitorSmartphone } from "lucide-react";
 import { cn } from "../utils";
 
-export type SlashCommand = { id: string; description: string; icon: LucideIcon; studioOnly?: boolean };
+// desktopOnly: only in the desktop app and Classgrid Code (a chat on this computer)
+export type SlashCommand = { id: string; description: string; icon: LucideIcon; studioOnly?: boolean; desktopOnly?: boolean };
+const onComputer = () => typeof window !== "undefined" && !!(window as unknown as { classgridDesktop?: unknown }).classgridDesktop;
 
 export const SLASH_COMMANDS: SlashCommand[] = [
   { id: "classgrid-guide", description: "Answer from the Classgrid AI guide", icon: BookOpen },
@@ -27,10 +29,12 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: "boost", description: "Think harder for this message", icon: Zap },
   { id: "learn", description: "Save this as a skill for future chats", icon: GraduationCap },
   { id: "compact", description: "Shrink the chat memory now", icon: Minimize2 },
+  // Remote PC (owner, 2026-11-18): the server turns it on for this chat ("/remote off" turns it off)
+  { id: "remote", description: "Follow and answer this chat from your phone", icon: MonitorSmartphone, desktopOnly: true },
 ];
 
 export const slashCommandsFor = (inStudio: boolean, query: string) =>
-  SLASH_COMMANDS.filter((c) => (inStudio || !c.studioOnly) && c.id.includes(query.toLowerCase()));
+  SLASH_COMMANDS.filter((c) => (inStudio || !c.studioOnly) && (!c.desktopOnly || onComputer()) && c.id.includes(query.toLowerCase()));
 
 // The command a message starts with ("/plan fix the header" -> "plan"), or undefined
 export function leadingSlashCommand(text: string, inStudio: boolean): string | undefined {

@@ -1383,7 +1383,18 @@ function rejectCheckpoint(chat, cp, onlyFile) {
 // One step of the AI on this computer: { tool, args, root?, chat?, checkpoint? } -> { text, computer?, browser?, file?, images?... }.
 // Used by the chat screens (pc_tool_call on the answer's own stream, posted back to /api/ai/pc-tool-result) and by the
 // socket fallback above. One reply stays under the server's 1 MB message limit; the AI only ever sees 100 KB of it.
+// Work on this computer, for Remote PC's "keep the computer awake" (remotepc.js): how many steps are running now, and
+// who is told when one starts or ends (the probes, "ping", are not work)
+let stepsRunning = 0;
+let onActivity = null;
 async function runTool(req) {
+  const counts = req?.tool !== "ping";
+  if (counts) { stepsRunning++; try { onActivity?.(); } catch { /* the listener's own problem */ } }
+  try { return await runToolStep(req); }
+  finally { if (counts) { stepsRunning--; try { onActivity?.(); } catch { /* the listener's own problem */ } } }
+}
+
+async function runToolStep(req) {
   const capReply = (r) => (r && typeof r.text === "string" && r.text.length > REPLY_CHARS ? { ...r, text: `${r.text.slice(0, REPLY_CHARS)}\n… (cut: the answer was too long; read or search a smaller part)` } : r);
   try {
     const { tool, root, chat, checkpoint } = req || {};
@@ -1534,4 +1545,10 @@ module.exports = {
   setBrowser(fn) { browserStep = fn; },
   isAllowed: (folder) => isAllowedRoot(folder),
   stopAll() { for (const job of jobs.values()) killTree(job.proc); jobs.clear(); socket?.disconnect(); },
+  // Remote PC (remotepc.js): the AI is working on this computer (a step running, or a background command still on)
+  busy: () => stepsRunning > 0 || [...jobs.values()].some((j) => j.exitCode === undefined || j.exitCode === null),
+  onActivity(fn) { onActivity = fn; },
+  // After sleep: the connection to the server is made again at once (a socket from before sleep may look connected
+  // while it is dead, and the AI could not reach this computer)
+  reconnect() { if (currentToken) connect(currentToken); },
 };
