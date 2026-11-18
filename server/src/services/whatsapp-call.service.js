@@ -1095,8 +1095,9 @@ async function askClassgridLive(call, request, projectName) {
         let hungUp = false;
         const hangUpWatch = duringCallOnly ? setInterval(() => { if (call.ended) { hungUp = true; stop.abort(); } }, 2000) : null;
         try {
-            // whatsappSince: the live work reads only the WhatsApp messages sent since this call started (no old ones)
-            const out = await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null, null, { whatsappSince: call.startedAt }, stop?.signal || null);
+            // whatsappSince: the live work reads only the WhatsApp messages sent since this call started (no old ones).
+            // liveCall: its chat is filed as the call's work (Studio only, under the call), never as a normal chat.
+            const out = await runAgentTask(call.user, question, project?._id, (id) => { call.liveSessions[key] ||= id; }, call.liveSessions[key] || null, null, { whatsappSince: call.startedAt, liveCall: true }, stop?.signal || null);
             const sessionId = out.sessionId || call.liveSessions[key] || null;
             if (clock.hit()) return { ...out, sessionId, answer: "", error: `it used the ${maxMinutes} minute${maxMinutes === 1 ? "" : "s"} of work a task from a call gets on your plan`, key };
             if (hungUp) return { ...out, sessionId, answer: "", error: "the call ended, and work after a call is not part of your plan", key };

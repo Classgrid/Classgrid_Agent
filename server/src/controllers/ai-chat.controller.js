@@ -2616,7 +2616,7 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
         // A message sent from Project Mode links this chat to the open project first (from the very first message)
         if (sessionId && !isIncognito) { touchedChat = sessionId; touchChat(req.user?.email, sessionId); }
         // Where this chat started (first message wins): the desktop app's chats and the website's chats are separate lists
-        if (sessionId && !isIncognito && !gridSender && !body.taskOrigin && req.user?._id) {
+        if (sessionId && !isIncognito && !gridSender && !body.taskOrigin && body.liveCall !== true && req.user?._id) {
             const placeField = fromWebsite ? "web_chat_ids" : body.clientApp === "desktop" ? "desktop_chat_ids" : null;
             if (placeField) User.updateOne({ _id: req.user._id, desktop_chat_ids: { $ne: sessionId }, web_chat_ids: { $ne: sessionId } }, { $addToSet: { [placeField]: sessionId } }).catch(() => {}); // (not waited for: the answer starts meanwhile)
         }
@@ -2633,8 +2633,10 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
             User.updateOne({ _id: req.user._id }, { $addToSet: { studio_chat_ids: sessionId } }).catch(() => {});
             await forgetChatScreenProject(sessionId);
         }
-        // Work from WhatsApp (calls and messages): its chat is listed only in Studio (owner, 2026-11-02)
-        if (sessionId && !isIncognito && body.taskOrigin === "whatsapp" && req.user?._id) {
+        // Work from WhatsApp (calls and messages): its chat is listed only in Studio (owner, 2026-11-02). A question
+        // asked live during a call (liveCall, whatsapp-call.service.js askClassgridLive) is call work too: it was filed
+        // as a website chat and showed in the normal chat list (owner, 2026-11-18: "why was a normal chat made")
+        if (sessionId && !isIncognito && (body.taskOrigin === "whatsapp" || body.liveCall === true) && req.user?._id) {
             await User.updateOne({ _id: req.user._id }, { $addToSet: { call_chat_ids: sessionId } }).catch(() => {});
         }
         // The three steps that may ask the user's computer (what's open in the editor, the project's folder, and the
