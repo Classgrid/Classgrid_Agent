@@ -55,7 +55,7 @@ describe("tools/list", () => {
         for (const t of tools) assert.deepEqual([t.annotations.readOnlyHint, t.annotations.destructiveHint], [true, false], t.name);
     });
     test("each new scope lists only its own tools", async () => {
-        assert.deepEqual((await listed(["chats:read"])).map((t) => t.name).sort(), ["list_my_chats", "read_my_chat", "search_my_chats"]);
+        assert.deepEqual((await listed(["chats:read"])).map((t) => t.name).sort(), ["list_my_chats", "read_my_chat", "read_recent_chats", "search_my_chats"]);
         assert.deepEqual((await listed(["skills:read"])).map((t) => t.name).sort(), ["list_skills", "read_skill"]);
         assert.deepEqual((await listed(["docs:read"])).map((t) => t.name).sort(), ["list_my_docs", "read_doc"]);
         assert.deepEqual((await listed(["docs:write"])).map((t) => t.name).sort(), ["create_doc", "doc_comments", "edit_doc"]);
@@ -116,20 +116,23 @@ describe("clear errors before any database or GitHub call", () => {
 });
 
 describe("Classgrid AI's own chat gets the chat-history and doc-list tools", () => {
-    test("four tools in the chat's function format, with working handlers", async () => {
-        assert.deepEqual(extra.APP_HISTORY_TOOLS.map((t) => t.function.name).sort(), ["list_my_chats", "list_my_docs", "read_my_chat", "search_my_chats"]);
+    test("five tools in the chat's function format, with working handlers", async () => {
+        assert.deepEqual(extra.APP_HISTORY_TOOLS.map((t) => t.function.name).sort(), ["list_my_chats", "list_my_docs", "read_my_chat", "read_recent_chats", "search_my_chats"]);
         for (const t of extra.APP_HISTORY_TOOLS) assert.equal(t.type, "function");
         const h = extra.buildAppHistoryHandlers({ user: USER });
         assert.match(await h.read_my_chat({ chat_id: "bad id!" }), /^Error: chat_id is not valid/);
         assert.match(await h.search_my_chats({ query: "" }), /^Error:/);
+        assert.match(await h.search_my_chats({ query: "a ? !" }), /^Error: Give at least one word/);
+        assert.equal(typeof h.read_recent_chats, "function");
         assert.match(await extra.buildAppHistoryHandlers({ user: null }).list_my_chats({}), /^Error: sign in first/);
     });
     test("every tool in the chat_history and live_docs groups exists", async () => {
         const { TOOL_GROUPS } = await import("../../src/services/ai-tool-groups.js");
         const history = TOOL_GROUPS.find((g) => g.id === "chat_history");
-        assert.deepEqual(history.tools.sort(), ["list_my_chats", "read_my_chat", "search_my_chats"]);
+        assert.deepEqual(history.tools.sort(), ["list_my_chats", "read_my_chat", "read_recent_chats", "search_my_chats"]);
         assert.ok(TOOL_GROUPS.find((g) => g.id === "live_docs").tools.includes("list_my_docs"));
         assert.ok(history.pattern.test("what did we discuss in my other chat"));
+        for (const t of ["give me the time table I sent you yesterday", "kal bheja tha wo time table", "what did I share with you last week"]) assert.ok(history.pattern.test(t), t);
     });
 });
 
@@ -154,5 +157,75 @@ describe("Grid answers and descriptions over MCP", () => {
     test("tool descriptions over MCP name no internal systems", () => {
         // only the tools MCP clients can see (a tool with a scope); the rest are never listed
         for (const t of extra.getRemoteMcpTools().filter((x) => scopes.requiredScopeForTool(x.name))) assert.doesNotMatch(t.description || "", /mongo|supabase|unified_db_query|\bR2\b/i, t.name);
+    });
+});
+
+// Old chats (owner, 2026-11-18: "make the old chat search powerful, it must get the exact result"): he asked for the
+// time table he had sent the day before and got a much older WhatsApp call chat instead.
+describe("searching old chats finds the right one", () => {
+    const DAY = 24 * 60 * 60 * 1000;
+    const NOW = Date.parse("2026-11-18T12:00:00Z");
+    const ago = (d) => new Date(NOW - d * DAY).toISOString();
+    const sessions = [
+        { id: "yesterday", title: "College schedule", created_at: ago(1) },
+        { id: "call", title: "WhatsApp call", created_at: ago(40) },
+        { id: "other", title: "Lunch ideas", created_at: ago(3) },
+        { id: "titled", title: "Exam time table", created_at: ago(60) },
+    ];
+    const msg = (session_id, d, content, role = "user", file_urls = []) => ({ session_id, role, created_at: ago(d), content, file_urls });
+
+    test("the key words of a query, without filler words; neighbours written together are looked for too", () => {
+        assert.deepEqual(extra.chatSearchTerms("my time table"), ["time", "table"]);
+        assert.deepEqual(extra.chatSearchTerms("Mera TIME-table kya hai?"), ["time", "table", "kya"]);
+        assert.deepEqual(extra.chatSearchTerms("the my"), ["the", "my"], "only filler words: they are searched as they are");
+        assert.deepEqual(extra.chatSearchPatterns(["time", "table"]), ["time", "table", "timetable"]);
+        assert.deepEqual(extra.chatSearchTerms("परीक्षा की तारीख"), ["परीक्षा", "की", "तारीख"]);
+    });
+
+    test("the newer chat wins over an older one with the same match, and spaces don't matter", () => {
+        const rows = [
+            msg("call", 40, "Here is my time table for the week"),
+            msg("yesterday", 1, "this is my timetable: Monday physics, Tuesday maths", "user", ["https://cdn.example/timetable.png"]),
+        ];
+        const out = extra.rankChatMatches(rows, sessions, ["time", "table"], { now: NOW });
+        assert.equal(out[0].chat_id, "yesterday", "yesterday's chat comes first");
+        assert.equal(out[1].chat_id, "call");
+        assert.match(out[0].matches[0].piece, /Monday physics/);
+        assert.deepEqual(out[0].matches[0].files, ["https://cdn.example/timetable.png"]);
+    });
+
+    test("more of the words beats fewer; a chat whose title matches is found even with no matching message", () => {
+        const rows = [
+            msg("other", 3, "a table for lunch"),
+            msg("call", 40, "my exam time table is out"),
+        ];
+        const out = extra.rankChatMatches(rows, sessions, ["exam", "time", "table"], { now: NOW });
+        assert.equal(out[0].chat_id, "call", "all three words, though older");
+        assert.ok(out.some((c) => c.chat_id === "titled"), "found by its title");
+        assert.ok(!out.some((c) => c.chat_id === "other"), "one word of three is not enough");
+    });
+
+    test("an AI answer is read for its visible text, and what a tool read counts too, at half weight", () => {
+        const answer = JSON.stringify({ classgrid_ai_message: true, content: "I read your file.", steps: [{ tool: "parse_document", result: "Weekly time table: Mon 9am Physics" }] });
+        const rows = [msg("other", 3, answer, "assistant"), msg("call", 40, "time table")];
+        const out = extra.rankChatMatches(rows, sessions, ["time", "table"], { now: NOW });
+        const found = out.find((c) => c.chat_id === "other");
+        assert.ok(found, "found through the tool's result");
+        assert.match(found.matches[0].piece, /^\[from what the AI read with a tool\]/);
+        assert.match(found.matches[0].piece, /Mon 9am Physics/);
+        assert.doesNotMatch(found.matches[0].piece, /classgrid_ai_message/, "never the stored JSON");
+    });
+
+    test("messages of chats that are not the user's are left out, and the limit holds", () => {
+        const rows = [msg("someone-else", 1, "time table"), ...Array.from({ length: 5 }, (_, i) => msg("call", 40 + i, `time table ${i}`))];
+        const out = extra.rankChatMatches(rows, sessions, ["time", "table"], { now: NOW, limit: 1 });
+        assert.equal(out.length, 1);
+        assert.equal(out[0].chat_id, "call");
+        assert.equal(out[0].matches.length, 3, "up to 3 matches of a chat");
+    });
+
+    test("a stored AI answer gives its visible text, and plain text stays as it is", () => {
+        assert.deepEqual(extra.messageParts(JSON.stringify({ classgrid_ai_message: true, content: "Hello", steps: [{ result: "R" }] })), { text: "Hello", tools: "R" });
+        assert.deepEqual(extra.messageParts("{not json"), { text: "{not json", tools: "" });
     });
 });

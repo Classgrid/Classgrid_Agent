@@ -133,9 +133,10 @@ export const TOOL_GROUPS = [
     },
     {
         id: "chat_history",
-        description: "The user's other Classgrid AI chats: list them, search their titles and messages, and read one.",
-        tools: ["list_my_chats", "search_my_chats", "read_my_chat"],
-        pattern: /\b(chats?|conversations?|history|earlier|previous(ly)?|last\s+time|before|discuss\w*|talked|told\s+you|said|pichl\w*|pehle)\b|पिछल|पहले/i,
+        description: "The user's other Classgrid AI chats: list them, search their titles and messages, read one, and read every message of the last days.",
+        tools: ["list_my_chats", "search_my_chats", "read_my_chat", "read_recent_chats"],
+        // (also what the user sent or told earlier: "what I sent you yesterday", "kal bheja tha", "last week")
+        pattern: /\b(chats?|conversations?|history|earlier|previous(ly)?|last\s+time|before|discuss\w*|talked|told\s+you|said|pichl\w*|pehle|yesterday|last\s+(week|few\s+days|month)|recent(ly)?|sent\s+(you|u)|shared\s+with\s+you|gave\s+you|bheja|bheji|bataya|batayi|diya\s+tha|kal\s+(bheja|bataya|diya)|old\s+chats?)\b|पिछल|पहले|भेजा|बताया/i,
     },
     {
         id: "image_media",

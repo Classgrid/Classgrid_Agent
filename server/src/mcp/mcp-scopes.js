@@ -106,7 +106,7 @@ export const MCP_SCOPES = Object.freeze([
         scope: "chats:read",
         label: "Read your Classgrid AI chat history",
         sensitive: true,
-        tools: ["list_my_chats", "read_my_chat", "search_my_chats"],
+        tools: ["list_my_chats", "read_my_chat", "search_my_chats", "read_recent_chats"],
     },
     {
         // Skills hold what the user asked Classgrid AI to remember, so they are off until ticked too

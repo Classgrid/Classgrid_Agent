@@ -6,7 +6,7 @@
  * is no chat, so these take the id of the user's project, chat, doc or page and check it is the user's own.
  *
  *   projects:read  list_projects, get_project, list_project_files, read_project_file, search_project_code
- *   chats:read     list_my_chats, read_my_chat, search_my_chats      (off until the user ticks it)
+ *   chats:read     list_my_chats, read_my_chat, search_my_chats, read_recent_chats   (off until the user ticks it)
  *   docs:read      list_my_docs, read_doc
  *   docs:write     create_doc, edit_doc, doc_comments
  *   pages:write    publish_page, page_comments
@@ -28,8 +28,8 @@ import { githubAppReady, repoAppToken } from "../services/github-app.service.js"
 import { GUIDE_PROJECT_DIR } from "../services/classgrid-guide.service.js";
 import { LIVE_DOC_TOOLS, buildLiveDocHandlers } from "../services/live-doc-tools.js";
 import { SHARE_PAGE_TOOLS, runPublishPage, runPageComments } from "../services/share-page.service.js";
-import { getSessions } from "../services/ai-chat.service.js";
-import { getChatTranscript } from "../services/ai-chat-history.service.js";
+import { getSessions, getSessionMessages } from "../services/ai-chat.service.js";
+import { senderLabels } from "../services/ai-chat-grid.service.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
 import connectDB from "../../config/db.js";
 
@@ -155,20 +155,31 @@ export const MCP_EXTRA_TOOLS = [
             offset: { type: "number", description: "How many to skip, for the next page." },
         }),
     tool("read_my_chat",
-        "Read the messages of one of the user's Classgrid AI chats, by message number (1 = the first message).",
+        "Read the messages of one of the user's Classgrid AI chats word for word, by message number (1 = the first message), with each message's date and its file links. Read the whole part that matters (follow \"More: read on with from N\") before answering from it.",
         {
-            chat_id: { type: "string", description: "The chat id, from list_my_chats or search_my_chats." },
-            from: { type: "number", description: "First message number to read (default 1)." },
-            count: { type: "number", description: "How many messages to read, 1-20 (default 10)." },
+            chat_id: { type: "string", description: "The chat id, from list_my_chats, search_my_chats or read_recent_chats." },
+            from: { type: "number", description: "First message number to read (default 1). search_my_chats gives the number of each match: start a few messages before it." },
+            count: { type: "number", description: "How many messages to read, 1-50 (default 20)." },
         },
         ["chat_id"]),
     tool("search_my_chats",
-        "Search the user's Classgrid AI chats for words or a phrase (titles and message text). Returns the matching chats with a short piece of each match; read more with read_my_chat.",
+        "Search ALL of the user's Classgrid AI chats (titles, messages, files they sent and what the AI read from them), including WhatsApp and call chats. "
+        + "Give the few key words, not a sentence: a message matches when it has any of them, and the best matches come first; between equal matches the NEWEST comes first. "
+        + "Spaces are ignored, so \"time table\" also finds \"timetable\". Each result has the chat's dates and the number of every matching message: read around it with read_my_chat before answering. "
+        + "When the user means something recent (\"yesterday\", \"this week\", \"what I sent you\"), pass days and prefer the newest chat; check its date. If nothing fits, search again with other words or spellings, or read the recent chats with read_recent_chats.",
         {
-            query: { type: "string", description: "Words or phrase to find (not case-sensitive)." },
-            limit: { type: "number", description: "Most matches to return, 1-30 (default 10)." },
+            query: { type: "string", description: "The key words to find (not case-sensitive), e.g. \"time table\" or \"physics exam date\"." },
+            days: { type: "number", description: "Only messages from the last N days (1-3650). Leave out to search every date." },
+            limit: { type: "number", description: "How many chats to return, 1-20 (default 8). Each comes with up to 3 of its best matching messages." },
         },
         ["query"]),
+    tool("read_recent_chats",
+        "Read, word for word, every message the user and Classgrid AI wrote in the last N days (default 7), across all their chats (WhatsApp and call chats too), newest chat first, with dates and file links. "
+        + "Use it when the user refers to something recent without clear words to search for (\"what I sent you yesterday\", \"the plan from this week\"), or when search_my_chats found nothing. Follow next_offset to read further.",
+        {
+            days: { type: "number", description: "How many days back, 1-30 (default 7)." },
+            offset: { type: "number", description: "How many chats to skip, for the next page (next_offset from the last call)." },
+        }),
 
     tool("list_my_docs",
         "List the user's Classgrid live docs (their own), newest first: doc id, title, link and when it was last changed.",
@@ -473,54 +484,316 @@ async function listMyChats(ctx, args) {
     return JSON.stringify({ ...meta, chats: page.map((s) => ({ chat_id: s.id, title: s.title || "(untitled)", created: s.created_at, ...(s.pinned ? { pinned: true } : {}) })) }, null, 2);
 }
 
+// Old chats (owner, 2026-11-18: "make the old chat search powerful, it must get the exact result; and the last 7 days
+// of chats it can read in full"). He asked for his time table, sent the day before, and the AI answered from a much
+// older WhatsApp call chat: the search looked for the whole phrase as typed ("my time table" missed "timetable"),
+// only in the newest 500 chats, kept the first 10 rows it met with no ranking, gave no dates and no message
+// numbers, and read_my_chat read only the last 500 messages of a chat, 4,000 characters of each.
+// Now: the key words of the query are matched one by one, spaces ignored; every match is scored (how many words,
+// the words together, in the visible text or only in what a tool read, the chat's title) and the newer of two equal
+// matches wins; results come grouped by chat with dates and message numbers; read_my_chat reads any message of the
+// whole chat from the database; and read_recent_chats reads every message of the last N days.
+
+const SEARCH_CHATS_MAX = 3000; // the newest chats a search or a recent read covers (100 per request, 5 at a time)
+const CHAT_ID_GROUP = 100;
+const ROWS_PER_GROUP = 80; // candidate messages per group of chats (the newest ones)
+const READ_BUDGET = 60000; // characters of messages one read_my_chat or read_recent_chats call gives back
+const MESSAGE_MAX = 20000; // characters of one message (a longer one is cut, and says so)
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// Words that say nothing about what to find (English and Hinglish)
+const STOP_WORDS = new Set([
+    "a", "an", "the", "my", "me", "i", "is", "am", "are", "was", "were", "be", "of", "to", "in", "on", "at", "for",
+    "and", "or", "it", "its", "this", "that", "these", "those", "what", "which", "who", "from", "with", "about", "your",
+    "you", "we", "our", "us", "did", "do", "does", "can", "please", "find", "search", "chat", "chats", "message",
+    "mera", "meri", "mere", "ka", "ki", "ke", "ko", "hai", "tha", "thi", "se", "maine", "mujhe", "wo", "woh", "jo",
+]);
+
+/** The key words of a search, lower case, without filler words (all words when only filler words were given) */
+export function chatSearchTerms(query) {
+    const words = [...new Set(String(query || "").toLowerCase().match(/[\p{L}\p{M}\p{N}]+/gu) || [])].filter((w) => w.length >= 2);
+    const kept = words.filter((w) => !STOP_WORDS.has(w));
+    return (kept.length ? kept : words).slice(0, 8);
+}
+
+/** The text patterns the database looks for: each word, and each two neighbouring words written together */
+export function chatSearchPatterns(terms) {
+    const pairs = terms.slice(0, -1).map((t, i) => t + terms[i + 1]);
+    return [...new Set([...terms, ...pairs])];
+}
+
+/** A stored message's visible text, and the text its tools read (a file it parsed, a page it opened) */
+export function messageParts(content) {
+    let text = typeof content === "string" ? content : JSON.stringify(content ?? "");
+    let tools = "";
+    if (text.trim().startsWith("{")) {
+        try {
+            const inner = JSON.parse(text);
+            if (inner && inner.classgrid_ai_message) {
+                text = String(inner.content || "");
+                if (Array.isArray(inner.steps)) tools = inner.steps.map((s) => (typeof s?.result === "string" ? s.result : "")).filter(Boolean).join("\n");
+            }
+        } catch { /* plain text that starts with a brace */ }
+    }
+    return { text, tools };
+}
+
+const squash = (s) => s.toLowerCase().replace(/\s+/g, "");
+
+// How well one text matches: the words found (spaces ignored), where the first one is, and the words together
+function matchIn(text, terms, together) {
+    const low = String(text || "").toLowerCase();
+    const flat = squash(low);
+    let found = 0;
+    let first = -1;
+    for (const t of terms) {
+        const i = low.indexOf(t);
+        if (i >= 0 || flat.includes(t)) {
+            found++;
+            if (i >= 0 && (first < 0 || i < first)) first = i;
+        }
+    }
+    return { found, first, together: together.length >= 4 && flat.includes(together) };
+}
+
+/**
+ * Scores the candidate messages and groups them by chat, best first (and between equal scores, newest first).
+ * rows: { session_id, role, content, created_at, file_urls }; sessions: the user's chats { id, title, created_at }.
+ * Pure (no database), so it is tested on its own.
+ */
+export function rankChatMatches(rows, sessions, terms, { now = Date.now(), limit = 8 } = {}) {
+    const together = terms.join("");
+    const need = terms.length <= 2 ? 1 : Math.ceil(terms.length / 2);
+    const byId = new Map(sessions.map((s) => [s.id, s]));
+    const recency = (at) => 3 * Math.max(0, 1 - (now - new Date(at).getTime()) / (30 * DAY_MS)); // up to 3 for today
+    const chats = new Map();
+    const chatFor = (id) => {
+        if (!chats.has(id)) {
+            const s = byId.get(id) || {};
+            const title = matchIn(s.title || "", terms, together);
+            const titleScore = title.found >= need ? 4 * (title.found / terms.length) + (title.together ? 2 : 0) : 0;
+            chats.set(id, { chat_id: id, title: s.title || "(untitled)", chat_started: s.created_at || null, titleScore, matches: [], best: 0, newest: 0 });
+        }
+        return chats.get(id);
+    };
+    for (const r of rows || []) {
+        if (!byId.has(r.session_id)) continue;
+        const { text, tools } = messageParts(r.content);
+        const seen = matchIn(text, terms, together);
+        const inTools = seen.found >= need ? null : matchIn(tools, terms, together);
+        const m = inTools || seen;
+        if (m.found < need) continue;
+        const weight = inTools ? 0.5 : 1; // found only in what a tool read: counts half
+        const score = weight * (10 * (m.found / terms.length) + (m.together ? 4 : 0)) + recency(r.created_at);
+        const source = inTools ? tools : text;
+        const at = Math.max(m.first, 0);
+        const start = Math.max(0, at - 250);
+        const piece = `${inTools ? "[from what the AI read with a tool] " : ""}${start > 0 ? "…" : ""}${source.slice(start, at + 450)}${at + 450 < source.length ? "…" : ""}`;
+        const files = Array.isArray(r.file_urls) ? r.file_urls.filter(Boolean).slice(0, 5) : [];
+        const c = chatFor(r.session_id);
+        c.matches.push({ role: r.role, at: r.created_at, score, piece, ...(files.length ? { files } : {}) });
+        c.best = Math.max(c.best, score);
+        c.newest = Math.max(c.newest, new Date(r.created_at).getTime());
+    }
+    // Chats whose title alone matches
+    for (const s of sessions) {
+        if (chats.has(s.id)) continue;
+        const t = matchIn(s.title || "", terms, together);
+        if (t.found >= need) chatFor(s.id);
+    }
+    const ranked = [...chats.values()]
+        .map((c) => ({ ...c, score: c.best + c.titleScore + Math.min(Math.max(c.matches.length - 1, 0), 3) * 0.5 }))
+        .filter((c) => c.score > 0)
+        .sort((a, b) => b.score - a.score || (b.newest || new Date(b.chat_started || 0).getTime()) - (a.newest || new Date(a.chat_started || 0).getTime()));
+    return ranked.slice(0, limit).map((c) => ({
+        chat_id: c.chat_id,
+        title: c.title,
+        chat_started: c.chat_started,
+        ...(c.newest ? { last_match_at: new Date(c.newest).toISOString() } : {}),
+        matches: c.matches.sort((a, b) => b.score - a.score || new Date(b.at) - new Date(a.at)).slice(0, 3)
+            .map(({ score, ...m }) => m),
+    }));
+}
+
+// Runs fn over the items, `width` at a time
+async function inBatches(items, width, fn) {
+    const out = [];
+    for (let i = 0; i < items.length; i += width) out.push(...await Promise.all(items.slice(i, i + width).map(fn)));
+    return out;
+}
+const groupsOf = (list, size) => Array.from({ length: Math.ceil(list.length / size) }, (_, i) => list.slice(i * size, i * size + size));
+const when = (at) => (at ? new Date(at).toISOString().replace(/:\d\d\.\d+Z$/, "Z").replace("T", " ") : "");
+
+// The chats the user had in WhatsApp calls and messages (to say so next to them)
+async function callChatIds(ctx) {
+    try {
+        await connectDB();
+        const User = (await import("../models/User.js")).default;
+        const u = await User.findById(ctx.userId).select("call_chat_ids").lean();
+        return new Set(u?.call_chat_ids || []);
+    } catch {
+        return new Set();
+    }
+}
+
+/** Every user and AI message of a chat from the database, numbered from 1 (the same numbers read_my_chat takes) */
+async function chatMessages(sessionId) {
+    const rows = await getSessionMessages(sessionId);
+    const label = (await senderLabels(sessionId).catch(() => null)) || (() => "");
+    return (rows || []).filter((m) => m.role === "user" || m.role === "assistant").map((m, i) => ({
+        n: i + 1,
+        role: m.role,
+        at: m.created_at,
+        text: label(m) + messageParts(m.content).text,
+        files: Array.isArray(m.file_urls) ? m.file_urls.filter(Boolean) : [],
+    }));
+}
+
+const messageBlock = (m) => {
+    const text = m.text.length > MESSAGE_MAX ? `${m.text.slice(0, MESSAGE_MAX)}\n…[the rest of this message is cut: ${m.text.length - MESSAGE_MAX} more characters]` : m.text;
+    return `#${m.n} ${m.role} (${when(m.at)}):\n${text}${m.files.length ? `\nFiles: ${m.files.join(" ")}` : ""}`;
+};
+
 async function readMyChat(ctx, args) {
     const { chat, error } = await ownChat(ctx, args.chat_id);
     if (error) return { error };
-    const all = await getChatTranscript(chat.id);
+    const all = await chatMessages(chat.id);
     if (!all.length) return `The chat "${chat.title || "(untitled)"}" has no messages.`;
-    const count = clampInt(args.count, 1, 20, 10);
+    const count = clampInt(args.count, 1, 50, 20);
     const from = clampInt(args.from, 1, all.length, 1);
-    const picked = all.slice(from - 1, from - 1 + count);
-    return maskSecrets(`Chat "${chat.title || "(untitled)"}" (${chat.id}) has ${all.length} messages. Messages ${from}-${from + picked.length - 1}:\n\n` +
-        picked.map((m) => `#${m.n} ${m.role}:\n${m.content.slice(0, 4000)}`).join("\n\n---\n\n") +
-        (from - 1 + picked.length < all.length ? `\n\nMore: read on with from ${from + picked.length}.` : ""));
+    const blocks = [];
+    let used = 0;
+    for (const m of all.slice(from - 1, from - 1 + count)) {
+        const block = messageBlock(m);
+        if (blocks.length && used + block.length > READ_BUDGET) break;
+        blocks.push(block);
+        used += block.length;
+    }
+    const last = from + blocks.length - 1;
+    const call = (await callChatIds(ctx)).has(chat.id) ? " It is a WhatsApp chat." : "";
+    return maskSecrets(`Chat "${chat.title || "(untitled)"}" (${chat.id}), started ${when(chat.created_at)}, has ${all.length} messages; the last one is from ${when(all[all.length - 1].at)}.${call} Messages ${from}-${last}:\n\n` +
+        blocks.join("\n\n---\n\n") +
+        (last < all.length ? `\n\nMore: read on with from ${last + 1}.` : ""));
 }
 
 async function searchMyChats(ctx, args) {
     const query = String(args.query || "").trim();
     if (!query) return { error: "Give the words to search for in query." };
     if (query.length > 200) return { error: "query is too long (200 characters at most)." };
-    const limit = clampInt(args.limit, 1, 30, 10);
-    const lower = query.toLowerCase();
+    const terms = chatSearchTerms(query);
+    if (!terms.length) return { error: "Give at least one word of 2 or more letters to search for." };
+    const limit = clampInt(args.limit, 1, 20, 8);
+    const days = args.days === undefined || args.days === null || args.days === "" ? null : clampInt(args.days, 1, 3650, 7);
+    const now = Date.now();
+    const since = days ? new Date(now - days * DAY_MS).toISOString() : null;
     const sessions = await getSessions(ctx.userEmail);
     if (!sessions.length) return "The user has no saved Classgrid AI chats yet.";
-    const titles = new Map(sessions.map((s) => [s.id, s.title || "(untitled)"]));
-    const byTitle = sessions.filter((s) => String(s.title || "").toLowerCase().includes(lower)).slice(0, limit)
-        .map((s) => ({ chat_id: s.id, title: titles.get(s.id) }));
 
-    // Message text: the newest 500 chats, in groups (a long id list doesn't fit in one request)
-    const like = `%${query.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
-    const ids = sessions.slice(0, 500).map((s) => s.id);
-    const hits = [];
-    for (let i = 0; i < ids.length && hits.length < limit; i += 100) {
-        const { data, error } = await primarySupabaseClient
-            .from("ai_chat_messages")
-            .select("session_id, role, content, created_at")
-            .in("session_id", ids.slice(i, i + 100))
-            .ilike("content", like)
-            .order("created_at", { ascending: false })
-            .limit(limit - hits.length);
+    // Candidate messages: any of the words (or two neighbours written together), newest first, in groups of chats
+    const filter = chatSearchPatterns(terms).map((p) => `content.ilike.%${p}%`).join(",");
+    const covered = sessions.slice(0, SEARCH_CHATS_MAX);
+    const rows = (await inBatches(groupsOf(covered.map((s) => s.id), CHAT_ID_GROUP), 5, async (ids) => {
+        let q = primarySupabaseClient.from("ai_chat_messages")
+            .select("session_id, role, content, created_at, file_urls")
+            .in("session_id", ids)
+            .or(filter);
+        if (since) q = q.gte("created_at", since);
+        const { data, error } = await q.order("created_at", { ascending: false }).limit(ROWS_PER_GROUP);
         if (error) throw error;
-        hits.push(...(data || []));
+        return data || [];
+    })).flat();
+
+    const results = rankChatMatches(rows, covered, terms, { now, limit });
+    if (!results.length) {
+        return `No chat${days ? ` of the last ${days} days` : ""} matches ${terms.map((t) => `"${t}"`).join(" or ")}. Try other words or spellings, ${days ? "more days, " : ""}or read the recent chats with read_recent_chats.`;
     }
-    const pieces = hits.map((m) => {
-        const text = typeof m.content === "string" ? m.content : JSON.stringify(m.content ?? "");
-        const at = Math.max(text.toLowerCase().indexOf(lower), 0);
-        const start = Math.max(0, at - 200);
-        return { chat_id: m.session_id, title: titles.get(m.session_id), role: m.role, at: m.created_at, piece: maskSecrets(`${start > 0 ? "…" : ""}${text.slice(start, at + query.length + 300)}`) };
+    // Each match's number in its chat (the number read_my_chat takes)
+    await Promise.all(results.flatMap((c) => c.matches.map(async (m) => {
+        const { count } = await primarySupabaseClient.from("ai_chat_messages")
+            .select("id", { count: "exact", head: true })
+            .eq("session_id", c.chat_id)
+            .in("role", ["user", "assistant"])
+            .lt("created_at", m.at);
+        if (typeof count === "number") m.message_number = count + 1;
+    })));
+    const calls = await callChatIds(ctx);
+    const out = {
+        now: new Date(now).toISOString(),
+        query,
+        words: terms,
+        ...(days ? { only_last_days: days } : {}),
+        searched_chats: covered.length,
+        ...(sessions.length > covered.length ? { note: `Only the newest ${covered.length} of ${sessions.length} chats were searched.` } : {}),
+        how_to_read: "Best match first; between equal matches the newest first. Read around a match with read_my_chat (chat_id, from = message_number minus 2) before answering, and check the dates: for something recent prefer the newest chat.",
+        results: results.map((c) => ({
+            ...c,
+            ...(calls.has(c.chat_id) ? { whatsapp_chat: true } : {}),
+            matches: c.matches.map((m) => ({ ...m, at: when(m.at), piece: maskSecrets(m.piece) })),
+            chat_started: when(c.chat_started),
+            ...(c.last_match_at ? { last_match_at: when(c.last_match_at) } : {}),
+        })),
+    };
+    return JSON.stringify(out, null, 2);
+}
+
+async function readRecentChats(ctx, args) {
+    const days = clampInt(args.days, 1, 30, 7);
+    const offset = clampInt(args.offset, 0, 100000, 0);
+    const now = Date.now();
+    const since = new Date(now - days * DAY_MS).toISOString();
+    const sessions = await getSessions(ctx.userEmail);
+    if (!sessions.length) return "The user has no saved Classgrid AI chats yet.";
+    const covered = sessions.slice(0, SEARCH_CHATS_MAX);
+    const byId = new Map(covered.map((s) => [s.id, s]));
+
+    // Which chats had a message in those days, and when the newest one was (pages of 1,000 rows per group of chats)
+    const lastAt = new Map();
+    await inBatches(groupsOf(covered.map((s) => s.id), CHAT_ID_GROUP), 5, async (ids) => {
+        for (let page = 0; page < 10; page++) {
+            const { data, error } = await primarySupabaseClient.from("ai_chat_messages")
+                .select("session_id, created_at")
+                .in("session_id", ids)
+                .in("role", ["user", "assistant"])
+                .gte("created_at", since)
+                .order("created_at", { ascending: false })
+                .range(page * 1000, page * 1000 + 999);
+            if (error) throw error;
+            for (const m of data || []) if (!lastAt.has(m.session_id) || m.created_at > lastAt.get(m.session_id)) lastAt.set(m.session_id, m.created_at);
+            if (!data || data.length < 1000) break;
+        }
     });
-    if (!byTitle.length && !pieces.length) return `No chat title or message contains "${query}".`;
-    return JSON.stringify({ query, title_matches: byTitle, message_matches: pieces }, null, 2);
+    const active = [...lastAt.entries()].sort((a, b) => (a[1] < b[1] ? 1 : -1)).map(([id]) => id);
+    if (!active.length) return `No chat has a message from the last ${days} days.`;
+    if (offset >= active.length) return `There are ${active.length} chats with messages from the last ${days} days; offset ${offset} is past the last one.`;
+
+    const calls = await callChatIds(ctx);
+    const parts = [];
+    let used = 0;
+    let next = null;
+    for (let i = offset; i < active.length; i++) {
+        const id = active[i];
+        const s = byId.get(id) || {};
+        const all = await chatMessages(id);
+        const recent = all.filter((m) => new Date(m.at).getTime() >= now - days * DAY_MS);
+        const head = `=== Chat "${s.title || "(untitled)"}" (${id})${calls.has(id) ? " · WhatsApp chat" : ""} · started ${when(s.created_at)} · ${all.length} messages in all; ${recent.length} in the last ${days} days, #${recent[0]?.n ?? "?"} to #${recent[recent.length - 1]?.n ?? "?"} ===`;
+        const blocks = [];
+        let size = head.length;
+        let cutAt = null;
+        for (const m of recent) {
+            const block = messageBlock(m);
+            if (used + size + block.length > READ_BUDGET && (parts.length || blocks.length)) { cutAt = m.n; break; }
+            blocks.push(block);
+            size += block.length;
+        }
+        if (!blocks.length) { next = i; break; }
+        parts.push(`${head}\n\n${blocks.join("\n\n---\n\n")}${cutAt ? `\n\n[This chat goes on: read it with read_my_chat (chat_id ${id}, from ${cutAt}).]` : ""}`);
+        used += size;
+        if (cutAt) { next = i + 1 < active.length ? i + 1 : null; break; }
+    }
+    const shown = parts.length;
+    return maskSecrets(`Now: ${when(new Date(now).toISOString())}. ${active.length} chats have messages from the last ${days} days (newest first)${covered.length < sessions.length ? `; only the newest ${covered.length} of ${sessions.length} chats were looked at` : ""}. Chats ${offset + 1}-${offset + shown}:\n\n` +
+        parts.join("\n\n") +
+        (next !== null ? `\n\nMore chats: call read_recent_chats again with offset ${next}.` : ""));
 }
 
 // ---------------------------------------------------------------------------------------------------------
@@ -548,7 +821,7 @@ async function listMyDocs(ctx, args) {
 // The same chat-history and doc-list tools for Classgrid AI's own chat (OpenAI function format), so it can find the
 // user's other chats and their docs too. user = the chat's signed-in user.
 
-const APP_TOOL_NAMES = ["list_my_chats", "search_my_chats", "read_my_chat", "list_my_docs"];
+const APP_TOOL_NAMES = ["list_my_chats", "search_my_chats", "read_my_chat", "read_recent_chats", "list_my_docs"];
 export const APP_HISTORY_TOOLS = MCP_EXTRA_TOOLS.filter((t) => APP_TOOL_NAMES.includes(t.name))
     .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
 
@@ -563,7 +836,7 @@ export function buildAppHistoryHandlers({ user }) {
             return `Error: ${e.message}`;
         }
     };
-    return { list_my_chats: run(listMyChats), search_my_chats: run(searchMyChats), read_my_chat: run(readMyChat), list_my_docs: run(listMyDocs) };
+    return { list_my_chats: run(listMyChats), search_my_chats: run(searchMyChats), read_my_chat: run(readMyChat), read_recent_chats: run(readRecentChats), list_my_docs: run(listMyDocs) };
 }
 
 const DOC_PAGE_TOOLS = new Set([...LIVE_DOC_TOOLS, ...SHARE_PAGE_TOOLS].map((t) => t.function.name));
@@ -588,6 +861,7 @@ const HANDLERS = {
     list_my_chats: listMyChats,
     read_my_chat: readMyChat,
     search_my_chats: searchMyChats,
+    read_recent_chats: readRecentChats,
     list_my_docs: listMyDocs,
 };
 
