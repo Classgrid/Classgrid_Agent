@@ -55,6 +55,7 @@ import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
 import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, splitPoolCharge } from "../services/answer-meter.js";
+import { withMadePictures as withMadePicturesOf } from "../utils/made-pictures.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
 import {
@@ -1790,6 +1791,9 @@ export const streamAskAi = async (req, res) => {
     // The answer's own first round is a normal round, never cut to the credits left (services/answer-meter.js): a
     // message that was allowed to start is answered like any other, and the limit ends at 100 percent.
     const liveMeter = { spent: 0, spendable: undefined, stopped: false, firstRoundDone: false };
+    // Saves what an answer that broke with an error did so far, its pictures included (set once the answer starts;
+    // used by the catch at the end, which is outside the block that knows the answer)
+    let keepAnswerOnError = null;
     // Playground (super admins): this answer's rounds, tool calls and live words go to the super admin's own live
     // channel, so the Playground page can show them next to the chat. Nothing is sent for other users.
     const playgroundRun = req.user?.role === "super_admin" && userId
@@ -7036,15 +7040,18 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             }
         };
         let unfinishedKept = false;
+        // The pictures this answer made, on top of its text, in every way the answer is saved (utils/made-pictures.js)
+        const withMadePictures = (answerText) => withMadePicturesOf(answerText, generatedImages);
         const keepUnfinishedAnswer = (note) => {
             if (unfinishedKept || isIncognito || !sessionId) return;
-            if (!accSteps.length && !accThought && !shownAnswerText.trim()) return;
+            if (!accSteps.length && !accThought && !shownAnswerText.trim() && !generatedImages.length) return;
             unfinishedKept = true;
             const text = shownAnswerText.trim();
-            const saved = JSON.stringify({ classgrid_ai_message: true, content: `${text}${text ? "\n\n" : ""}${note}`, thought: accThought, steps: accSteps, worked_ms: Date.now() - requestStartedAt });
+            const saved = JSON.stringify({ classgrid_ai_message: true, content: withMadePictures(`${text}${text ? "\n\n" : ""}${note}`), thought: accThought, steps: accSteps, worked_ms: Date.now() - requestStartedAt });
             saveMessage(sessionId, "assistant", saved, []).catch((err) => console.error("Failed to save the unfinished answer:", err));
             appendToHistory(sessionId, "assistant", saved).catch(() => {});
         };
+        keepAnswerOnError = () => keepUnfinishedAnswer(FAILED_NOTE);
         while (attempt <= maxAttempts) {
             if (attempt > 1 && shownAnswerText) {
                 console.warn(`[AI-STREAM] Not retrying (attempt ${attempt}): answer text was already shown`);
@@ -7554,20 +7561,16 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
         // ---------------------------------
 
-        if (generatedImages.length && typeof answer === "string" && answer !== "[RATE_LIMITED]") {
-            let text = answer.replace(/\[IMAGE_GENERATION_(?:COMPLETE|QUEUED|ERROR):[^\]\n]*\]?/g, "");
-            for (const img of generatedImages) {
-                text = text.split(`](${img.url})`).join("](#)").replace(/!\[[^\]\n]*\]\(#\)/g, "").split(img.url).join("");
-            }
-            const markers = generatedImages.map((img) => `[IMAGE_GENERATION_COMPLETE: ${img.prompt.replace(/[\]\n|]/g, " ")} | ${img.url}]`).join("\n\n");
-            answer = `${markers}\n\n${text.replace(/\n{3,}/g, "\n\n").trim()}`.trim();
-        }
+        if (generatedImages.length && typeof answer === "string" && answer !== "[RATE_LIMITED]") answer = withMadePictures(answer);
 
+        // (a failed answer keeps the pictures it made: the app replaces what streamed with this final answer)
         if (answer == null && !res.writableEnded) {
             keepUnfinishedAnswer(FAILED_NOTE);
-            res.write(`data: ${JSON.stringify({ type: "answer", answer: "Failed to get an answer from the AI." })}\n\n`);
+            res.write(`data: ${JSON.stringify({ type: "answer", answer: withMadePictures("Failed to get an answer from the AI.") })}\n\n`);
         } else if (answer === "[RATE_LIMITED]" && !res.writableEnded) {
-            res.write(`data: ${JSON.stringify({ type: "answer", answer: "I'm currently experiencing high traffic and cannot process your request right now." })}\n\n`);
+            const busyText = "I'm currently experiencing high traffic and cannot process your request right now.";
+            if (generatedImages.length) keepUnfinishedAnswer(busyText);
+            res.write(`data: ${JSON.stringify({ type: "answer", answer: withMadePictures(busyText) })}\n\n`);
         } else if (!res.writableEnded) {
             // Save Assistant response: to Supabase (source of truth) + Redis (cache) in parallel
             if (!isIncognito && sessionId) {
@@ -7671,6 +7674,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
 
     } catch (err) {
         console.error("API Route Error:", err);
+        // (what the answer did so far is saved, so a picture it made stays in the chat)
+        try { keepAnswerOnError?.(); } catch (e) { console.error("Saving the broken answer failed:", e?.message || e); }
         if (!res.writableEnded) {
             res.write(`data: ${JSON.stringify({ type: "error", error: "The AI took too long to respond or encountered an error. Please try again." })}\n\n`);
         }
