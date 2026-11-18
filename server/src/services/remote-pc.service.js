@@ -248,6 +248,12 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
  */
 export async function stopRemote(userId, sessionId) {
     await redis.set(STOP(sessionId), "1", "EX", 60).catch(() => {});
+    // The answer itself stops on the server too, the way a newer message stops an older one (streamAskAi checks the
+    // chat's run key every 3 seconds and ends, saving what it wrote with "(Stopped.)"). Ending only the phone's run was
+    // not enough: the answer went on to the end and saved the whole of it (found testing Stop on the phone,
+    // 2026-11-18). Short-lived, so the next message is not taken for a running one.
+    const runKey = `chat:run:${userId}:${sessionId}`;
+    if (await redis.exists(runKey).catch(() => 0)) await redis.set(runKey, `stopped-${Date.now()}`, "EX", 8).catch(() => {});
     const { turnId } = await liveState(sessionId);
     return { ok: true, turnId };
 }

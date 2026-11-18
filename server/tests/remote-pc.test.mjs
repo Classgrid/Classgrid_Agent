@@ -129,7 +129,10 @@ test("a phone that opens the chat mid-answer gets what it missed; the end clears
     const after = await svc.liveState(S);
     assert.equal(after.running, false);
     assert.deepEqual(after.events, []);
+    // Stop also ends the answer on the server: its run key changes, which streamAskAi checks every 3 seconds
+    await redis.set(`chat:run:u1:${S}`, "run-1");
     assert.equal((await svc.stopRemote("u1", S)).ok, true);
+    assert.match(await redis.get(`chat:run:u1:${S}`), /^stopped-/);
 });
 
 test("a computer whose own Remote PC switch is off: the phone's message is refused", async () => {
