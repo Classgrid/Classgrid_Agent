@@ -473,19 +473,25 @@ function HelperItem({ task, answer, failed, loading, live }: { task: string; ans
   );
 }
 
-// Helpers started in the background, shown like a coding agent's background agents (owner, 2026-11-18, with Claude
-// Code's as the example: "we already have the Agent map for this"). One line per helper, the Agent map's state, tokens,
-// steps and time (helperSnapshot.ts), still counting while it works; a click opens that helper in the Agent map.
+// Helpers started in the background, shown like Claude Code's background agents (owner, 2026-11-18, with Claude
+// Code's as the example: "we already have the Agent map; fix only how it starts helpers and how the report comes").
+// The state, time, steps and tokens are the Agent map's (helperSnapshot.ts); a click opens that helper in the map.
+//   ● Agent: Research context.dev guides
+//     [IN  Research https://www.context.dev/guides thoroughly: ...]
+//     ● Working in the background · click to see its work        (then "Finished" / "Failed")
+// Once all have finished it can be folded to one line each:
 //   ● 2 helpers
 //     ● Research context.dev guides     34.8k tokens · 33 steps · 2m 50s
 // The tool's own result ("Started 1 helper(s)... Talk to them with message_helper...") is for the AI, never shown.
-function BackgroundHelpers({ result, tasks }: { result: string; tasks: string[] }) {
+const GREEN = 'bg-[#22c55e]';
+function BackgroundHelpers({ result, tasks, titles }: { result: string; tasks: string[]; titles: string[] }) {
   const snap = useHelperSnapshot();
   // "Helper 2 (DeepSeek V4.1 Flash, read only): ..." → 2, in the order of the tasks
   const nos = [...result.matchAll(/^Helper (\d+) \(/gm)].map((m) => Number(m[1]));
   const helpers = nos.map((no, i) => {
     const h = snap.helpers.find((x) => x.no === no);
-    return { no, task: h?.task || tasks[i] || `Helper ${no}`, h };
+    // its short name (the main agent gives one with each helper); without one, "Helper 2" (the task is in the IN box)
+    return { no, task: h?.task || tasks[i] || `Helper ${no}`, title: h?.title || titles[i] || '', h };
   });
   const working = helpers.filter((x) => !x.h || x.h.state === 'running').length;
   const [now, setNow] = useState(Date.now());
@@ -494,23 +500,22 @@ function BackgroundHelpers({ result, tasks }: { result: string; tasks: string[] 
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, [working]);
-  const [open, setOpen] = useState(true);
+  const [folded, setFolded] = useState(false);
   const n = helpers.length;
-  return (
-    <div className="flex flex-col">
-      <Row onClick={() => setOpen(!open)} open={open}>
-        <Dot state={working ? 'running' : 'done'} />
-        <span className="shrink-0">{n} helper{n === 1 ? '' : 's'}</span>
-      </Row>
-      {open && (
+  if (!working && folded) {
+    return (
+      <div className="flex flex-col">
+        <Row onClick={() => setFolded(false)} open={false}>
+          <span className="shrink-0">{n} helper{n === 1 ? '' : 's'}</span>
+        </Row>
         <div className="ml-10 mb-1 flex flex-col gap-1">
-          {helpers.map(({ no, task, h }) => {
+          {helpers.map(({ no, task, title, h }) => {
             const state = h?.state || 'running';
             const steps = (h?.steps || []).length;
             return (
               <button key={no} type="button" onClick={() => openHelper(no)} className="group flex min-w-0 items-center gap-2 py-0.5 text-left text-[13px]">
-                <Dot state={state} />
-                <span className="min-w-0 truncate text-slate-500 dark:text-[#8a8a8a] group-hover:text-foreground">{helperTitle({ no, task })}</span>
+                <span className={cn('size-1.5 shrink-0 rounded-full', state === 'failed' ? 'bg-red-500' : 'bg-muted-foreground/45')} />
+                <span className="min-w-0 truncate text-slate-500 dark:text-[#8a8a8a] group-hover:text-foreground">{helperTitle({ no, task, title })}</span>
                 <span className="shrink-0 font-semibold text-slate-500 dark:text-[#8a8a8a]">
                   {[state === 'failed' ? 'Failed' : '', h?.tokens ? tokensText(h.tokens) : '', h ? `${steps} ${steps === 1 ? 'step' : 'steps'}` : '', h ? helperTook(h, now) : ''].filter(Boolean).join(' · ')}
                 </span>
@@ -518,7 +523,105 @@ function BackgroundHelpers({ result, tasks }: { result: string; tasks: string[] 
             );
           })}
         </div>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-4 py-1">
+      {helpers.map(({ no, task, title, h }) => {
+        const state = h?.state || 'running';
+        return (
+          <div key={no} className="flex min-w-0 flex-col gap-2">
+            <button type="button" onClick={() => (working ? openHelper(no) : setFolded(true))} className="flex min-w-0 items-center gap-3 pl-[11px] text-left">
+              {state === 'running' ? <Dot state="running" /> : <span className={cn('size-2 shrink-0 rounded-full', state === 'failed' ? 'bg-red-500' : GREEN)} />}
+              <span className="flex min-w-0 items-baseline gap-1.5">
+                <span className="shrink-0 text-[14px] font-semibold text-foreground">Agent:</span>
+                <span className="truncate font-mono text-[13px] text-foreground/90">{title || `Helper ${no}`}</span>
+              </span>
+            </button>
+            <button type="button" onClick={() => openHelper(no)} className="ml-10 flex min-w-0 items-center gap-3 rounded-lg border border-border px-3 py-2.5 text-left hover:bg-muted/40">
+              <span className="shrink-0 font-mono text-[12px] text-muted-foreground">IN</span>
+              <span className="truncate font-mono text-[13px] text-foreground/85">{task.replace(/\s+/g, ' ').trim()}</span>
+            </button>
+            <button type="button" onClick={() => openHelper(no)} className="ml-10 flex w-fit items-center gap-1.5 text-left text-[13px] text-muted-foreground hover:text-foreground">
+              <span className={cn('size-2 shrink-0 rounded-full', state === 'running' ? GREEN : state === 'failed' ? 'bg-red-500' : 'bg-muted-foreground/45')} />
+              <span>{state === 'running' ? 'Working in the background' : state === 'failed' ? 'Failed' : 'Finished'} · click to see its work</span>
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// A helper's report coming back to the chat (the hidden message that wakes the chat: chat-wake.service.js,
+// utils/helper-reports.js), shown like Claude Code's "Message from @agent: ..." line: one muted line per report that
+// opens to the whole report. null when the message is not a helper's report.
+export type HelperReport = { no: number; task: string; failed: boolean; report: string };
+export function helperReportsOf(content: unknown): HelperReport[] | null {
+  const text = String(content || '');
+  if (!text.startsWith('[SYSTEM: background work you started')) return null;
+  const body = text.replace(/^\[SYSTEM:[^\]]*\]\s*/, '').split(/\n\nTell the user the result now/)[0] ?? '';
+  const out: HelperReport[] = [];
+  for (const note of body.split('\n\n---\n\n')) {
+    const m = note.match(/^Helper (\d+) \(([\s\S]*?)\) (finished|failed)(?::\n([\s\S]*)|\. ([\s\S]*))$/);
+    if (!m) continue;
+    const report = (m[4] ?? m[5] ?? '').split(/\n\nFILES CHANGED IN PROJECT:|\n\n\[(?:No helper of this chat|\d+ other helpers? of this chat)/)[0] ?? '';
+    out.push({ no: Number(m[1]), task: m[2] ?? '', failed: m[3] === 'failed', report: report.trim() });
+  }
+  return out.length ? out : null;
+}
+
+function HelperReportLine({ r }: { r: HelperReport }) {
+  const [open, setOpen] = useState(false);
+  const snap = useHelperSnapshot();
+  const h = snap.helpers.find((x) => x.no === r.no);
+  const task = h?.task || r.task;
+  return (
+    <div className="flex flex-col">
+      <button type="button" onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 py-1 pl-10 text-left text-[14px] italic text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
+        <span className="min-w-0 truncate">Message from Helper {r.no} ({helperTitle({ no: r.no, task, title: h?.title })}): {r.report.replace(/\s+/g, ' ').trim()}</span>
+        {open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
+      </button>
+      {open && (
+        <FollowBox className="ml-10 mb-2 max-h-[360px]" follow={0}>
+          <div className="whitespace-pre-wrap text-[14px] text-slate-500 dark:text-[#8a8a8a]">{r.report}</div>
+        </FollowBox>
       )}
+    </div>
+  );
+}
+
+export function HelperReportLines({ reports }: { reports: HelperReport[] }) {
+  return <div className="mb-3 flex flex-col">{reports.map((r, i) => <HelperReportLine key={`${r.no}-${i}`} r={r} />)}</div>;
+}
+
+// The reports the main agent read itself with check_helpers (server: "Helper 1 (DeepSeek V4.1 Flash, read only):
+// finished.\n  Report:\n..." or ": failed (why)."). A report read this way never comes back as its own message, so it
+// shows here, as the same "Message from Helper 1: ..." line (owner, 2026-11-18: his test showed no report at all).
+export function checkHelpersReports(result: unknown): HelperReport[] {
+  const text = String(result || '')
+    .split('\n\nFILES CHANGED IN PROJECT:')[0]!
+    .replace(/\n\n(?:\d+ helper\(s\) still working\.|All helpers have finished\.)\s*$/, '');
+  const out: HelperReport[] = [];
+  for (const part of text.split(/\n\n(?=Helper \d+ \()/)) {
+    const done = part.match(/^Helper (\d+) \([^)]*\): finished\.(?:\n {2}New notes: [^\n]*)?\n {2}Report:\n([\s\S]*)$/);
+    if (done) { out.push({ no: Number(done[1]), task: '', failed: false, report: (done[2] ?? '').trim() }); continue; }
+    const failed = part.match(/^Helper (\d+) \([^)]*\): failed \(([\s\S]*)\)\.(?:\n {2}New notes: [\s\S]*)?$/);
+    if (failed) out.push({ no: Number(failed[1]), task: '', failed: true, report: (failed[2] ?? '').trim() });
+  }
+  return out;
+}
+
+export function CheckHelpersStep({ step }: { step: Step }) {
+  const reports = step.status === 'loading' ? [] : checkHelpersReports(step.result);
+  return (
+    <div className="flex flex-col">
+      <Row>
+        <ShimmerText active={step.status === 'loading'} className="shrink-0">{step.status === 'loading' ? 'Checking helpers' : 'Checked helpers'}</ShimmerText>
+        {step.status === 'loading' && <Spinner className="size-3.5 shrink-0" />}
+      </Row>
+      {reports.length > 0 && <HelperReportLines reports={reports} />}
     </div>
   );
 }
@@ -530,7 +633,8 @@ export function ProjectHelpersStep({ step }: { step: Step }) {
   const tasks: string[] = rawTasks.map((t: any) => String(typeof t === 'string' ? t : t?.task ?? '')).filter((t: string) => t.trim()).slice(0, 5);
   const [open, setOpen] = useState<boolean | null>(null);
   const started = !loading && /^Started \d+ helper/.test(String(step.result || ''));
-  if (started) return <BackgroundHelpers result={String(step.result)} tasks={tasks} />;
+  const titles: string[] = rawTasks.map((t: any) => String(typeof t === 'string' ? '' : t?.title ?? '').trim()).slice(0, 5);
+  if (started) return <BackgroundHelpers result={String(step.result)} tasks={tasks} titles={titles} />;
   const results = loading ? [] : parseHelpers(step.result);
   const n = loading ? tasks.length : results.length || tasks.length;
   const isOpen = open ?? true;

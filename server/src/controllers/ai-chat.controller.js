@@ -4366,7 +4366,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         const raw = Array.isArray(args?.helpers) && args.helpers.length ? args.helpers : (Array.isArray(args?.tasks) ? args.tasks : []);
                         const specs = raw
                             .map((h) => (typeof h === "string" ? { task: h } : (h || {})))
-                            .map((h) => ({ task: String(h.task || "").trim(), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", canEditGiven: h.can_edit !== undefined, browser: h.browser === true || h.browser === "true", type: String(h.type || "").trim(), worktree: h.worktree === true || h.worktree === "true", withChat: h.with_chat === true || h.with_chat === "true" }))
+                            .map((h) => ({ task: String(h.task || "").trim(), title: String(h.title || "").replace(/\s+/g, " ").trim().slice(0, 80), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", canEditGiven: h.can_edit !== undefined, browser: h.browser === true || h.browser === "true", type: String(h.type || "").trim(), worktree: h.worktree === true || h.worktree === "true", withChat: h.with_chat === true || h.with_chat === "true" }))
                             .filter((h) => h.task);
                         // Helper types made with define_helper: their role, and their model and edit rights unless given here
                         if (specs.some((h) => h.type) && userId) {
@@ -4612,7 +4612,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.endedAt = Date.now();
@@ -7829,6 +7829,8 @@ export const getChatHelpers = async (req, res) => {
         helpers: board.helpers.map((h) => ({
             no: h.no,
             task: String(h.task || ""),
+            // its short name, shown in the chat as "Agent: <title>" (the task shows under it)
+            title: String(h.title || ""),
             type: h.type || null,
             model: MODEL_DISPLAY_NAMES[h.usedModel || h.nowModel || h.model] || h.usedModel || h.nowModel || h.model || null,
             // A model that stopped and the one that took over ("Claude Opus 5.5 stopped: … GLM 5.3 took over")

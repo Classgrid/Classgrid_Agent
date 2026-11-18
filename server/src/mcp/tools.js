@@ -606,6 +606,7 @@ export const getMcpTools = () => [
           items: {
             type: 'object',
             properties: {
+              title: { type: 'string', description: 'A short name for this helper job, 3 to 6 words, shown to the user (e.g. "Check the login page", "Research context.dev guides").' },
               task: { type: 'string', description: 'One clear task for this helper, with the files it owns when it edits.' },
               model: { type: 'string', description: 'Model for this helper, by its name in the model list (e.g. "DeepSeek V4.1 Flash", "Claude Sonnet 5.5", "GLM 5.3", "Kimi K2.7 Code"). Pick a cheap fast model for simple work and a stronger one for hard work. Empty = a default.' },
               can_edit: { type: 'boolean', description: 'true = it may write and edit files and run commands; false (default) = read only.' },

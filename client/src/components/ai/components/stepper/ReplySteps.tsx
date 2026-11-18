@@ -39,7 +39,7 @@ import { DocumentGenerationView } from "./DocumentGenerationView";
 import { KnowledgeBaseSearchView } from "./KnowledgeBaseSearchView";
 import { CdnUploadView } from "./CdnUploadView";
 import { PublishedPageStep } from "./PublishedPageStep";
-import { PROJECT_EXPLORE_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_BACKGROUND_TOOLS, ProjectExploreGroup, ProjectEditStep, ProjectPushStep, ProjectHelpersStep, ComputerStep, TerminalStep, ProjectRunChanges } from "./ProjectToolSteps";
+import { PROJECT_EXPLORE_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_BACKGROUND_TOOLS, ProjectExploreGroup, ProjectEditStep, ProjectPushStep, ProjectHelpersStep, CheckHelpersStep, checkHelpersReports, ComputerStep, TerminalStep, ProjectRunChanges } from "./ProjectToolSteps";
 import type { AgentStep } from "../AskAiPanel";
 
 // Some models draft whole code blocks (e.g. widget cards) in their thinking. The thinking panel shows one
@@ -177,6 +177,11 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
         }
         if (step.tool === 'run_project_helpers') {
           elements.push(<ProjectHelpersStep key={step.id} step={step} />);
+          return;
+        }
+        // The helpers' reports the agent read itself: "Message from Helper 1: ..." (none read: the plain step as before)
+        if (step.tool === 'check_helpers' && step.status !== 'loading' && checkHelpersReports(step.result).length) {
+          elements.push(<CheckHelpersStep key={step.id} step={step} />);
           return;
         }
         if (step.tool === 'computer') {

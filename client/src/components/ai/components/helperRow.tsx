@@ -13,7 +13,7 @@ export const helperTook = (h: Pick<HelperSnap, "startedAt" | "endedAt">, now: nu
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
 };
 export const tokensText = (n?: number) => (!n ? "" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M tokens` : n >= 1000 ? `${(n / 1000).toFixed(1)}k tokens` : `${n} tokens`);
-export const helperTitle = (h: Pick<HelperSnap, "no" | "task">) => (h.task.split("\n")[0] || "").replace(/\s+/g, " ").trim().slice(0, 90) || `Helper ${h.no}`;
+export const helperTitle = (h: Pick<HelperSnap, "no" | "task" | "title">) => (h.title?.trim() || h.task.split("\n")[0] || "").replace(/\s+/g, " ").trim().slice(0, 90) || `Helper ${h.no}`;
 // "Claude Opus 5.5 → GLM 5.3" when another model took over
 export const modelText = (h: Pick<HelperSnap, "model" | "switches">) => [...(h.switches || []).map((x) => x.from), h.model].filter(Boolean).join(" → ");
 export const stateText = (h: Pick<HelperSnap, "state">) => (h.state === "running" ? "Working" : h.state === "done" ? "Finished" : "Failed");

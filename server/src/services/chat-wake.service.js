@@ -73,7 +73,9 @@ async function runWake(userId, sessionId) {
         let meta = {};
         try { meta = JSON.parse((await redis.get(META(sessionId))) || "{}"); } catch { /* none */ }
         ran = true;
-        tell(userId, { sessionId, phase: "start" });
+        const question = `[SYSTEM: background work you started in this chat has finished while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nTell the user the result now, the way you would mention it in the middle of a conversation: what finished, whether it worked and what it means. If the user's task needs a next step, do it; otherwise don't start new long work.`;
+        // (note: the open chat shows a helper's report from it as "Message from Helper 1: ...", the rest stays hidden)
+        tell(userId, { sessionId, phase: "start", note: question });
         // Remote PC (owner, 2026-11-18: the phone shows everything the computer's chat shows, live): the answer the
         // finished work wakes reaches the phone like any other answer in that chat (its question is Classgrid's own, so
         // the phone shows none)
@@ -84,7 +86,6 @@ async function runWake(userId, sessionId) {
                 await pc.remoteTurnStarted(String(userId), sessionId, { question: "", from: "computer" });
             }
         } catch { /* not followed on the phone */ }
-        const question = `[SYSTEM: background work you started in this chat has finished while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nTell the user the result now, the way you would mention it in the middle of a conversation: what finished, whether it worked and what it means. If the user's task needs a next step, do it; otherwise don't start new long work.`;
         const { runAgentTask } = await import("./whatsapp-call.service.js");
         await runAgentTask(user, question, null, null, sessionId, null, {
             ...(meta.clientApp ? { clientApp: meta.clientApp } : {}),

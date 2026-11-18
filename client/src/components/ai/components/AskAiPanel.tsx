@@ -212,7 +212,7 @@ import { McpConnectCards } from "./answer-cards/mcp-connect";
 
 import { SongsDisplay } from "./answer-cards/songs";
 
-import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, markCheckpoint } from "./stepper/ProjectToolSteps";
+import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, markCheckpoint, helperReportsOf, HelperReportLines } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 
 import { ReplySteps } from "./stepper/ReplySteps";
@@ -3881,13 +3881,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setMessages((prev) => prev.map((m) => (m.id === liveId ? change(m) : m)));
     };
     // question: a message sent from the phone into a Remote PC chat (2026-11-18): it shows here at once, above its answer
-    const start = (question?: string) => {
+    // note: what woke the chat (only for the AI; a helper's report in it shows as "Message from Helper 1: ...")
+    const start = (question?: string, note?: string) => {
       if (gridOpenChatRef.current !== gridSessionId || gridSubmittingRef.current) return;
       const id = createMessageId("assistant");
       liveId = id;
       const asked = typeof question === "string" && question.trim()
         ? [{ id: createMessageId("user"), role: "user" as const, content: question, createdAt: Date.now() }]
-        : [];
+        : typeof note === "string" && note.trim()
+          ? [{ id: createMessageId("user"), role: "user" as const, content: note, createdAt: Date.now(), hidden: true }]
+          : [];
       setMessages((prev) => [...prev, ...asked, { id, role: "assistant", content: "", createdAt: Date.now(), typing: true, steps: [] }]);
       setThinkingLabel("Thinking");
       setThinking(true); // "Thinking" shows at once, until its first words or step
@@ -3915,9 +3918,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         });
       }
     };
-    const onWoke = (d: { sessionId?: string; phase?: string; question?: string }) => {
+    const onWoke = (d: { sessionId?: string; phase?: string; question?: string; note?: string }) => {
       if (d?.sessionId !== gridSessionId) return;
-      if (d.phase === "start") start(d.question);
+      if (d.phase === "start") start(d.question, d.note);
       else if (d.phase === "end") {
         if (liveId) setThinking(false);
         liveId = null;
@@ -5831,7 +5834,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
           const node = (
           <>
             {messages.map((rawMessage, index) => {
-              if (isHiddenMessage(rawMessage)) return null;
+              if (isHiddenMessage(rawMessage)) {
+                // A helper's report coming back: "Message from Helper 1 (...): ..." (the rest stays hidden)
+                const reports = rawMessage.role === "user" ? helperReportsOf(rawMessage.content) : null;
+                return reports ? <HelperReportLines key={rawMessage.id} reports={reports} /> : null;
+              }
 
               // Parse pasted text out of the content dynamically to reconstruct chips on page refresh
               const message = { ...rawMessage };

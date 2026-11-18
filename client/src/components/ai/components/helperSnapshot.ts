@@ -8,6 +8,8 @@ import { useSyncExternalStore } from "react";
 export type HelperSnap = {
   no: number;
   task: string;
+  /** Its short name (3-6 words), when the main agent gave one */
+  title?: string;
   state: "running" | "done" | "failed";
   startedAt: number | null;
   endedAt: number | null;
