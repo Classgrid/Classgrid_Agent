@@ -298,6 +298,9 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
             // (the chat checks it is one of its "/" commands for this mode, as for the computer's own box)
             ...(command ? { command } : {}),
             remoteFrom: "phone",
+            // the answer's checkpoint on the computer (the app keeps its before-copies under it): Review and Undo of
+            // what it changed there, on the phone and in the app, as for an answer typed on the computer
+            localCheckpoint: String(Date.now()),
         }, stop.signal, (data) => {
             mirrorRemoteEvent(userId, sessionId, data);
             if (["token", "thought", "tool_start", "tool_result", "status"].includes(data?.type)) {

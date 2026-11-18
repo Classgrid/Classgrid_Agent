@@ -9,11 +9,20 @@
 //   DELETE /api/remote/chats/:id             -> { ok }   Remote PC off for this chat (the computer keeps the chat)
 //   GET    /api/remote/devices/:deviceId     -> { allowed, defaultMode }   the computer's own settings (its app)
 //   PUT    /api/remote/devices/:deviceId     { allowed?, defaultMode? } -> { ok }
+// Studio's own tabs for the chat (services/remote-pc-tabs.service.js; 404 not_remote, 403 not_allowed, 503 offline):
+//   GET    /api/remote/chats/:id/review              -> { place, projectId, checkpoints, here, needsUpdate }
+//   GET    /api/remote/chats/:id/review/:cp          -> { files: [{ file, added, removed, kind, diff }], finished }
+//   POST   /api/remote/chats/:id/review/:cp/reject   { file? } -> { reverted }   (asked first on the phone)
+//   POST   /api/remote/chats/:id/review/:cp/undo     -> { reverted }
+//   GET    /api/remote/chats/:id/files               -> { place, projectId, name, listing? }
+//   GET    /api/remote/chats/:id/file?path=          -> { path, binary, image?, mime?, data?, content?, size?, truncated? }
+//   GET    /api/remote/chats/:id/jobs                -> { jobs: [{ id, command, running, exitCode, startedAt, output }] }
 // The live answer itself comes over the person's socket: "remote:live", "remote:turn", "remote:chats".
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
 import { deviceSettings, listRemoteChats, liveState, remoteChatDetails, sendFromPhone, setDeviceAllowed, setRemoteChat, stopRemote } from "../services/remote-pc.service.js";
+import { RemoteTabError, chatJobs, fileRead, filesList, reviewList, reviewPutBack, reviewShow } from "../services/remote-pc-tabs.service.js";
 
 const router = express.Router();
 const CHAT_ID = /^[0-9a-f-]{36}$/i;
@@ -96,6 +105,26 @@ router.delete("/chats/:id", isAuthenticated, async (req, res) => {
     await setRemoteChat({ userId: req.user._id, sessionId: id, on: false });
     res.json({ ok: true });
 });
+
+// ── Studio's own tabs on the phone (services/remote-pc-tabs.service.js): Review, Files, the chat's background commands ──
+async function tab(req, res, fn) {
+    const id = await ownChat(req, res);
+    if (!id) return;
+    try {
+        res.json(await fn(id));
+    } catch (e) {
+        if (e instanceof RemoteTabError) return res.status(e.status).json({ error: e.message, code: e.code });
+        console.error("[Remote PC] tab failed:", e?.message || e);
+        res.status(500).json({ error: "Something went wrong. Try again." });
+    }
+}
+router.get("/chats/:id/review", isAuthenticated, (req, res) => tab(req, res, (id) => reviewList(req.user, id)));
+router.get("/chats/:id/review/:cp", isAuthenticated, (req, res) => tab(req, res, (id) => reviewShow(req.user, id, req.params.cp)));
+router.post("/chats/:id/review/:cp/reject", isAuthenticated, (req, res) => tab(req, res, (id) => reviewPutBack(req.user, id, req.params.cp, { action: "reject", file: req.body?.file || null })));
+router.post("/chats/:id/review/:cp/undo", isAuthenticated, (req, res) => tab(req, res, (id) => reviewPutBack(req.user, id, req.params.cp, { action: "undo" })));
+router.get("/chats/:id/files", isAuthenticated, (req, res) => tab(req, res, (id) => filesList(req.user, id)));
+router.get("/chats/:id/file", isAuthenticated, (req, res) => tab(req, res, (id) => fileRead(req.user, id, req.query.path)));
+router.get("/chats/:id/jobs", isAuthenticated, (req, res) => tab(req, res, (id) => chatJobs(req.user, id)));
 
 router.get("/devices/:deviceId", isAuthenticated, async (req, res) => {
     const deviceId = String(req.params.deviceId || "");

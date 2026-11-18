@@ -2111,6 +2111,7 @@ export const streamAskAi = async (req, res) => {
     // answer goes down this stream as pc_tool_call and the app posts the reply back (local-runner.service.js
     // pcExecutors). Not for the website, headless task turns or wake-ups (no app is on their stream).
     let unregisterPcExecutor = null;
+    let unregisterSocketCheckpoint = null; // a phone message's checkpoint for its steps on the computer (below)
     let pcExecutor = null; // this answer's app, for the steps on the computer (local-runner.service.js pcExecutors)
     let durableTurn = null;
     let localLoop = null; // the app driving the loop (set below, once the abort controls exist)
@@ -2784,6 +2785,12 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "S
         const onThisComputer = whereProject?.location === "local" || (!!body.deviceId && (whereProject?.localCopies || []).some((c) => c?.here && c?.deviceId && String(c.deviceId) === String(body.deviceId)));
         if (body.clientApp === "desktop" && onThisComputer && /^\d{10,16}$/.test(String(body.localCheckpoint || ""))) checkpointId = String(body.localCheckpoint);
         if (pcExecutor && checkpointId) pcExecutor.checkpoint = checkpointId;
+        // A message sent from the phone into a Remote PC chat has no app on its stream: its steps go over the socket and
+        // carry the checkpoint from there, so the computer keeps this answer's before-copies for Review (owner, 2026-11-18)
+        else if (!pcExecutor && checkpointId && body.remoteFrom === "phone" && sessionId && String(checkpointId) === String(body.localCheckpoint || "")) {
+            const { setSocketCheckpoint } = await import("../services/local-runner.service.js");
+            unregisterSocketCheckpoint = setSocketCheckpoint(sessionId, checkpointId);
+        }
         if (checkpointId && !res.writableEnded) res.write(`data: ${JSON.stringify({ type: "checkpoint", id: checkpointId })}\n\n`);
         dynamicSystemPrompt += promptBlock("connector:zoom|connector:google|connector:microsoft|schedules", `\nCRITICAL TIMEZONE RULE FOR MEETINGS: When scheduling a Zoom meeting or Google Calendar event, the APIs EXPECT the 'startTime' parameter to be in UTC format (with a 'Z' at the end). To ensure accuracy, YOU MUST ALWAYS USE the \`get_timezone_time\` tool to check the current time and UTC offset for the user's location BEFORE scheduling any future meetings. Use the offset returned by the tool (e.g. GMT+05:30) to calculate the correct UTC time for the meeting.`);
 
@@ -7741,6 +7748,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         if (keepAliveInterval) clearInterval(keepAliveInterval);
         if (replacedCheck) clearInterval(replacedCheck);
         if (unregisterPcExecutor) unregisterPcExecutor(); // helpers still working after this use the socket path
+        if (unregisterSocketCheckpoint) unregisterSocketCheckpoint();
         if (localLoop) localLoop.dispose();
         // The answer ended here: its saved rounds (and the ones of the run it went on from) aren't needed any more
         if (durableTurn) import("../services/turn-state.service.js").then((m) => { m.clearTurnState(durableTurn.id); if (resumeState && body.resumeTurn) m.clearTurnState(String(body.resumeTurn)); }).catch(() => {});

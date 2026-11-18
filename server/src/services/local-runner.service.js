@@ -164,6 +164,18 @@ function withWakeNote(reply) {
     return text === reply.text ? reply : { ...reply, text };
 }
 
+// An answer with no app on its stream that works in a folder on the computer (a message sent from the phone into a
+// Remote PC chat, owner 2026-11-18) still has its checkpoint: every step it sends over the socket carries it, so the
+// app keeps the answer's before-copies and its Review lists it (on the phone and in the app). sessionId -> checkpoint
+const socketCheckpoints = new Map();
+/** The answer's checkpoint for its socket steps; returns the call that takes it away when the answer ends. */
+export function setSocketCheckpoint(sessionId, checkpoint) {
+    const key = String(sessionId);
+    socketCheckpoints.set(key, String(checkpoint));
+    return () => { if (socketCheckpoints.get(key) === String(checkpoint)) socketCheckpoints.delete(key); };
+}
+export const socketCheckpointFor = (sessionId) => (sessionId ? socketCheckpoints.get(String(sessionId)) || null : null);
+
 // Sends one tool call to the user's desktop app. Returns its whole answer ({ text, ... }), or null when the app isn't open.
 async function askRunner(userId, tool, payload) {
     const quiet = withQuietProgress(tool, payload);
@@ -174,7 +186,8 @@ async function askRunner(userId, tool, payload) {
         if (reply) return withWakeNote(reply);
     }
     // (the answer's checkpoint goes along on the socket too, so the app keeps its before-copies for the Review tab)
-    return withWakeNote(await askRunnerOnce(userId, tool, exec?.checkpoint ? { ...quiet, checkpoint: exec.checkpoint } : quiet));
+    const checkpoint = exec?.checkpoint || socketCheckpointFor(payload?.chat);
+    return withWakeNote(await askRunnerOnce(userId, tool, checkpoint ? { ...quiet, checkpoint } : quiet));
 }
 // Windows PowerShell draws a progress bar for every piece of a download (Invoke-WebRequest, Expand-Archive...), even in a
 // hidden window, which makes them many times slower: it is switched off for the AI's PowerShell commands
