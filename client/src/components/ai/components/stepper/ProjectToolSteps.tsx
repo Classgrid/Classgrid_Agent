@@ -17,6 +17,8 @@ import { Spinner } from '@/components/marketing_ui/spinner';
 import { CombinedReasoningBlock } from './CombinedReasoningBlock';
 import { cn } from '@/lib/utils';
 import { ShimmerText } from './ShimmerText';
+import { openHelper, useHelperSnapshot } from '../helperSnapshot';
+import { Dot, helperTitle, helperTook, tokensText } from '../helperRow';
 
 // Steps of the Project Mode file tools, shown like a code editor's agent: "Edited calculator.ts +26 -0",
 // and reading/searching grouped as "Exploring 2 files, 1 search".
@@ -471,14 +473,66 @@ function HelperItem({ task, answer, failed, loading, live }: { task: string; ans
   );
 }
 
+// Helpers started in the background, shown like a coding agent's background agents (owner, 2026-11-18, with Claude
+// Code's as the example: "we already have the Agent map for this"). One line per helper, the Agent map's state, tokens,
+// steps and time (helperSnapshot.ts), still counting while it works; a click opens that helper in the Agent map.
+//   ● 2 helpers
+//     ● Research context.dev guides     34.8k tokens · 33 steps · 2m 50s
+// The tool's own result ("Started 1 helper(s)... Talk to them with message_helper...") is for the AI, never shown.
+function BackgroundHelpers({ result, tasks }: { result: string; tasks: string[] }) {
+  const snap = useHelperSnapshot();
+  // "Helper 2 (DeepSeek V4.1 Flash, read only): ..." → 2, in the order of the tasks
+  const nos = [...result.matchAll(/^Helper (\d+) \(/gm)].map((m) => Number(m[1]));
+  const helpers = nos.map((no, i) => {
+    const h = snap.helpers.find((x) => x.no === no);
+    return { no, task: h?.task || tasks[i] || `Helper ${no}`, h };
+  });
+  const working = helpers.filter((x) => !x.h || x.h.state === 'running').length;
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!working) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [working]);
+  const [open, setOpen] = useState(true);
+  const n = helpers.length;
+  return (
+    <div className="flex flex-col">
+      <Row onClick={() => setOpen(!open)} open={open}>
+        <Dot state={working ? 'running' : 'done'} />
+        <span className="shrink-0">{n} helper{n === 1 ? '' : 's'}</span>
+      </Row>
+      {open && (
+        <div className="ml-10 mb-1 flex flex-col gap-1">
+          {helpers.map(({ no, task, h }) => {
+            const state = h?.state || 'running';
+            const steps = (h?.steps || []).length;
+            return (
+              <button key={no} type="button" onClick={() => openHelper(no)} className="group flex min-w-0 items-center gap-2 py-0.5 text-left text-[13px]">
+                <Dot state={state} />
+                <span className="min-w-0 truncate text-slate-500 dark:text-[#8a8a8a] group-hover:text-foreground">{helperTitle({ no, task })}</span>
+                <span className="shrink-0 font-semibold text-slate-500 dark:text-[#8a8a8a]">
+                  {[state === 'failed' ? 'Failed' : '', h?.tokens ? tokensText(h.tokens) : '', h ? `${steps} ${steps === 1 ? 'step' : 'steps'}` : '', h ? helperTook(h, now) : ''].filter(Boolean).join(' · ')}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ProjectHelpersStep({ step }: { step: Step }) {
   const loading = step.status === 'loading';
   // Only the first 5 tasks run (the server takes up to 5 helpers)
   const rawTasks: unknown[] = Array.isArray(step.args?.helpers) && step.args.helpers.length ? step.args.helpers : Array.isArray(step.args?.tasks) ? step.args.tasks : [];
   const tasks: string[] = rawTasks.map((t: any) => String(typeof t === 'string' ? t : t?.task ?? '')).filter((t: string) => t.trim()).slice(0, 5);
+  const [open, setOpen] = useState<boolean | null>(null);
+  const started = !loading && /^Started \d+ helper/.test(String(step.result || ''));
+  if (started) return <BackgroundHelpers result={String(step.result)} tasks={tasks} />;
   const results = loading ? [] : parseHelpers(step.result);
   const n = loading ? tasks.length : results.length || tasks.length;
-  const [open, setOpen] = useState<boolean | null>(null);
   const isOpen = open ?? true;
   return (
     <div className="flex flex-col">

@@ -9,6 +9,8 @@ import { Dialog, DialogContent, DialogTitle } from "@/components/marketing_ui/di
 import { cn } from "@/lib/utils";
 import { ReplySteps } from "./stepper/ReplySteps";
 import type { AgentStep } from "./AskAiPanel";
+import { OPEN_HELPER_EVENT, publishHelpers } from "./helperSnapshot";
+import { Dot, HelperRow, helperTook as took, helperTitle as title, modelText, stateText, tokensText } from "./helperRow";
 
 type Helper = {
   no: number; task: string; type: string | null; model: string | null; tokens?: number; canEdit: boolean;
@@ -18,29 +20,9 @@ type Helper = {
   switches?: { from: string; why: string }[];
 };
 
-const took = (h: Helper, now: number) => {
-  if (!h.startedAt) return "";
-  const s = Math.max(0, Math.round(((h.endedAt || now) - h.startedAt) / 1000));
-  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`;
-};
-const tokensText = (n?: number) => (!n ? "" : n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M tokens` : n >= 1000 ? `${(n / 1000).toFixed(1)}k tokens` : `${n} tokens`);
-const title = (h: Helper) => (h.task.split("\n")[0] || "").replace(/\s+/g, " ").trim().slice(0, 90) || `Helper ${h.no}`;
-// "Claude Opus 5.5 → GLM 5.3" when another model took over
-const modelText = (h: Helper) => [...(h.switches || []).map((x) => x.from), h.model].filter(Boolean).join(" → ");
-const stateText = (h: Helper) => (h.state === "running" ? "Working" : h.state === "done" ? "Finished" : "Failed");
 // (a server from before the full steps sent { tool, what, result, failed })
 const asSteps = (h: Helper): AgentStep[] =>
   (h.steps || []).map((s, i) => (s?.type === "tool" ? s : { id: `s${i}`, type: "tool", tool: String(s?.tool || ""), args: s?.what ? { url: s.what } : {}, result: s?.result || "", status: s?.failed ? "error" : "success" }));
-
-// Green while working, grey when done, red when it failed (a hex green: the app's emerald and green classes are greys)
-function Dot({ state }: { state: "running" | "done" | "failed" }) {
-  return (
-    <span className="relative flex size-2 shrink-0">
-      {state === "running" && <span className="absolute inline-flex size-full rounded-full bg-[#22c55e] opacity-60 animate-ping" />}
-      <span className={cn("relative inline-flex size-2 rounded-full", state === "running" ? "bg-[#22c55e]" : state === "failed" ? "bg-red-500" : "bg-muted-foreground/45")} />
-    </span>
-  );
-}
 
 // The detail box keeps showing the newest work while it comes in, unless the user scrolled up to read
 function useFollow(dep: unknown) {
@@ -111,10 +93,13 @@ export function AgentMapButton({ sessionId, busy, renderAnswer }: { sessionId: s
   const running = helpers.filter((h) => h.state === "running").length;
 
   const load = React.useCallback(async () => {
-    if (!sessionId) { setHelpers([]); return; }
+    if (!sessionId) { setHelpers([]); publishHelpers(null, []); return; }
     try {
       const { data } = await apiClient.get(`/api/ai/sessions/${sessionId}/helpers`);
-      setHelpers(Array.isArray(data?.helpers) ? data.helpers : []);
+      const list: Helper[] = Array.isArray(data?.helpers) ? data.helpers : [];
+      setHelpers(list);
+      // (the helper rows in the chat show the same: helperSnapshot.ts)
+      publishHelpers(sessionId, list);
     } catch { /* keep what is shown */ }
   }, [sessionId]);
 
@@ -127,6 +112,12 @@ export function AgentMapButton({ sessionId, busy, renderAnswer }: { sessionId: s
   }, [busy, running, open, load]);
   // The answer ended: helpers it started are now in the list
   React.useEffect(() => { if (!busy) void load(); }, [busy, load]);
+  // A helper row in the chat was clicked: its details open here
+  React.useEffect(() => {
+    const on = (e: Event) => { const no = Number((e as CustomEvent).detail); if (no) { setPicked(no); setNow(Date.now()); setOpen(true); } };
+    window.addEventListener(OPEN_HELPER_EVENT, on);
+    return () => window.removeEventListener(OPEN_HELPER_EVENT, on);
+  }, []);
   // The chat was woken because helpers finished
   React.useEffect(() => {
     const sock = getSocket();
@@ -180,18 +171,7 @@ export function AgentMapButton({ sessionId, busy, renderAnswer }: { sessionId: s
                   <div className="absolute top-1/2 left-0 w-3 border-t border-border" />
                 </div>
                 <div className="flex-1 min-w-0 flex flex-col gap-2 sm:border-l sm:border-border sm:pl-3">
-                  {helpers.map((h) => (
-                    <button key={h.no} type="button" onClick={() => setPicked(h.no)} className="group text-left rounded-xl border border-border px-3 py-2.5 hover:bg-muted/60 transition-colors">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <Dot state={h.state} />
-                        <span className="text-sm font-medium truncate">{title(h)}</span>
-                        <ChevronRight className="ml-auto size-3.5 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
-                      </div>
-                      <div className="ml-4 mt-0.5 text-xs text-muted-foreground truncate">
-                        {stateText(h)} · {took(h, now)} · {asSteps(h).length} {asSteps(h).length === 1 ? "step" : "steps"}{h.tokens ? ` · ${tokensText(h.tokens)}` : ""}{h.model ? ` · ${modelText(h)}` : ""}
-                      </div>
-                    </button>
-                  ))}
+                  {helpers.map((h) => <HelperRow key={h.no} helper={h} now={now} onClick={() => setPicked(h.no)} />)}
                 </div>
               </div>
             </div>
