@@ -16,6 +16,15 @@ if (el) {
 }
 
 async function play(el) {
+  // A hidden window draws no frames, so the animation would never reach the point where it starts the app: Classgrid
+  // started by Windows into the tray (Remote PC's "Start Classgrid with Windows"), or a window covered by others. Then
+  // the app starts at once without the welcome screen, so it signs in and the phone can reach this computer.
+  if (document.visibilityState === "hidden") {
+    window.classgridDesktop?.setSplashBar?.(false);
+    el.remove();
+    window.cgStartApp?.();
+    return;
+  }
   const $ = (s) => el.querySelector(s);
   let theme = "system";
   try { theme = localStorage.getItem("vite-ui-theme") || "system"; } catch { /* storage blocked */ }
@@ -45,8 +54,10 @@ async function play(el) {
   tl.to($(".cg-grid"), { opacity: 1, duration: 1.8, ease: "power2.out" }, 0)
     .fromTo($(".cg-glow"), { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 2 }, 0)
     .to(letters, { y: 0, opacity: 1, duration: 1, stagger: 0.045 }, 0.42)
-    .to($(".cg-line"), { opacity: 1, duration: 0.6, ease: "power2.out" }, 0.95)
-    .call(() => start(el, opened), [], 1.2);
+    .to($(".cg-line"), { opacity: 1, duration: 0.6, ease: "power2.out" }, 0.95);
+  // The app starts on a timer, not on the timeline: the timeline stops while the window is hidden (covered or put in
+  // the tray during the opening), timers go on
+  setTimeout(() => start(el, opened), 1200);
 
   // Framer Motion: the line fills over the welcome time with a light sweeping along it, and the glow breathing
   animate($(".cg-line b"), { transform: ["scaleX(0)", "scaleX(1)"] }, { duration: (MIN_SHOW - 1000) / 1000, ease: [0.3, 0.1, 0.2, 1], delay: 0.95 });
@@ -56,6 +67,8 @@ async function play(el) {
 
 // Starts the app, then waits until it has replaced its loading skeleton (#app-splash) with real screens
 function start(el, opened) {
+  if (el.dataset.started) return;
+  el.dataset.started = "1";
   window.cgStartApp?.();
   const began = performance.now();
   const ready = () => !document.getElementById("app-splash") && document.getElementById("root")?.childElementCount;
