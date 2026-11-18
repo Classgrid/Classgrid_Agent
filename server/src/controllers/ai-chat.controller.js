@@ -7641,7 +7641,11 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         worked_ms: Date.now() - requestStartedAt
                     });
                 }
-                saveMessage(sessionId, "assistant", savedContent, [])
+                // Saved BEFORE the answer's end is sent: the apps read the chat again the moment the stream ends, and a
+                // save still on its way made that read come back without the answer, which then vanished from the screen
+                // (owner, 2026-11-18: "sometimes on the phone and sometimes on the PC the answer hides by itself"; chat
+                // 64c24baf: the stream ended at 07:36:48.7, the app's read started 48.9, the answer was saved at 49.0)
+                await saveMessage(sessionId, "assistant", savedContent, [])
                     .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email }); })
                     .catch(err => console.error("Failed to save assistant message:", err));
                 appendToHistory(sessionId, "assistant", savedContent).catch(err => console.error("Failed to append assistant reply to Redis:", err));
