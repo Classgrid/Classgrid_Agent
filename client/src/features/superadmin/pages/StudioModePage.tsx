@@ -605,7 +605,8 @@ export function StudioModePage() {
       "-",
       { label: "Open Project", run: () => navigate(window.location.pathname.startsWith("/superadmin") ? "/superadmin/studio/project" : "/c/studio/project") },
       "-",
-      { label: "Close Window", run: () => window.close() },
+      // (through the app, so Remote PC's tray keeps Classgrid running; window.close() would end the app)
+      { label: "Close Window", run: () => { const d = (window as { classgridDesktop?: { closeWindow?: () => void } }).classgridDesktop; if (d?.closeWindow) d.closeWindow(); else window.close(); } },
     ] },
     { label: "Edit", items: [
       { label: "Undo", keys: "Ctrl+Z", run: () => editAction("undo") },

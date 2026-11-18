@@ -412,6 +412,12 @@ ipcMain.on("cg:titleBar", (e, dark) => {
   if (splashBars.has(e.sender.id)) return void splashBars.set(e.sender.id, dark);
   setBar(e, dark ? TITLE_BAR.dark : TITLE_BAR.light);
 });
+// File > Close Window in our top bar: the window's own close (its "close" event: Remote PC's tray keeps the app and its
+// work running). A page's window.close() would skip that event and end the app.
+ipcMain.on("cg:closeWindow", (e) => {
+  const w = BrowserWindow.fromWebContents(e.sender);
+  if (w && !w.isDestroyed()) w.close();
+});
 ipcMain.on("cg:splashBar", (e, on, dark) => {
   if (on) {
     if (!splashBars.has(e.sender.id)) splashBars.set(e.sender.id, null);

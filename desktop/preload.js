@@ -88,6 +88,9 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   setTitleBar: (dark) => ipcRenderer.send("cg:titleBar", !!dark),
   // The welcome screen's colour for the window buttons while it shows (on), and back to the top bar's after it (off)
   setSplashBar: (on, dark) => ipcRenderer.send("cg:splashBar", !!on, !!dark),
+  // The top bar's File > Close Window: closed the way the window's own close button closes it (to the tray while
+  // Remote PC keeps Classgrid running). window.close() from the page skips that and ends the app.
+  closeWindow: () => ipcRenderer.send("cg:closeWindow"),
   // The top bar's Edit menu: undo, redo, cut, copy, paste, selectAll
   edit: (action) => ipcRenderer.send("cg:edit", action),
   // Studio's Browser tab: the AI's browser runs in this app and sits over the tab (rect = the tab's place on screen)
