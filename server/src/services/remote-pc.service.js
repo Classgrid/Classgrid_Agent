@@ -282,6 +282,9 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
     // The computer's app shows it like a woken chat: the start, the live answer, then the saved chat at the end
     // (with the question, so the computer's chat shows it at once above the answer; an app from before shows it at the end)
     emit(userId, "chat:woke", { sessionId, phase: "start", question, ...(attachments.length ? { attachments } : {}) });
+    // The model picked on the phone is the chat's model on the computer too (owner, 2026-11-18: "select the model on the
+    // phone, and it is shared with the computer"): the computer's open chat sets its picker to it (AskAiPanel)
+    if (selectedModel) emit(userId, "remote:model", { sessionId, selectedModel, effort: effort || null });
     const fullUser = await User.findById(user._id).select("-password -verificationToken");
     try {
         const { runAgentTask } = await import("./whatsapp-call.service.js");
@@ -343,9 +346,11 @@ export async function remoteChatDetails(user, sessionId) {
     const row = await RemoteChat.findOne({ userId: user._id, sessionId: String(sessionId), on: true }).lean();
     if (!row) return null;
     const { deviceConnection } = await import("./remote-device.service.js");
-    const [conn, project] = await Promise.all([
+    const [conn, project, meta] = await Promise.all([
         deviceConnection(userId, row.deviceId || null, { kind: row.deviceKind || null }).catch(() => ({ online: false, state: "offline", connectedSince: null, totalConnectedMs: 0 })),
         chatProject(sessionId),
+        // the model and effort the chat last ran with (on the computer or from the phone): the phone's picker shows it
+        redis.get(`chatwake:meta:${sessionId}`).then((v) => JSON.parse(v || "{}")).catch(() => ({})),
     ]);
     const turnedOn = row.turnedOnAt || row.createdAt || null;
     return {
@@ -360,6 +365,8 @@ export async function remoteChatDetails(user, sessionId) {
         mode: row.appMode || "agent",
         clientApp: row.clientApp || "desktop",
         turnedOnAt: turnedOn ? new Date(turnedOn).toISOString() : null,
+        selectedModel: typeof meta?.selectedModel === "string" ? meta.selectedModel : null,
+        effort: meta?.effort === "low" || meta?.effort === "high" ? meta.effort : null,
     };
 }
 

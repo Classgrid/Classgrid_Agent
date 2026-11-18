@@ -150,6 +150,13 @@ export function getThinkingLevel(): ThinkingLevel {
     return "normal";
   }
 }
+// The level set from outside the picker (a model and effort picked on the phone for this chat, Remote PC): saved,
+// and every open picker shows it
+export const THINKING_LEVEL_EVENT = "cg:thinking-level";
+export function setThinkingLevel(level: ThinkingLevel) {
+  try { localStorage.setItem(THINKING_KEY, level); } catch { /* storage blocked */ }
+  try { window.dispatchEvent(new CustomEvent(THINKING_LEVEL_EVENT, { detail: level })); } catch { /* no window */ }
+}
 const THINKING_LEVELS: { id: ThinkingLevel; label: string; hint: string }[] = [
   { id: "fast", label: "Fast", hint: "Quick, short answers" },
   { id: "normal", label: "Normal", hint: "The usual" },
@@ -194,6 +201,11 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   }, [fableLocked, access, value, onChange]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const [thinking, setThinkingState] = React.useState<ThinkingLevel>(getThinkingLevel);
+  React.useEffect(() => {
+    const on = (e: Event) => { const v = (e as CustomEvent).detail; if (v === "fast" || v === "normal" || v === "deep") setThinkingState(v); };
+    window.addEventListener(THINKING_LEVEL_EVENT, on);
+    return () => window.removeEventListener(THINKING_LEVEL_EVENT, on);
+  }, []);
   const setThinking = (id: ThinkingLevel) => {
     setThinkingState(id);
     try { localStorage.setItem(THINKING_KEY, id); } catch { /* storage blocked: this message only */ }

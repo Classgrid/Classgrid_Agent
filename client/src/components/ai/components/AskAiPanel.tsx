@@ -128,7 +128,7 @@ import { cn } from "../utils";
 const DESKTOP_STUDIO = import.meta.env.VITE_DESKTOP === "1" && import.meta.env.VITE_EDITOR !== "1";
 import { CodeBlockShiki } from "./CodeBlockShiki";
 
-import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID, getThinkingLevel } from "./ModelPicker";
+import { ModelPicker, useSelectedModel, MODEL_GROUPS, AUTO_MODEL_ID, getThinkingLevel, setThinkingLevel, isKnownModelId } from "./ModelPicker";
 
 import { TypingGreeting } from "./AgentHomeExtras";
 
@@ -3929,6 +3929,20 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const timer = attach() ? null : setInterval(() => { if (attach() && timer) clearInterval(timer); }, 3000);
     return () => { if (timer) clearInterval(timer); sock?.off("chat:woke", onWoke); sock?.off("chat:woke-live", onLive); };
   }, [gridSessionId, refreshSharedMessages]);
+  // Remote PC (owner, 2026-11-18: "select the model on the phone, and it is shared with the computer too"): a model and
+  // effort picked on the phone for this chat become this chat box's model and thinking level
+  useEffect(() => {
+    if (!gridSessionId) return;
+    let sock: ReturnType<typeof getSocket> = null;
+    const on = (d: { sessionId?: string; selectedModel?: string; effort?: string | null }) => {
+      if (d?.sessionId !== gridSessionId || typeof d.selectedModel !== "string") return;
+      if (isKnownModelId(d.selectedModel)) setSelectedModel(d.selectedModel);
+      setThinkingLevel(d.effort === "low" ? "fast" : d.effort === "high" ? "deep" : "normal");
+    };
+    const attach = () => { sock = getSocket(); if (sock) sock.on("remote:model", on); return !!sock; };
+    const timer = attach() ? null : setInterval(() => { if (attach() && timer) clearInterval(timer); }, 3000);
+    return () => { if (timer) clearInterval(timer); sock?.off("remote:model", on); };
+  }, [gridSessionId, setSelectedModel]);
   const gridMyEmail = (session?.user?.email || "").toLowerCase();
   const gridPeople = React.useMemo(() => Object.fromEntries((grid.data?.members || []).map((p) => [p.email, p])), [grid.data]);
   const gridOwner = grid.data?.members?.find((p) => p.role === "owner");
