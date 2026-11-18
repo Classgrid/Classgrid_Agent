@@ -23,6 +23,7 @@ import { leaveSharedChat } from "./ai-chat-grid.service.js";
 import { sandboxSsh } from "./ide-project.service.js";
 import AgentTask from "../models/AgentTask.js";
 import AiLibraryFile from "../models/AiLibraryFile.js";
+import AiMemoryNote from "../models/AiMemoryNote.js";
 import AiSchedule from "../models/AiSchedule.js";
 import AiSkill from "../models/AiSkill.js";
 import AiUsageLog from "../models/AiUsageLog.js";
@@ -154,6 +155,7 @@ export async function deleteAccountData(user, { io = null } = {}) {
 
     const byUser = [
         ["skills", AiSkill, { userId: user._id }],
+        ["memory notes", AiMemoryNote, { userId: user._id }],
         ["schedules", AiSchedule, { user_id: user._id }],
         ["agentTasks", AgentTask, { user_id: user._id }],
         ["calls", Call, { user_id: user._id }],

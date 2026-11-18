@@ -111,6 +111,7 @@ import AiUsageLog from "../models/AiUsageLog.js";
 import { LIVE_DOC_TOOLS, LIVE_DOC_PROMPT, buildLiveDocHandlers } from "../services/live-doc-tools.js";
 import { APP_HISTORY_TOOLS, buildAppHistoryHandlers } from "../mcp/mcp-extra-tools.js";
 import { PLAN_INFO_TOOLS, buildPlanInfoHandlers } from "../services/plan-info-tools.js";
+import { SAVED_NOTE_TOOLS, buildSavedNoteHandlers, savedNotesOf, savedNotesBlock, notesFromChat } from "../services/ai-memory-notes.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
@@ -2990,13 +2991,15 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
         // for the preferences and the connected integrations (two reads of 150 ms each, measured 2026-11-10)
         const selfRow = req.user && String(req.user._id) === String(userId) ? (typeof req.user.toObject === "function" ? req.user.toObject() : req.user) : null;
         // (read once and kept for 10 seconds: the same user's next message doesn't wait on the database for them again)
-        const [deepContext, userPrefsDocResult, customSkillsResult, latestUserResult] = await Promise.all([
+        const [deepContext, userPrefsDocResult, customSkillsResult, latestUserResult, savedNotesResult] = await Promise.all([
             null, // The ERP is gone: its class/subject/teacher context (buildDeepContext) is no longer added
             // (each read is 150 ms away; preferences and skills change rarely, the user's row holds the connected
             // integrations, which a user may connect and use within a minute, so it is kept for a shorter time)
             userId ? (selfRow ? { ai_preferences: selfRow.ai_preferences } : keptFor(`prefs:${userId}`, 60000, () => UserModel.findById(userId).select("ai_preferences").lean().catch((e) => { console.error("Error loading AI Preferences:", e); return null; }))) : null,
             userId ? keptFor(`skills:${userId}`, 60000, () => AiSkillModel.find({ userId, is_active: true }).lean().catch((e) => { console.error("Error loading AI skills:", e); return []; })) : [],
-            req.user ? (selfRow || keptFor(`user:${req.user._id}`, 20000, () => mongoose.model('User').findById(req.user._id).lean().catch((e) => { console.error("Error loading user for integrations:", e); return null; }))) : null
+            req.user ? (selfRow || keptFor(`user:${req.user._id}`, 20000, () => mongoose.model('User').findById(req.user._id).lean().catch((e) => { console.error("Error loading user for integrations:", e); return null; }))) : null,
+            // The AI's online memory notes about this person (exam dates, deadlines, events: services/ai-memory-notes.js)
+            userId ? keptFor(`usernotes:${userId}`, 60000, () => savedNotesOf(userId).catch((e) => { console.error("Error loading memory notes:", e); return []; })) : []
         ]);
         console.log(`[AI-TIMING] user lookups done at +${Date.now() - requestStartedAt}ms`);
 
@@ -3071,6 +3074,9 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     });
                     volatilePrompt += `</active_skills_instructions>\n`;
                 }
+
+                // The AI's online memory notes, known in every chat (never in an incognito chat)
+                if (!isIncognito) volatilePrompt += savedNotesBlock(savedNotesResult);
 
                 // Desktop app: what the same person saved in their other Classgrid accounts on this computer
                 // (the app keeps each account's memory locally), so switching accounts keeps the memory
@@ -3886,6 +3892,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                 ...APP_HISTORY_TOOLS,
                 // Plans, prices, limits and the user's own usage, live (tool group account_plan)
                 ...PLAN_INFO_TOOLS,
+                // The AI's online memory notes (tool group memory_notes)
+                ...SAVED_NOTE_TOOLS,
                 {
                     type: "function",
                     function: {
@@ -4789,6 +4797,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     ...buildLiveDocHandlers({ user: req.user }),
                     ...buildAppHistoryHandlers({ user: req.user }),
                     ...buildPlanInfoHandlers({ user: req.user }),
+                    ...buildSavedNoteHandlers({ user: isIncognito ? null : req.user, sessionId, onChange: () => forgetKept(`usernotes:${userId}`) }),
                     ...buildEndConversationHandlers({ sessionId, isIncognito, messages, question: body.question, res }),
                     update_plan_step: async (args) => {
                         const stepId = typeof args?.step_id === "string" ? args.step_id.trim().slice(0, 100) : "";
@@ -7684,6 +7693,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     .then(() => { if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email }); })
                     .catch(err => console.error("Failed to save assistant message:", err));
                 appendToHistory(sessionId, "assistant", savedContent).catch(err => console.error("Failed to append assistant reply to Redis:", err));
+                // The AI's online memory notes: every 10 new messages of the chat a small model reads them and keeps the
+                // person's notes (exam dates, deadlines, events) up to date. In the background, after the answer is saved;
+                // never for a shared chat (other people write there)
+                if (userId && !gridSender) notesFromChat({ sessionId, userId }).then((changed) => { if (changed) forgetKept(`usernotes:${userId}`); }).catch(() => {});
                 // Push notifications to the phone (user-push.service.js). The asker gets one only when no app is on
                 // this answer's stream: the chat was woken by background work, a task the agent set for itself in this
                 // chat went on (sleep_until, agent-task.service.js), or the app's connection went away before the end

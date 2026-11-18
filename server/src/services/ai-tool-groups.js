@@ -208,6 +208,14 @@ export const TOOL_GROUPS = [
         tools: ["get_plans_and_usage"],
         pattern: /\b(pricing|prices?|price\s+list|cost|costs|subscri\w*|upgrad\w*|downgrad\w*|billing|invoices?|receipts?|credits?|top[\s-]?ups?|recharg\w*|usage|quota|refill\w*|student\s+(price|discount|plan)\w*|(free|pro|max|paid|my|which|current|your)\s+plans?|plans?\s+(price|cost|limit|include|detail|compar)\w*|limits?\s+(left|reset\w*|refill\w*|kab|khatam)|(my|session|weekly|daily|monthly|claude|fable|image|images|chat|call|whatsapp|storage)\s+limits?|out\s+of\s+(credits?|limit)|kitna\s+(bacha|baaki)|kitne\s+paise|paise|rupees?)\b|₹|प्लान|क्रेडिट|लिमिट|कीमत|दाम/i,
     },
+    // The AI's online memory notes about the user (services/ai-memory-notes.js). The notes themselves are in every
+    // chat's prompt and are saved in the background; these tools are for saving, finding or deleting one in a chat.
+    {
+        id: "memory_notes",
+        description: "Your online memory notes about the user (exam dates, deadlines, events, lasting facts), known in every chat: save, search and delete a note.",
+        tools: ["save_user_note", "search_user_notes", "delete_user_note"],
+        pattern: /\b(remember\w*|memor(y|ies|ise|ize)\w*|forget|forgot|exams?|deadlines?|viva|wedding|birthday|yaad\s*rakh\w*|bhool\w*)\b|याद|परीक्षा/i,
+    },
     // Staff-only groups (database role super_admin / co_super_admin).
     {
         id: "internal_ops",
