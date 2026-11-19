@@ -272,8 +272,9 @@ export function LibraryPage() {
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-y-auto">
-      {/* Header */}
-      <div className="px-6 pt-4 pb-5 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-40">
+      {/* Header (solid, not see-through: the blue file icons scrolling under it used to tint it blue,
+          owner, 2026-11-19: "when I scroll, that top section gets blue, don't make it blue") */}
+      <div className="px-6 pt-4 pb-5 border-b border-border/50 sticky top-0 bg-background z-40">
         <div className="max-w-6xl mx-auto w-full flex flex-col gap-5">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           {/* Uploaded by you, or made by Classgrid AI. (No page title here: the top bar already says Library,
@@ -688,7 +689,8 @@ function LibraryTrash({ endpointPrefix, formatBytes, onBack }: { endpointPrefix:
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-y-auto">
-      <div className="px-6 pt-4 pb-5 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-40">
+      {/* (solid, not see-through: the blue file icons scrolling under it used to tint it blue) */}
+      <div className="px-6 pt-4 pb-5 border-b border-border/50 sticky top-0 bg-background z-40">
         <div className="max-w-6xl mx-auto w-full flex flex-col gap-4">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="flex items-center gap-2 min-w-0">
