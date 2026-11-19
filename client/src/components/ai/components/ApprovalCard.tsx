@@ -349,6 +349,15 @@ export function ApprovalCard({
     onReject?.();
   };
 
+  // The plan card's own Reject (its first button is View Plan): answered like Approve, and the card goes the same way
+  const showPlanReject = variant === "plan" && rejectLabel === undefined && !!onViewPlan && !!onReject;
+  const handlePlanReject = () => {
+    if (isSubmitted) return;
+    cancelAutoApprove();
+    setIsSubmitted(true);
+    onReject?.();
+  };
+
   const cancelAutoApprove = () => {
     if (autoUI !== "active") return;
     autoFired.current = true;
@@ -852,6 +861,18 @@ export function ApprovalCard({
           >
             {safeRender(resolvedReject)}
           </button>
+          {showPlanReject && (
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={(e) => {
+                e.preventDefault();
+                handlePlanReject();
+              }}
+            >
+              Reject
+            </button>
+          )}
           <button
             type="button"
             className={styles.btnPrimary}

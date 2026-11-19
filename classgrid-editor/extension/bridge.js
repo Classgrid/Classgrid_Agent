@@ -448,6 +448,8 @@
     editorContext: bind("editorContext"),
     openInEditor: bind("openInEditor"),
     revealInEditor: bind("revealInEditor"),
+    // The plan card's plan file (plan/*.md): its own tab beside the chat, the plan shown as a page (extension.js showPlan)
+    showPlan: bind("showPlan"),
     onOpenFolderProject: on("openFolderProject"),
     // Settings → Appearance: light, dark or the same as the computer, for the whole editor. It also says which one that
     // is now (the computer's own for "same as your PC"), so the AI panel switches at once, not after the editor does

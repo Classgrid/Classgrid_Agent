@@ -212,7 +212,7 @@ import { McpConnectCards } from "./answer-cards/mcp-connect";
 
 import { SongsDisplay } from "./answer-cards/songs";
 
-import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, markCheckpoint, helperReportsOf, HelperReportLines } from "./stepper/ProjectToolSteps";
+import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, markCheckpoint, helperReportsOf, HelperReportLines, planFileOf, markdownFilePath, openLocalFile, OPEN_PROJECT_FILE_EVENT } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 
 import { ReplySteps } from "./stepper/ReplySteps";
@@ -1681,7 +1681,48 @@ function ShareGridIcon({ className }: { className?: string }) {
   );
 }
 
-const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, onApprovalAction, isHistorical, onRetry, currentStepIndex, setActiveBuildSessionId }: { content: string, sources?: ChatSource[], createdAt?: number, isTyping?: boolean, onApprovalAction?: (text: string) => void, isHistorical?: boolean, onRetry?: (error: string) => void, currentStepIndex?: number, setActiveBuildSessionId?: (id: string) => void }) => {
+// The plan card ("variant": "plan") in an answer: its plan file (the card's own "planFile", newer answers) and title
+function planCardOf(content: string): { planFile: string | null; planTitle?: string } | null {
+  const match = String(content || "").match(/```approval\s*\n([\s\S]*?)```/);
+  if (!match?.[1]) return null;
+  try {
+    const parsed = JSON5.parse(match[1]);
+    if (parsed?.variant !== "plan") return null;
+    return { planFile: markdownFilePath(parsed.planFile), planTitle: typeof parsed.planTitle === "string" ? parsed.planTitle : undefined };
+  } catch { return null; }
+}
+
+// Opens the plan file the AI wrote. Classgrid Code: its own plan tab beside the chat, the plan shown as a page, the
+// chat keeping the cursor (the extension's showPlan; one tab per plan, it follows the file). The desktop app and the
+// website: where their file chips open a file (a file on this computer in its own tab, a project file in the
+// editor or Studio's Files tab). auto: the card just appeared (only Classgrid Code opens it by itself).
+// false when nothing here can open it (View Plan then does what it did before).
+function openPlanFile(file: string, planTitle: string | undefined, auto: boolean): boolean {
+  const desk = (window as unknown as { classgridDesktop?: { inEditor?: boolean; editorFolder?: string | null; showPlan?: (folder: string, file: string) => Promise<unknown>; openPath?: unknown }; __cgStudioFiles?: boolean });
+  const d = desk.classgridDesktop;
+  if (d?.inEditor && d.editorFolder && typeof d.showPlan === "function") {
+    d.showPlan(d.editorFolder, file).catch(() => { /* the extension logs it */ });
+    return true;
+  }
+  if (auto) return false;
+  if (/^[A-Za-z]:[\\/]/.test(file)) {
+    if (!desk.__cgStudioFiles && !d?.openPath) return false;
+    openLocalFile(file, true);
+    return true;
+  }
+  // (the same places as View Plan without a file: Project Mode or Studio with a project open, and Studio itself)
+  const parts = window.location.pathname.split("/");
+  let inProject = false;
+  try {
+    inProject = (parts.includes("project") || parts.includes("studio")) && !!(sessionStorage.getItem("cg_project_open") || localStorage.getItem("cg_project_open"));
+  } catch { /* storage blocked */ }
+  const inStudio = parts.includes("studio") && !parts.includes("project");
+  if (!inProject && !inStudio) return false;
+  window.dispatchEvent(new CustomEvent(OPEN_PROJECT_FILE_EVENT, { detail: { path: file, plan: true, planTitle } }));
+  return true;
+}
+
+const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, onApprovalAction, isHistorical, onRetry, currentStepIndex, setActiveBuildSessionId, planFile }: { content: string, sources?: ChatSource[], createdAt?: number, isTyping?: boolean, onApprovalAction?: (text: string) => void, isHistorical?: boolean, onRetry?: (error: string) => void, currentStepIndex?: number, setActiveBuildSessionId?: (id: string) => void, planFile?: string }) => {
   // `components` below must keep a stable identity: a new object makes ReactMarkdown remount
   // every code block and Mermaid diagram. So it reads changing props from refs, which are
   // assigned during render so the markdown rendered in this same pass sees current values.
@@ -1691,6 +1732,9 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
   const isHistoricalRef = React.useRef(isHistorical);
   const currentStepIndexRef = React.useRef(currentStepIndex);
   const contentRef = React.useRef(content);
+  // The plan file the AI last wrote in this chat up to this answer (for the plan card's View Plan)
+  const planFileRef = React.useRef(planFile);
+  planFileRef.current = planFile;
   const sourcesRef = React.useRef(sources);
   sourcesRef.current = sources;
   // When this answer was written: timers ("duration" countdowns) count from here, to the second
@@ -1923,9 +1967,18 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
                   }
                 }}
                 onReject={() => {
+                  // The plan card's Reject: answered the same way as its Approve, so the AI stops and asks what to change
+                  if (parsedProps.variant === "plan" && parsedProps.plan && Array.isArray(parsedProps.plan)) {
+                    onApprovalActionRef.current?.(`I reject this plan.`);
+                    return;
+                  }
                   onApprovalActionRef.current?.(`I want to skip this or I do not approve.`);
                 }}
                 onViewPlan={() => {
+                  // The plan file the AI wrote (named on the card, else the last one it wrote in this chat): opened
+                  // where files open here (Classgrid Code: its plan tab beside the chat)
+                  const file = markdownFilePath(parsedProps.planFile) || planFileRef.current;
+                  if (file && openPlanFile(file, parsedProps.planTitle, false)) return;
                   // Only opens the plan, never sends a message: Project Mode shows the plan/ file in the editor, otherwise the side panel
                   let inProject = false;
                   try {
@@ -2100,12 +2153,18 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
     prevProps.content === nextProps.content &&
     prevProps.sources === nextProps.sources &&
     prevProps.isTyping === nextProps.isTyping &&
-    prevProps.isHistorical === nextProps.isHistorical
+    prevProps.isHistorical === nextProps.isHistorical &&
+    prevProps.planFile === nextProps.planFile
   );
 });
 
 // A helper's answer in the Agent map, shown like the main agent's answers
 const helperAnswer = (text: string, writing: boolean) => <AssistantMessageContent content={text} isTyping={writing} isHistorical={!writing} />;
+
+// The chat box's menu lists "Create image" and "Web search" among its own items at the top; the same two are also
+// the first entries of INTEGRATIONS_LIST (for the AI Hub), so they were listed a second time above Notion. Each
+// integration shows only when the items above it don't already have its name.
+const notListedYet = (listed: { name: string }[], more: any[]) => more.filter((item) => !listed.some((l) => l.name === item.name));
 
 export const INTEGRATIONS_LIST: any[] = [
   { id: "image", name: "Create image", description: "Visualize anything", icon: FileImage, type: "action" },
@@ -2368,6 +2427,32 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const planSteps = useMemo(() => {
     return planStepsString ? JSON.parse(planStepsString) : null;
   }, [planStepsString]);
+
+  // For each message: the plan file (plan/*.md) the AI last wrote in this chat up to it, for the plan card's View Plan
+  const planFiles = useMemo(() => {
+    let last: string | null = null;
+    return messages.map((m) => {
+      const written = m.role === "assistant" ? planFileOf(m.steps as any) : null;
+      if (written) last = written;
+      return last;
+    });
+  }, [messages]);
+
+  // Classgrid Code: a plan card that just appeared opens its plan in the plan tab beside the chat by itself (once per
+  // card; View Plan opens it again). Elsewhere nothing opens by itself.
+  const autoOpenedPlans = useRef(new Set<string>());
+  const lastMessage = messages[messages.length - 1];
+  const autoPlan = useMemo(() => {
+    if (!lastMessage || lastMessage.role !== "assistant" || lastMessage.typing || !lastMessage.content.includes("```approval")) return null;
+    const card = planCardOf(lastMessage.content);
+    const file = card ? card.planFile || planFiles[messages.length - 1] : null;
+    return card && file ? { key: `${lastMessage.id}:${file}`, file, planTitle: card.planTitle } : null;
+  }, [lastMessage, planFiles, messages.length]);
+  useEffect(() => {
+    if (!autoPlan || autoOpenedPlans.current.has(autoPlan.key)) return;
+    autoOpenedPlans.current.add(autoPlan.key);
+    openPlanFile(autoPlan.file, autoPlan.planTitle, true);
+  }, [autoPlan]);
 
   // Reset live step progress when a new plan appears or the chat changes (chat change swaps the plan too)
   useEffect(() => {
@@ -6262,6 +6347,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                         currentStepIndex={-1}
                                         onRetry={undefined}
                                         onApprovalAction={handleApprovalAction}
+                                        planFile={planFiles[index] || undefined}
                                       />
                                     ) : null)}
                                   </>
@@ -6304,6 +6390,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   currentStepIndex={-1}
                                   onRetry={undefined}
                                   onApprovalAction={handleApprovalAction}
+                                  planFile={planFiles[index] || undefined}
                                 />
                               )}
                             </div>
@@ -6862,7 +6949,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             { id: "web-search", name: "Web search", description: "Find real-time news and info", icon: Globe2 },
                             { id: "deep-research", name: "Deep research", description: "Get a detailed report", icon: Globe2 },
                           ].filter(item => item.name.toLowerCase().includes(atMenuQuery.toLowerCase()));
-                          const menuItems = [...baseItems, ...filteredIntegrations];
+                          const menuItems = [...baseItems, ...notListedYet(baseItems, filteredIntegrations)];
 
                           return (
                             <>
@@ -7003,7 +7090,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           { id: "web-search", name: "Web search", description: "Find real-time news and info", icon: Globe2 },
                           { id: "deep-research", name: "Deep research", description: "Get a detailed report", icon: Globe2 },
                         ].filter(item => item.name.toLowerCase().includes(atMenuQuery.toLowerCase()));
-                        const menuItems = [...baseItems, ...filteredIntegrations];
+                        const menuItems = [...baseItems, ...notListedYet(baseItems, filteredIntegrations)];
 
                         if (e.key === 'ArrowDown') {
                           e.preventDefault();
@@ -7675,7 +7762,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       { id: "web-search", name: "Web search", description: "Find real-time news and info", icon: Globe2 },
                                       { id: "deep-research", name: "Deep research", description: "Get a detailed report", icon: Globe2 },
                                     ].filter(item => item.name.toLowerCase().includes(atMenuQuery.toLowerCase()));
-                                    const menuItems = [...baseItems, ...filteredIntegrations];
+                                    const menuItems = [...baseItems, ...notListedYet(baseItems, filteredIntegrations)];
 
                                     return (
                                       <>
@@ -7763,7 +7850,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                     { id: "web-search", name: "Web search", description: "Find real-time news and info", icon: Globe2 },
                                     { id: "deep-research", name: "Deep research", description: "Get a detailed report", icon: Globe2 },
                                   ].filter(item => item.name.toLowerCase().includes(atMenuQuery.toLowerCase()));
-                                  const menuItems = [...baseItems, ...filteredIntegrations];
+                                  const menuItems = [...baseItems, ...notListedYet(baseItems, filteredIntegrations)];
 
                                   if (e.key === 'ArrowDown') {
                                     e.preventDefault();

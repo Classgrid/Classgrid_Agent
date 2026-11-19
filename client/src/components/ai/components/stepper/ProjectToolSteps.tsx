@@ -32,6 +32,29 @@ const baseName = (p = '') => String(p).replace(/\\/g, '/').replace(/\/+$/, '').s
 const lineCount = (s = '') => (String(s) === '' ? 0 : String(s).split('\n').length);
 const isError = (s?: Step) => !!s?.result && /^(error|no project is open)/i.test(String(s.result).trim());
 
+// The plan file (a .md in the plan/ folder) the AI last wrote or changed in these steps, as a project path
+// ("plan/demo-plan.md"), or the full path when it wrote it with a full path on this computer; null when none.
+// The plan card's "View Plan" opens it.
+const PLAN_FILE = /(^|[\\/])plan[\\/][^\\/]+\.(md|markdown)$/i;
+// A markdown file's path as the AI's file tools give it, as a project path (a full Windows path stays as it is);
+// null when it isn't a markdown file
+export function markdownFilePath(raw: unknown): string | null {
+  const given = String(raw ?? '').trim();
+  const p = /^[A-Za-z]:[\\/]/.test(given)
+    ? given
+    : given.replace(/^\/data\/project\//, '').replace(/^\/data\//, '').replace(/^\/home\/workspace\/projects\/[^/]+\//, '').replace(/^\.\//, '').replace(/^\/+/, '');
+  return p && /\.(md|markdown)$/i.test(p) ? p : null;
+}
+export function planFileOf(steps?: { type?: string; tool?: string; status?: string; args?: any; result?: string }[]): string | null {
+  let found: string | null = null;
+  for (const s of steps || []) {
+    if (!s || !PROJECT_EDIT_TOOLS.has(String(s.tool)) || s.status === 'loading' || s.status === 'error' || isError(s as Step)) continue;
+    const p = markdownFilePath(s.args?.path);
+    if (p && PLAN_FILE.test(p)) found = p;
+  }
+  return found;
+}
+
 // File icons: the Seti set with VS Code's own Seti colours (the same icons as Studio's Files tab), for every file type
 const setiIcon = themeIcons({
   blue: '#519aba', grey: '#4d5a5e', 'grey-light': '#6d8086', green: '#8dc149', orange: '#e37933',

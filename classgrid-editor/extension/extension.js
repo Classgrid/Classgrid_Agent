@@ -716,6 +716,91 @@ async function showFile(full, startLine, endLine) {
   const range = new vscode.Range(from, 0, to, 0);
   await vscode.window.showTextDocument(doc, { viewColumn: vscode.ViewColumn.One, preview: false, selection: Number(startLine) > 0 ? range : undefined });
 }
+// The plan card's plan file (a .md in the plan/ folder of the folder open here), like Claude Code's plan: its own tab
+// beside the chat, the plan shown as a page (headings, lists, code, tables) in the editor's own colours, named after
+// the plan's first heading. The chat keeps the cursor (preserveFocus) and the plan card stays in the chat, so the box
+// to type in is never covered. One tab per plan file: asked again (View Plan), the same tab shows, or opens again if it
+// was closed; it follows the file while it changes on disk.
+const planTabs = new Map(); // the plan file's full path (lower case) -> { panel, watcher, timer }
+const escapeHtml = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+// The first heading's words, without the markdown around them ("# **Demo** plan" -> "Demo plan")
+const firstHeading = (text) => {
+  const h = (String(text).match(/^ {0,3}#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/m) || [])[1] || "";
+  return h.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`~]/g, "").replace(/\s+/g, " ").trim();
+};
+async function renderPlan(full) {
+  const text = fs.readFileSync(full, "utf8");
+  // (VS Code's own markdown, the same as its Markdown preview; the plain text if the editor has no markdown support)
+  const html = await vscode.commands.executeCommand("markdown.api.render", text).then((h) => (typeof h === "string" ? h : null), () => null);
+  return { title: firstHeading(text) || path.basename(full), body: html ?? `<pre>${escapeHtml(text)}</pre>` };
+}
+function planPage(webview, body) {
+  const nonce = crypto.randomBytes(16).toString("base64");
+  const csp = `default-src 'none'; img-src ${webview.cspSource} https: data:; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'`;
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}">
+<style>
+body{margin:0;padding:8px 28px 40px;color:var(--vscode-editor-foreground);background:var(--vscode-editor-background);font-family:var(--vscode-markdown-font-family,var(--vscode-font-family));font-size:var(--vscode-markdown-font-size,14px);line-height:var(--vscode-markdown-line-height,1.6);word-wrap:break-word}
+#plan{max-width:880px}
+h1,h2,h3,h4,h5,h6{font-weight:600;line-height:1.3;margin:1.3em 0 .5em}
+h1{font-size:1.9em;padding-bottom:.3em;border-bottom:1px solid var(--vscode-panel-border)}
+h2{font-size:1.45em;padding-bottom:.25em;border-bottom:1px solid var(--vscode-panel-border)}
+h3{font-size:1.2em}
+#plan>:first-child{margin-top:.6em}
+p,ul,ol,table,pre,blockquote{margin:0 0 .9em}
+ul,ol{padding-left:1.6em}
+li+li{margin-top:.2em}
+a{color:var(--vscode-textLink-foreground);text-decoration:none}
+a:hover{color:var(--vscode-textLink-activeForeground);text-decoration:underline}
+code{font-family:var(--vscode-editor-font-family);font-size:.92em;background:var(--vscode-textCodeBlock-background);padding:.1em .35em;border-radius:4px}
+pre{background:var(--vscode-textCodeBlock-background);padding:12px 14px;border-radius:6px;overflow:auto}
+pre code{background:none;padding:0;font-size:var(--vscode-editor-font-size,13px);line-height:1.5}
+table{border-collapse:collapse;display:block;overflow:auto}
+th,td{border:1px solid var(--vscode-panel-border);padding:6px 12px;text-align:left}
+th{font-weight:600}
+blockquote{margin-left:0;padding:2px 14px;border-left:4px solid var(--vscode-textBlockQuote-border);background:var(--vscode-textBlockQuote-background)}
+hr{border:0;border-top:1px solid var(--vscode-panel-border);margin:1.4em 0}
+img{max-width:100%}
+input[type=checkbox]{margin-right:.4em;vertical-align:middle}
+</style></head><body><div id="plan">${body}</div>
+<script nonce="${nonce}">window.addEventListener("message",function(e){var m=e.data||{};if(typeof m.planHtml==="string")document.getElementById("plan").innerHTML=m.planHtml;});</script>
+</body></html>`;
+}
+async function showPlan(folder, file) {
+  if (!parts.runner.isAllowed(folder)) throw new Error("This folder isn't open in Classgrid Code.");
+  const full = inside(folder, file);
+  if (!full || !/\.(md|markdown)$/i.test(full)) throw new Error("That plan file isn't in this project.");
+  if (!fs.existsSync(full)) throw new Error(`${path.relative(String(folder), full)} isn't there yet.`);
+  const key = full.toLowerCase();
+  const open = planTabs.get(key);
+  if (open) { open.panel.reveal(open.panel.viewColumn ?? vscode.ViewColumn.Beside, true); return { ok: true }; }
+  const first = await renderPlan(full);
+  // (opened again while it was being read: the tab that got there first)
+  const again = planTabs.get(key);
+  if (again) { again.panel.reveal(again.panel.viewColumn ?? vscode.ViewColumn.Beside, true); return { ok: true }; }
+  const panel = vscode.window.createWebviewPanel("classgrid.plan", first.title, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true }, { enableScripts: true, enableFindWidget: true, retainContextWhenHidden: true, localResourceRoots: [] });
+  panel.iconPath = vscode.Uri.file(path.join(__dirname, "media", "classgrid.svg"));
+  panel.webview.html = planPage(panel.webview, first.body);
+  const tab = { panel, watcher: null, timer: null };
+  planTabs.set(key, tab);
+  // The file changed (the AI updated the plan, or you saved it): the tab shows it again, in place
+  const refresh = () => {
+    clearTimeout(tab.timer);
+    tab.timer = setTimeout(() => {
+      if (!fs.existsSync(full)) return;
+      renderPlan(full).then(({ title, body }) => {
+        if (planTabs.get(key) !== tab) return;
+        panel.title = title;
+        panel.webview.postMessage({ planHtml: body });
+      }, (err) => log.appendLine(`[${new Date().toISOString()}] plan tab ${full}: ${err?.message || err}`));
+    }, 150);
+  };
+  tab.watcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(vscode.Uri.file(path.dirname(full)), path.basename(full)));
+  tab.watcher.onDidChange(refresh);
+  tab.watcher.onDidCreate(refresh);
+  panel.onDidDispose(() => { clearTimeout(tab.timer); tab.watcher?.dispose(); if (planTabs.get(key) === tab) planTabs.delete(key); });
+  return { ok: true };
+}
+
 const HANDLERS = {
   // (copy and paste in our screens: bridge.js)
   clipboardWrite: (_p, text) => vscode.env.clipboard.writeText(String(text ?? "")).then(() => undefined),
@@ -843,6 +928,8 @@ const HANDLERS = {
     await showFile(full, startLine, endLine);
     return { ok: true };
   },
+  // The plan card in the Agent panel: its plan file in the plan tab beside the chat (see showPlan)
+  showPlan: (_p, folder, file) => showPlan(String(folder || ""), String(file || "")),
   // The chats sidebar: its width (the icon strip, or open with the chat history), the chat picked in it (opens in the
   // Agent panel), and the chat the Agent panel shows (marked in the sidebar)
   // (the editor reads the width straight from the page, classgrid-left-strip.patch: setting it here too came late
