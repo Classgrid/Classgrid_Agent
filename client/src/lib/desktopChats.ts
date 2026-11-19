@@ -135,6 +135,23 @@ export async function listOtherChatCopies(listQuery: string): Promise<OtherAccou
     .filter((a) => a.chats.length > 0);
 }
 
+// A chat that belongs to another account on this computer (its saved copy is here), by its id, or null. The chat
+// panel opens a chat by its id (the last chat Classgrid Code or the extension had open in a folder, a link): when the
+// server says it isn't this account's, it opens from this copy and goes on under this account, like switching
+// accounts in Claude Code (owner, 2026-11-19: Antigravity, after a demo account, answered "Unauthorized" to every
+// message instead)
+export async function findOtherChat(chatId: string): Promise<OtherChatRef | null> {
+  const d = desktop();
+  if (!d?.listOtherChats || !chatId) return null;
+  const accounts = await d.listOtherChats().catch(() => null);
+  if (!Array.isArray(accounts)) return null;
+  for (const a of accounts) {
+    const c = (a.chats || []).find((x: { id?: string }) => x?.id === chatId);
+    if (c) return { userId: a.userId, chatId, email: a.email || null, title: c.title || "New chat" };
+  }
+  return null;
+}
+
 // Another account's saved chat: { details, messages, email } in the server's shape, or null
 export async function readOtherChatCopy(userId: string, chatId: string): Promise<{ details: any; messages: any[]; email: string | null } | null> {
   const d = desktop();

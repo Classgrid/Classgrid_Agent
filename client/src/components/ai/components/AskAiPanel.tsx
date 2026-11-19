@@ -250,7 +250,7 @@ import { docContextLine, getOpenDoc, openDocInStudio, splitDocContext, type Open
 
 import { LOCAL_IMAGE_MISSING, jpegName, keepLocalImage, loadLocalImages, readAsDataUrl, sendsInline, shrinkForAi, showLocalImages } from "@/lib/desktopImages";
 
-import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
+import { OFFLINE_CHAT_NOTE, continueChatCopy, continuedChatOf, continuedFrom, findOtherChat, isUnreachable, keepsChatCopies, readChatCopy, readOtherChatCopy, removeChatCopy, saveChatCopy, syncChatCopy, type OtherChatRef } from "@/lib/desktopChats";
 
 import { memoryNotesIndex, otherAccountsMemory, syncComputerMemory } from "@/lib/desktopMemory";
 
@@ -3717,6 +3717,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         console.error("Failed to load chat from route", err);
         // (the saved copy is already on screen: keep it, no error, unless the chat is gone)
         if (copyFirst.shown() && !(err?.status === 403 || err?.status === 404) && !isUnreachable(err)) return;
+        // Another account's chat that is saved on this computer: it opens from that copy, and the next message goes on
+        // with it under this account (desktopChats.ts findOtherChat)
+        if ((err?.status === 403 || err?.status === 404) && keepsChatCopies()) {
+          const other = await findOtherChat(routeSessionId).catch(() => null);
+          if (controller.signal.aborted) return;
+          if (other) { window.dispatchEvent(new CustomEvent("agent:open-other-chat", { detail: other })); return; }
+        }
         if (err?.status === 403 || err?.status === 404) removeChatCopy(routeSessionId);
         // Desktop app, no internet: open the copy saved on this computer instead
         if (keepsChatCopies() && (isUnreachable(err) || err?.name === "AbortError") && await showSavedChatCopy(routeSessionId)) return;

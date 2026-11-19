@@ -26,14 +26,13 @@ const LAST_CHAT_KEY = "classgrid.lastChat"; // the chat open in the Agent panel,
 function tokenUser() {
   try { return String(JSON.parse(Buffer.from(String(storage.token || "").split(".")[1] || "", "base64url").toString("utf8")).id || ""); } catch { return ""; }
 }
-// The folder's last chat, only when it is the signed-in account's: after signing in with another account, the panel
-// reopened the other account's chat and every message got "Unauthorized. You do not have permission to view this
-// chat" (owner, 2026-11-19, Antigravity after a demo account). An old plain id (saved before the account was kept
-// with it) is not reopened.
+// The folder's last chat (an old plain id, or { chat, user }). It reopens whatever account is signed in now: a chat of
+// another account opens from the copy on this computer and the next message goes on with it under this account, like
+// switching accounts in Claude Code (the Agent panel does that: AskAiPanel, findOtherChat). Owner, 2026-11-19: "just
+// like Claude Code, no button".
 function lastChatFor(saved) {
-  if (!saved || typeof saved !== "object") return null;
-  const chat = String(saved.chat || "");
-  return /^[\w-]+$/.test(chat) && saved.user && saved.user === tokenUser() ? chat : null;
+  const chat = String((saved && typeof saved === "object" ? saved.chat : saved) || "");
+  return /^[\w-]+$/.test(chat) ? chat : null;
 }
 
 let parts = null; // the desktop app's runner, chats and memory (after activate)
