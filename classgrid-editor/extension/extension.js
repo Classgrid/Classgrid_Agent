@@ -21,7 +21,20 @@ const DESKTOP_DIR = firstThere(path.join(__dirname, "desktop"), path.join(__dirn
 const API = /^https:\/\/api\.classgrid\.in\//;
 const UPLOAD = /^https:\/\/[a-z0-9]+\.r2\.cloudflarestorage\.com\//; // a chat file going to our storage (a signed link)
 const STORAGE_KEY = "classgrid.storage";
-const LAST_CHAT_KEY = "classgrid.lastChat"; // the chat open in the Agent panel, per folder
+const LAST_CHAT_KEY = "classgrid.lastChat"; // the chat open in the Agent panel, per folder: { chat, user }
+// The account of the login this editor has (the id in its token), or "" when signed out
+function tokenUser() {
+  try { return String(JSON.parse(Buffer.from(String(storage.token || "").split(".")[1] || "", "base64url").toString("utf8")).id || ""); } catch { return ""; }
+}
+// The folder's last chat, only when it is the signed-in account's: after signing in with another account, the panel
+// reopened the other account's chat and every message got "Unauthorized. You do not have permission to view this
+// chat" (owner, 2026-11-19, Antigravity after a demo account). An old plain id (saved before the account was kept
+// with it) is not reopened.
+function lastChatFor(saved) {
+  if (!saved || typeof saved !== "object") return null;
+  const chat = String(saved.chat || "");
+  return /^[\w-]+$/.test(chat) && saved.user && saved.user === tokenUser() ? chat : null;
+}
 
 let parts = null; // the desktop app's runner, chats and memory (after activate)
 let deviceId;
@@ -82,8 +95,8 @@ async function activate(context) {
       screens.agent = view.webview;
       // (it opens on the chat that was open last time in this folder, like the editor brings back your files)
       const load = holdScreens(view.webview, () => {
-        const last = context.workspaceState.get(LAST_CHAT_KEY);
-        return typeof last === "string" && /^[\w-]+$/.test(last) ? `/editor/project/${last}` : "/editor/project";
+        const last = lastChatFor(context.workspaceState.get(LAST_CHAT_KEY));
+        return last ? `/editor/project/${last}` : "/editor/project";
       });
       view.onDidDispose(() => { loaders.delete(load); stopFetches(view.webview); if (screens.agent === view.webview) screens.agent = null; });
       view.onDidChangeVisibility(() => { if (view.visible) screens.agent = view.webview; });
@@ -843,7 +856,7 @@ const HANDLERS = {
   activeChat: (_p, id) => {
     screens.chats?.postMessage({ cgEvent: "activeChat", data: id ? String(id) : null });
     // (remembered for this folder: Classgrid Code opens on it next time)
-    parts?.context.workspaceState.update(LAST_CHAT_KEY, id ? String(id) : undefined).then(undefined, () => {});
+    parts?.context.workspaceState.update(LAST_CHAT_KEY, id ? { chat: String(id), user: tokenUser() } : undefined).then(undefined, () => {});
   },
   // Settings → Log out: one login for Classgrid Code and the Classgrid app, so both log out (the website stays signed in).
   // In another editor only this editor logs out (sharedLogin).
