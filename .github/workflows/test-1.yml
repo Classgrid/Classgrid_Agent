@@ -1,0 +1,17 @@
+# A test run started by hand (owner, 2026-11-19): it only waits 4 minutes and finishes. Nothing is built or published.
+name: test 1
+
+on:
+  workflow_dispatch:
+
+jobs:
+  wait:
+    name: test 1
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Wait 4 minutes
+        run: |
+          echo "test 1 started at $(date -u)"
+          sleep 240
+          echo "test 1 finished at $(date -u)"
