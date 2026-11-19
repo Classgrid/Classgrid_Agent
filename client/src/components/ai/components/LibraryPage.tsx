@@ -48,11 +48,20 @@ interface Quota {
   used_bytes: number;
   max_bytes: number;
   percentage: number;
+  // (the server's storage answer: the user's plan, not a fixed 600 MB)
+  unlimited?: boolean;
+  plan?: { key: string; name: string } | null;
 }
+
+type SourceFilter = 'all' | 'uploaded' | 'generated';
+const isGenerated = (f: LibraryFile) => f.source === 'generated';
+const pctOf = (q: Quota) => (q.unlimited || !q.max_bytes ? 0 : Math.min(100, (q.used_bytes / q.max_bytes) * 100));
 
 export function LibraryPage() {
   const [files, setFiles] = useState<LibraryFile[]>(() => readPageCache<{ files: LibraryFile[] }>("library:newest:all")?.files || []);
-  const [quota, setQuota] = useState<Quota>({ used_bytes: 0, max_bytes: 629145600, percentage: 0 });
+  // (max_bytes 0 = not known yet: nothing is shown until the server says the plan's room)
+  const [quota, setQuota] = useState<Quota>({ used_bytes: 0, max_bytes: 0, percentage: 0 });
+  const [source, setSource] = useState<SourceFilter>('all');
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'image' | 'video' | 'pdf' | 'doc' | 'audio'>('all');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'largest'>('newest');
@@ -83,7 +92,7 @@ export function LibraryPage() {
       const keyNow = `library:${sort}:${activeTab}`;
       const kept = readPageCache<{ files: LibraryFile[]; quota: Quota | null }>(keyNow);
       const showQuota = (q: Quota | null | undefined) => {
-        if (q) setQuota({ ...q, percentage: Math.min(100, (q.used_bytes / q.max_bytes) * 100) });
+        if (q) setQuota({ ...q, percentage: pctOf(q) });
       };
       if (kept) { setFiles(kept.files); showQuota(kept.quota); setIsLoading(false); }
       else setIsLoading(true);
@@ -127,7 +136,7 @@ export function LibraryPage() {
     if (acceptedFiles.length === 0) return;
     const file = acceptedFiles[0];
     
-    if (quota.used_bytes + file.size > quota.max_bytes) {
+    if (!quota.unlimited && quota.max_bytes > 0 && quota.used_bytes + file.size > quota.max_bytes) {
       toast.error("Storage quota exceeded. Please delete some files first.");
       return;
     }
@@ -181,10 +190,7 @@ export function LibraryPage() {
       });
       if (res.ok) {
         const data = await res.json();
-        if (data.quota) {
-          const percentage = Math.min(100, (data.quota.used_bytes / data.quota.max_bytes) * 100);
-          setQuota({ ...data.quota, percentage });
-        }
+        if (data.quota) setQuota({ ...data.quota, percentage: pctOf(data.quota) });
       } else {
         setFiles(before);
         toast.error("Failed to delete file.");
@@ -218,8 +224,10 @@ export function LibraryPage() {
   const filteredFiles = files.filter(f => {
     const matchesSearch = f.original_name.toLowerCase().includes(search.toLowerCase());
     const matchesDate = dateFilter ? f.created_at.startsWith(format(dateFilter, "yyyy-MM-dd")) : true;
-    return matchesSearch && matchesDate;
+    const matchesSource = source === 'all' || (source === 'generated' ? isGenerated(f) : !isGenerated(f));
+    return matchesSearch && matchesDate && matchesSource;
   });
+  const sourceCounts = { all: files.length, uploaded: files.filter(f => !isGenerated(f)).length, generated: files.filter(isGenerated).length };
 
   const getFileIcon = (type: string) => {
     switch (type) {
@@ -236,15 +244,31 @@ export function LibraryPage() {
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-y-auto">
       {/* Header */}
-      <div className="px-6 pt-2 pb-6 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-40">
-        <div className="max-w-6xl mx-auto w-full">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div>
-            {/* (desktop app, Studio: the name is in the top bar above instead) */}
-            {!(import.meta.env.VITE_DESKTOP === "1" && location.pathname.split("/").includes("studio")) && (
-              <h1 className="text-3xl font-bold tracking-tight mb-2">Library</h1>
-            )}
-            <p className="text-muted-foreground text-sm">Manage your uploaded and AI-generated files.</p>
+      <div className="px-6 pt-4 pb-5 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-40">
+        <div className="max-w-6xl mx-auto w-full flex flex-col gap-5">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          {/* Uploaded by you, or made by Classgrid AI. (No page title here: the top bar already says Library,
+              owner, 2026-11-19: "header has Library, still you show it again") */}
+          <div role="tablist" aria-label="Who made the files" className="inline-flex items-center gap-0.5 p-1 rounded-full bg-accent/60 border border-border/50 self-start">
+            {([
+              { id: 'all', label: 'All' },
+              { id: 'uploaded', label: 'Uploaded' },
+              { id: 'generated', label: 'AI-generated' },
+            ] as const).map(s => (
+              <button
+                key={s.id}
+                type="button"
+                role="tab"
+                aria-selected={source === s.id}
+                onClick={() => setSource(s.id)}
+                className={`flex items-center gap-1.5 h-8 px-3.5 rounded-full text-sm font-medium transition-colors whitespace-nowrap cursor-pointer ${
+                  source === s.id ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {s.label}
+                <span className="text-xs tabular-nums text-muted-foreground">{sourceCounts[s.id]}</span>
+              </button>
+            ))}
           </div>
           
           <div className="flex items-center gap-4">
@@ -268,22 +292,30 @@ export function LibraryPage() {
           </div>
         </div>
 
-        {/* Quota Bar */}
+        {/* Storage: the room of the user's plan (Free, Pro, Max each have their own) */}
         <div className="flex flex-col gap-2">
-          <div className="flex justify-between items-end">
-            <span className="text-sm font-medium">Storage Usage</span>
-            <span className="text-xs text-muted-foreground">
-              {formatBytes(quota.used_bytes)} / {formatBytes(quota.max_bytes)}
+          <div className="flex justify-between items-end gap-3">
+            <span className="text-sm font-medium">
+              Storage{quota.plan?.name ? <span className="ml-1.5 text-xs font-normal text-muted-foreground">{quota.plan.name} plan</span> : null}
+            </span>
+            <span className="text-xs text-muted-foreground tabular-nums">
+              {quota.unlimited
+                ? `${formatBytes(quota.used_bytes)} used · Unlimited`
+                : quota.max_bytes > 0
+                  ? `${formatBytes(quota.used_bytes)} of ${formatBytes(quota.max_bytes)}`
+                  : '…'}
             </span>
           </div>
-          <div className="h-2 w-full bg-accent rounded-full overflow-hidden">
-            <div 
-              className={`h-full transition-all duration-500 ${quota.percentage > 80 ? 'bg-red-500' : 'bg-foreground'}`}
-              style={{ width: `${quota.percentage}%` }}
-            />
-          </div>
-          {quota.percentage > 80 && (
-            <p className="text-xs text-red-500 mt-1">Storage is almost full. Delete some files to free up space.</p>
+          {!quota.unlimited && (
+            <div className="h-2 w-full bg-accent rounded-full overflow-hidden">
+              <div
+                className={`h-full transition-all duration-500 ${quota.percentage > 90 ? 'bg-red-500' : quota.percentage > 80 ? 'bg-amber-500' : 'bg-foreground'}`}
+                style={{ width: `${quota.percentage}%` }}
+              />
+            </div>
+          )}
+          {!quota.unlimited && quota.percentage > 80 && (
+            <p className="text-xs text-red-500 mt-1">Storage is almost full. Delete some files, or upgrade your plan for more space.</p>
           )}
         </div>
 
@@ -378,7 +410,13 @@ export function LibraryPage() {
             </div>
             <h3 className="text-lg font-medium mb-2">No files found</h3>
             <p className="text-muted-foreground text-sm max-w-sm">
-              {search ? "We couldn't find any files matching your search." : "You haven't uploaded any files yet. Drag and drop a file anywhere or click the upload button to get started."}
+              {search
+                ? "We couldn't find any files matching your search."
+                : source === 'generated'
+                  ? "Files Classgrid AI makes for you (pictures, PDFs, documents) show up here."
+                  : source === 'uploaded'
+                    ? "You haven't uploaded any files yet. Click Upload File to add one."
+                    : "You haven't uploaded any files yet. Drag and drop a file anywhere or click the upload button to get started."}
             </p>
           </div>
         ) : (

@@ -3,8 +3,9 @@
 // editor, and our screens follow it), the AI Hub's pages (Plugins, Images, Skills, Connected apps, Usage, AI Credits,
 // Upgrade: here instead of a window over the editor) and Docs.
 import { useEffect, useState } from "react";
-import { Activity, BookOpen, Bell, CreditCard, LogOut, Monitor, Moon, Palette, Sun, User } from "lucide-react";
+import { Activity, BookOpen, Bell, CreditCard, HardDrive, LogOut, Monitor, Moon, Palette, Sun, User } from "lucide-react";
 import { SettingsUsageSection } from "@/features/shared/components/settings/SettingsUsageSection";
+import { SettingsStorageSection } from "@/features/shared/components/settings/SettingsStorageSection";
 import { SettingsBillingSection } from "@/features/shared/components/settings/SettingsBillingSection";
 import { SettingsDesktopNotificationsCard } from "@/features/shared/components/settings/SettingsDesktopNotificationsCard";
 import { useTheme } from "next-themes";
@@ -29,6 +30,7 @@ const SECTIONS = [
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "notifications", label: "Notifications", icon: Bell },
   { id: "usage", label: "Usage", icon: Activity },
+  { id: "storage", label: "Storage", icon: HardDrive },
   { id: "billing", label: "Billing", icon: CreditCard },
 ] as const;
 type Section = string;
@@ -207,6 +209,7 @@ export function EditorSettingsPage() {
             <div className="max-w-2xl"><SettingsDesktopNotificationsCard /></div>
           )}
           {section === "usage" && <SettingsUsageSection />}
+          {section === "storage" && <SettingsStorageSection noLibraryLink />}
           {section === "billing" && <SettingsBillingSection />}
           {section === "appearance" && (
             <>

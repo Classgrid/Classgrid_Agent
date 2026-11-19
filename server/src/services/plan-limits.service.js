@@ -71,6 +71,50 @@ function untilText(ms) {
     const h = Math.floor(m / 60);
     return h < 48 ? `in ${h} h ${m % 60} min` : `in ${Math.round(h / 24)} days`;
 }
+// ── The Library's storage, as every screen shows it (owner, 2026-11-19: "every plan shows the same 600 MB") ──
+// One answer for the Library page, Settings > Storage and the phone app: used = every file in the Library (uploaded or
+// made by the AI, the same sum the upload check and Settings > Usage use), max = the user's plan (library_storage_mb).
+// Plans off: the old per-user row (600 MB unless the super admin changed it). Classgrid staff, or a plan with -1:
+// unlimited (max_bytes is then 1 TB, so older phone apps that need a number above 0 still show something sensible).
+const UNLIMITED_BYTES = 1024 * 1024 * 1024 * 1024;
+export async function libraryStorageFor(user) {
+    const { default: AiLibraryFile } = await import("../models/AiLibraryFile.js");
+    const userId = user?._id;
+    const rows = userId
+        ? await AiLibraryFile.aggregate([{ $match: { user_id: userId } }, { $group: { _id: "$source", bytes: { $sum: "$size_bytes" }, count: { $sum: 1 } } }]).catch(() => [])
+        : [];
+    // (a file with no source is an upload: the model's default)
+    const sum = (keep) => rows.filter(keep).reduce((a, r) => ({ bytes: a.bytes + (r.bytes || 0), count: a.count + (r.count || 0) }), { bytes: 0, count: 0 });
+    const generated = sum((r) => r._id === "generated");
+    const uploaded = sum((r) => r._id !== "generated");
+    const usedBytes = uploaded.bytes + generated.bytes;
+
+    const [plan, enabled] = await Promise.all([planOf(user).catch(() => null), plansEnabled().catch(() => false)]);
+    let maxBytes;
+    let unlimited = false;
+    if (plan) {
+        const capMb = Number(plan.library_storage_mb);
+        if (isUnlimited(capMb)) unlimited = true;
+        else maxBytes = Math.max(0, Number.isFinite(capMb) ? capMb : 600) * 1024 * 1024;
+    } else if (enabled) {
+        unlimited = true; // (plans on, no plan row: Classgrid staff, no plan gate applies to them)
+    } else {
+        const { default: UserStorageQuota } = await import("../models/UserStorageQuota.js");
+        const row = userId ? await UserStorageQuota.findOne({ user_id: userId }).select("max_bytes").lean().catch(() => null) : null;
+        maxBytes = Number(row?.max_bytes) > 0 ? Number(row.max_bytes) : 629145600;
+    }
+    if (unlimited) maxBytes = UNLIMITED_BYTES;
+    return {
+        used_bytes: usedBytes,
+        max_bytes: maxBytes,
+        percentage: unlimited || !maxBytes ? 0 : Math.min(100, (usedBytes / maxBytes) * 100),
+        unlimited,
+        plan: plan ? { key: plan.key, name: plan.name } : null,
+        uploaded,
+        generated,
+    };
+}
+
 export async function checkUploadAllowed(user, sizeBytes) {
     const plan = await planOf(user).catch(() => null);
     if (!plan) return { ok: true };

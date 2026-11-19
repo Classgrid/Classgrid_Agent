@@ -82,6 +82,8 @@ import { SettingsDesktopNotificationsCard } from "../components/settings/Setting
 import { isChatHost } from "@/lib/chatHost";
 import { SettingsBrowserSection } from "../components/settings/SettingsBrowserSection";
 import { SettingsUsageSection } from "../components/settings/SettingsUsageSection";
+import { SettingsStorageSection } from "../components/settings/SettingsStorageSection";
+import { SettingsArchivedChatsSection } from "../components/settings/SettingsArchivedChatsSection";
 import { SettingsBillingSection } from "../components/settings/SettingsBillingSection";
 import { SettingsDevicesSection } from "../components/settings/SettingsDevicesSection";
 import { SettingsEditorExtensionCard } from "../components/settings/SettingsEditorExtensionCard";
@@ -244,6 +246,8 @@ export function SharedSettingsPage() {
         )
       )}
 
+      {section === "archived" && <SettingsArchivedChatsSection />}
+
       {section === "devices" && <SettingsDevicesSection />}
 
       {section === "browser" && <SettingsBrowserSection role={role} />}
@@ -251,6 +255,8 @@ export function SharedSettingsPage() {
       {section === "mastero" && <SettingsMasteroSection />}
 
       {section === "usage" && <SettingsUsageSection />}
+
+      {section === "storage" && <SettingsStorageSection />}
 
       {section === "billing" && <SettingsBillingSection />}
 

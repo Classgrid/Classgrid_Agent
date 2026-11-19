@@ -30,6 +30,7 @@
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import AiLibraryFile from '../models/AiLibraryFile.js';
 import UserStorageQuota from '../models/UserStorageQuota.js';
+import { libraryStorageFor } from '../services/plan-limits.service.js';
 import { uploadBufferToR2, deleteFromR2 } from '../config/r2Client.js';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -63,17 +64,19 @@ export const uploadToLibrary = async (req, res) => {
       return res.status(uploadCheck.status).json({ error: uploadCheck.error, code: uploadCheck.code, plan: uploadCheck.plan });
     }
 
+    // The Library's room is the user's plan (not a fixed 600 MB for everyone: owner, 2026-11-19)
+    const storage = await libraryStorageFor(req.user);
+    if (!storage.unlimited && storage.used_bytes + fileSizeBytes > storage.max_bytes) {
+      return res.status(400).json({
+        error: 'quota_exceeded',
+        used: storage.used_bytes,
+        max: storage.max_bytes
+      });
+    }
+    // (the old per-user counter is still kept up to date for anything that reads it)
     let quota = await UserStorageQuota.findOne({ user_id: userId });
     if (!quota) {
       quota = new UserStorageQuota({ user_id: userId, user_email: userEmail });
-    }
-
-    if (quota.used_bytes + fileSizeBytes > quota.max_bytes) {
-      return res.status(400).json({ 
-        error: 'quota_exceeded', 
-        used: quota.used_bytes, 
-        max: quota.max_bytes 
-      });
     }
 
     const fileType = getFileType(file.mimetype);
@@ -107,7 +110,7 @@ export const uploadToLibrary = async (req, res) => {
       console.error("Failed to emit socket event:", err);
     }
 
-    return res.status(201).json({ file: libraryFile, quota });
+    return res.status(201).json({ file: libraryFile, quota: await libraryStorageFor(req.user) });
   } catch (error) {
     console.error('Error in uploadToLibrary:', error);
     return res.status(500).json({ error: 'Internal server error' });
@@ -129,13 +132,10 @@ export const getLibrary = async (req, res) => {
     else if (sort === 'largest') sortQuery = { size_bytes: -1 };
     else if (sort === 'smallest') sortQuery = { size_bytes: 1 };
 
-    const files = await AiLibraryFile.find(query).sort(sortQuery);
-
-    let quota = await UserStorageQuota.findOne({ user_id: userId });
-    if (!quota) {
-      quota = new UserStorageQuota({ user_id: userId, user_email: req.user.email });
-      await quota.save();
-    }
+    const [files, quota] = await Promise.all([
+      AiLibraryFile.find(query).sort(sortQuery),
+      libraryStorageFor(req.user),
+    ]);
 
     return res.status(200).json({ files, quota });
   } catch (error) {
@@ -175,7 +175,7 @@ export const deleteFromLibrary = async (req, res) => {
       console.error("Failed to emit socket event:", err);
     }
 
-    return res.status(200).json({ success: true, quota });
+    return res.status(200).json({ success: true, quota: await libraryStorageFor(req.user) });
   } catch (error) {
     console.error('Error in deleteFromLibrary:', error);
     return res.status(500).json({ error: 'Internal server error' });
@@ -185,19 +185,7 @@ export const deleteFromLibrary = async (req, res) => {
 export const getQuota = async (req, res) => {
   try {
     const userId = req.user._id;
-    let quota = await UserStorageQuota.findOne({ user_id: userId });
-    if (!quota) {
-      quota = new UserStorageQuota({ user_id: userId, user_email: req.user.email });
-      await quota.save();
-    }
-
-    const percentage = Math.min(100, (quota.used_bytes / quota.max_bytes) * 100);
-
-    return res.status(200).json({
-      used_bytes: quota.used_bytes,
-      max_bytes: quota.max_bytes,
-      percentage
-    });
+    return res.status(200).json(await libraryStorageFor(req.user));
   } catch (error) {
     console.error('Error in getQuota:', error);
     return res.status(500).json({ error: 'Internal server error' });

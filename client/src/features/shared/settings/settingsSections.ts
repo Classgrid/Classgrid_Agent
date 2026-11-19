@@ -1,11 +1,11 @@
 // Settings, divided into sections (like ChatGPT's settings): the left sidebar lists them (SettingsNav) and the page
 // shows the one picked (?section=...). Each section says who sees it and the words search finds it by.
 import { useSearchParams } from "react-router-dom";
-import { Activity, Bell, CreditCard, Globe, Lock, MonitorSmartphone, Palette, Settings2, UserRound, type LucideIcon } from "lucide-react";
+import { Activity, Archive, Bell, CreditCard, Globe, HardDrive, Lock, MonitorSmartphone, Palette, Settings2, UserRound, type LucideIcon } from "lucide-react";
 import { isChatHost } from "@/lib/chatHost";
 import { MasteroMark } from "@/components/icons/MasteroMark";
 
-export type SettingsSectionId = "general" | "notifications" | "privacy" | "account" | "devices" | "browser" | "mastero" | "usage" | "billing" | "platform";
+export type SettingsSectionId = "general" | "notifications" | "privacy" | "account" | "archived" | "devices" | "browser" | "mastero" | "usage" | "storage" | "billing" | "platform";
 export type SettingsSection = { id: SettingsSectionId; label: string; icon: LucideIcon | typeof MasteroMark; words: string };
 type Who = { role?: string | null };
 
@@ -15,15 +15,19 @@ export function settingsSections({ role }: Who): SettingsSection[] {
   const chat = isChatHost();
   // The push notifications card (SharedSettingsPage): only for roles that have it on the main site
   const push = !!role && role !== "org_admin" && role !== "super_admin" && role !== "user" && !chat;
+  // Classgrid AI's own sections (the chat site and the desktop app): your archived chats and the Library's storage
+  const ai = chat || DESKTOP;
   return [
     { id: "general" as const, label: "General", icon: Settings2, words: "appearance theme dark mode light role sidebar code editors vs code cursor windsurf extension" },
     ...(DESKTOP || push ? [{ id: "notifications" as const, label: "Notifications", icon: Bell, words: "notifications sound volume agent grids alerts push" }] : []),
     { id: "privacy" as const, label: "Privacy", icon: Lock, words: "privacy data domain verified identity" },
     { id: "account" as const, label: "Account", icon: UserRound, words: "account password delete role request security whatsapp number verify" },
+    ...(ai ? [{ id: "archived" as const, label: "Archived chats", icon: Archive, words: "archived chats archive unarchive restore hidden chats delete chat history" }] : []),
     { id: "devices" as const, label: "Devices", icon: MonitorSmartphone, words: "devices signed in sign-ins logins log out logout all phone app desktop app website browser code editor vs code cursor security" },
     { id: "browser" as const, label: "Browser", icon: Globe, words: "browser history downloads cookies logins site data cache camera microphone location notifications websites permissions block allow" },
     { id: "mastero" as const, label: "Mastero", icon: MasteroMark, words: "mastero projects github push commit revert undo cloud computer node python" },
     { id: "usage" as const, label: "Usage", icon: Activity, words: "usage limits session weekly claude fable deepseek glm whatsapp calls voice credits history" },
+    ...(ai ? [{ id: "storage" as const, label: "Storage", icon: HardDrive, words: "storage space library files uploads uploaded generated ai-generated quota mb gb full disk" }] : []),
     { id: "billing" as const, label: "Billing", icon: CreditCard, words: "billing invoices plan upgrade pro max credits buy top-up auto top-up payment receipt pricing" },
     ...(role === "super_admin" ? [{ id: "platform" as const, label: "Platform", icon: Palette, words: "platform branding name logo" }] : []),
   ];
