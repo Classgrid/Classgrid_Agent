@@ -3,9 +3,10 @@
 // services/plan-limits.service.js libraryStorageFor), split into files you uploaded and files Classgrid AI made.
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ChevronRight, FileUp, HardDrive, RefreshCw, Sparkles, Trash2 } from "lucide-react";
+import { ChevronRight, FileUp, HardDrive, Sparkles, Trash2 } from "lucide-react";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { fetchWithRescue } from "@/lib/rescue";
+import { getSocket } from "@/lib/socketClient";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 const DESKTOP = import.meta.env.VITE_DESKTOP === "1" || import.meta.env.VITE_EDITOR === "1";
@@ -36,22 +37,29 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
   const navigate = useNavigate();
   const [data, setData] = useState<Storage | null>(null);
   const [failed, setFailed] = useState(false);
-  const [busy, setBusy] = useState(false);
 
+  // (quiet: the numbers change by themselves, so no spinner and no refresh button)
   const load = useCallback(async () => {
-    setBusy(true);
-    setFailed(false);
     try {
       const res = await fetchWithRescue(`${backendUrl}/api/ai/library/quota`, { credentials: "include" });
       if (!res.ok) throw new Error(String(res.status));
       setData(await res.json());
+      setFailed(false);
     } catch {
-      setFailed(true);
-    } finally {
-      setBusy(false);
+      // (a failed quiet refresh keeps the numbers already on screen)
+      setData((now) => { if (!now) setFailed(true); return now; });
     }
   }, []);
   useEffect(() => { load(); }, [load]);
+
+  // Live: the server says ai_library_updated on every upload, delete, restore and empty (the Library listens too)
+  useEffect(() => {
+    const socket = getSocket();
+    if (!socket) return;
+    const onLibraryUpdate = () => { load(); };
+    socket.on("ai_library_updated", onLibraryUpdate);
+    return () => { socket.off("ai_library_updated", onLibraryUpdate); };
+  }, [load]);
 
   // (?source= opens the Library on that kind of file, ?trash=1 on its Trash)
   const openLibrary = (q = "") => navigate(`${DESKTOP ? "/c/studio" : "/c/agent"}/library${q}`);
@@ -89,13 +97,7 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
 
   return (
     <div>
-      <div className="flex items-center justify-between gap-3">
-        <h2 className="text-xl font-semibold text-foreground">Storage</h2>
-        <button type="button" onClick={load} disabled={busy} title="Refresh"
-          className="size-8 flex items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer disabled:opacity-50">
-          <RefreshCw className={`size-4 ${busy ? "animate-spin" : ""}`} />
-        </button>
-      </div>
+      <h2 className="text-xl font-semibold text-foreground">Storage</h2>
 
       {/* The plan's room */}
       <div className="rounded-xl border border-border bg-card mt-5 p-5">

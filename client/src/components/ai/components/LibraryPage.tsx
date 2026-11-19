@@ -142,7 +142,8 @@ export function LibraryPage() {
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length === 0) return;
     const file = acceptedFiles[0];
-    
+    if (!file) return;
+
     if (!quota.unlimited && quota.max_bytes > 0 && quota.used_bytes + file.size > quota.max_bytes) {
       toast.error("Storage quota exceeded. Please delete some files first.");
       return;
