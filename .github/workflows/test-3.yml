@@ -1,0 +1,55 @@
+name: test 3
+
+# A test workflow (owner, 2026-11-19): runs from the moment it starts until 8:01 AM IST
+# (20 Nov 2026, 02:31 UTC). One GitHub job can run at most 6 hours, so it is three jobs
+# chained with needs, each one sleeping until its target time. test-2 (the 4-minute one) was deleted.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/test-3.yml'
+
+jobs:
+  part-1:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sleep until 11:46 PM IST
+        run: |
+          echo "Started: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          target=$(date -u -d "2026-11-19 18:16:00" +%s)
+          now=$(date -u +%s)
+          remaining=$((target - now))
+          echo "Sleeping $remaining seconds"
+          if [ "$remaining" -gt 0 ]; then sleep "$remaining"; fi
+          echo "Part 1 done: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+  part-2:
+    needs: part-1
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sleep until 3:46 AM IST
+        run: |
+          echo "Part 2 start: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          target=$(date -u -d "2026-11-19 22:16:00" +%s)
+          now=$(date -u +%s)
+          remaining=$((target - now))
+          echo "Sleeping $remaining seconds"
+          if [ "$remaining" -gt 0 ]; then sleep "$remaining"; fi
+          echo "Part 2 done: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+
+  part-3:
+    needs: part-2
+    runs-on: ubuntu-latest
+    steps:
+      - name: Sleep until 8:01 AM IST
+        run: |
+          echo "Part 3 start: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          target=$(date -u -d "2026-11-20 02:31:00" +%s)
+          now=$(date -u +%s)
+          remaining=$((target - now))
+          echo "Sleeping $remaining seconds"
+          if [ "$remaining" -gt 0 ]; then sleep "$remaining"; fi
+          echo "Part 3 done: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
