@@ -89,6 +89,7 @@ const SECTIONS: Section[] = [
   { title: "Files and devices", icon: HardDrive, fields: [
     { key: "uploads_per_window", label: "Uploads per session", type: "number", unlimited: true },
     { key: "upload_max_mb", label: "Largest upload", type: "number", unit: "MB" },
+    { key: "files_per_message", label: "Pictures and files per message", type: "number" },
     { key: "library_storage_mb", label: "Library storage", type: "number", unit: "MB", unlimited: true },
     { key: "devices_max", label: "Signed-in devices", type: "number", unlimited: true },
   ] },

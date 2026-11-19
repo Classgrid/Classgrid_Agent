@@ -76,6 +76,9 @@ const planConfigSchema = new mongoose.Schema(
         // Files and devices
         uploads_per_window: { type: Number, default: 0 },
         upload_max_mb: { type: Number, default: 10 },
+        // Pictures and files one message may carry (owner, 2026-11-19: "6 for Free, 12 for Pro, 15 for Max; not
+        // hard-coded, in the super admin's plans so we can adjust it")
+        files_per_message: { type: Number, default: 6 },
         library_storage_mb: { type: Number, default: 600 },
         devices_max: { type: Number, default: 2 },
 
@@ -106,7 +109,7 @@ export const DEFAULT_PLANS = [
         calls_per_week: 10, calls_per_month: 30, call_tasks_per_call: 3, call_tasks_at_once: 2, call_task_max_minutes: 10,
         whatsapp_per_day: 10, whatsapp_per_period: 100, whatsapp_reset_value: 1, whatsapp_reset_unit: "month",
         projects_max: 3, sandbox_hours_per_month: 3, sandbox_sessions: 1,
-        uploads_per_window: 30, upload_max_mb: 30, library_storage_mb: 600, devices_max: 2,
+        uploads_per_window: 30, upload_max_mb: 30, files_per_message: 6, library_storage_mb: 600, devices_max: 2,
         priority: false, support_level: "community",
         features_text: ["40 new chats every 5 hours, no limit inside a chat", "Claude models: no", "4 images and photo edits a week", "30 free WhatsApp call minutes a month, 3 calls a day, 3 small tasks a call", "3 cloud projects", "Grids, Schedule, Library, Calls, desktop and Android apps"],
     },
@@ -123,7 +126,7 @@ export const DEFAULT_PLANS = [
         calls_per_week: 100, calls_per_month: 300, call_tasks_per_call: 10, call_tasks_at_once: 5, call_task_max_minutes: 60,
         whatsapp_per_day: 100, whatsapp_per_period: 600, whatsapp_reset_value: 1, whatsapp_reset_unit: "month",
         projects_max: 25, sandbox_hours_per_month: 30, sandbox_sessions: 1,
-        uploads_per_window: 150, upload_max_mb: 150, library_storage_mb: 5120, devices_max: 5,
+        uploads_per_window: 150, upload_max_mb: 150, files_per_message: 12, library_storage_mb: 5120, devices_max: 5,
         priority: false, support_level: "email",
         features_text: ["2,000 new chats every 5 hours, no limit inside a chat", "Claude Sonnet, Opus and Haiku, and a share of Fable", "100 images and photo edits a month", "150 free WhatsApp call minutes a month, 10 calls a day, 10 tasks a call", "25 cloud projects", "128K context window, deep thinking"],
     },
@@ -140,7 +143,7 @@ export const DEFAULT_PLANS = [
         calls_per_week: 300, calls_per_month: 1000, call_tasks_per_call: 25, call_tasks_at_once: 10, call_task_max_minutes: 180,
         whatsapp_per_day: 300, whatsapp_per_period: 2000, whatsapp_reset_value: 1, whatsapp_reset_unit: "month",
         projects_max: -1, sandbox_hours_per_month: 100, sandbox_sessions: 2,
-        uploads_per_window: 500, upload_max_mb: 150, library_storage_mb: 20480, devices_max: 10,
+        uploads_per_window: 500, upload_max_mb: 150, files_per_message: 15, library_storage_mb: 20480, devices_max: 10,
         priority: true, support_level: "priority email",
         features_text: ["Unlimited chats, no limit inside a chat", "Claude models: 5x the usage of Pro", "Claude Fable up to half of your Claude credits", "300 images and photo edits a month", "400 free WhatsApp call minutes a month, 15-minute calls, 25 tasks a call", "Unlimited cloud projects", "400K context window, priority at peak"],
     },
@@ -157,7 +160,7 @@ export const DEFAULT_PLANS = [
         calls_per_week: 300, calls_per_month: 1000, call_tasks_per_call: 25, call_tasks_at_once: 10, call_task_max_minutes: 180,
         whatsapp_per_day: 100, whatsapp_per_period: 5000, whatsapp_reset_value: 1, whatsapp_reset_unit: "month",
         projects_max: -1, sandbox_hours_per_month: 25, sandbox_sessions: 1,
-        uploads_per_window: 150, upload_max_mb: 200, library_storage_mb: 5120, devices_max: 10,
+        uploads_per_window: 150, upload_max_mb: 200, files_per_message: 15, library_storage_mb: 5120, devices_max: 10,
         priority: true, support_level: "named contact",
         features_text: ["Classgrid AI for everyone on your team", "Priced per seat, billed yearly, from 50 seats", "One shared AI credit pool", "Admin controls, roles, SSO and your branding", "A named contact and a 45-day free pilot"],
     },

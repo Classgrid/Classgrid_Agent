@@ -243,6 +243,10 @@ type PageContext = {
 
 import { usePostHog } from 'posthog-js/react';
 import { useQueryClient } from "@tanstack/react-query";
+import { usePlanOverview } from "@/features/shared/queries/usePlanOverview";
+
+// Until the plan overview has loaded (the server's own default: PlanConfig files_per_message)
+const DEFAULT_FILES_PER_MESSAGE = 6;
 import { fetchWithRescue } from "@/lib/rescue";
 import { ANSWER_FEEDBACK_ASK, ANSWER_FEEDBACK_SET, closeReading, getReading, startReading, useReadingOf, useReadingOn } from "../reading";
 import { ReadingBar } from "./ReadingBar";
@@ -2867,6 +2871,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   // â”€â”€ File attachment state â”€â”€
   const [attachedFiles, setAttachedFiles] = useState<UIFileAttachment[]>([]);
+  // Pictures and files one message may carry: the plan's own number (Super Admin > Plans, files_per_message), read
+  // from the plan overview; the server refuses a message with more
+  const { data: planOverview } = usePlanOverview();
+  const maxFiles = planOverview?.files_per_message || DEFAULT_FILES_PER_MESSAGE;
   // Project files dragged from Studio's Files tab into the chat box (sent as their names, like an @ mention)
   const [fileMentions, setFileMentions] = useState<string[]>([]);
   // Studio: comments and quotes on code from the Files tab, sent with the next message (kept per chat)
@@ -3078,17 +3086,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     for (const f of newFiles) {
       if (f.size > MAX_FILE_SIZE) {
-        toast.error(`"${f.name}" is too large (${formatFileSize(f.size)}).`, { description: "Limit: 6 files • 150MB each" });
+        toast.error(`"${f.name}" is too large (${formatFileSize(f.size)}).`, { description: `Limit: ${maxFiles} files • 150MB each` });
         return;
       }
     }
 
     if (newFiles.length === 0) return;
 
-    const remaining = 6 - attachedFiles.length;
+    const remaining = maxFiles - attachedFiles.length;
 
     if (remaining <= 0) {
-      toast.error("You can attach up to 6 files per message.");
+      toast.error(`You can attach up to ${maxFiles} files per message.`);
       return;
     }
 
@@ -3106,7 +3114,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // If we had dropped files, show the warning now
     if (droppedWarning) {
-      toast.error("You can attach up to 6 files per message.");
+      toast.error(`You can attach up to ${maxFiles} files per message.`);
     }
 
     // Pre-flight check: See if we have enough hourly quota
@@ -7070,9 +7078,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                       <button
                         type="button"
                         onClick={() => fileInputRef.current?.click()}
-                        disabled={attachedFiles.length >= 6}
+                        disabled={attachedFiles.length >= maxFiles}
                         className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-30 transition-all cursor-pointer"
-                        title={attachedFiles.length >= 6 ? "Max 6 files" : "Attach file (max 35MB)"}
+                        title={attachedFiles.length >= maxFiles ? `Max ${maxFiles} files` : "Attach file (max 35MB)"}
                       >
                         <Paperclip className={cn("h-4 w-4 -rotate-45", isAnyFileUploading && "opacity-50")} />
                       </button>
@@ -7815,9 +7823,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               <button
                                 type="button"
                                 onClick={() => fileInputRef.current?.click()}
-                                disabled={attachedFiles.length >= 6}
+                                disabled={attachedFiles.length >= maxFiles}
                                 className="h-8 w-8 shrink-0 rounded-full flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-muted/80 disabled:opacity-30 transition-all cursor-pointer"
-                                title={attachedFiles.length >= 6 ? "Max 6 files" : "Attach file (max 35MB)"}
+                                title={attachedFiles.length >= maxFiles ? `Max ${maxFiles} files` : "Attach file (max 35MB)"}
                               >
                                 <Paperclip className="h-4 w-4 -rotate-45" />
                               </button>

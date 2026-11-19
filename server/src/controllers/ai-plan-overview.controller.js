@@ -8,7 +8,7 @@ import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import AiLibraryFile from "../models/AiLibraryFile.js";
 import IdeProject from "../models/IdeProject.js";
 import AiUsageLog from "../models/AiUsageLog.js";
-import { planOf, planKeyOf, plansEnabled } from "../services/plan-limits.service.js";
+import { planOf, planKeyOf, plansEnabled, filesPerMessage, DEFAULT_FILES_PER_MESSAGE } from "../services/plan-limits.service.js";
 import { freeWindow, weekCounters, tokenWindowEnd } from "../services/ai-credits.service.js";
 import { resolveFeatureLimit, resolveResetPeriod, checkWhatsappLimit, formatPeriodLength } from "../services/ai-feature-limits.js";
 import { usedToday, dayKey } from "../services/plan-usage.service.js";
@@ -39,7 +39,7 @@ const PLAN_FIELDS = [
     "calls_per_week", "calls_per_month", "call_tasks_per_call", "call_tasks_at_once", "call_task_max_minutes",
     "whatsapp_per_day", "whatsapp_per_period", "whatsapp_reset_value", "whatsapp_reset_unit",
     "projects_max", "sandbox_hours_per_month", "sandbox_sessions",
-    "uploads_per_window", "upload_max_mb", "library_storage_mb", "devices_max", "priority", "support_level", "features_text",
+    "uploads_per_window", "upload_max_mb", "files_per_message", "library_storage_mb", "devices_max", "priority", "support_level", "features_text",
     "price_inr_monthly", "price_inr_yearly", "student_price_inr_monthly", "student_price_inr_yearly", "tagline", "coming_soon",
 ];
 
@@ -126,6 +126,8 @@ export async function planOverviewFor(userId) {
                 status: mine.status || "active", billing: mine.billing || "none", started_at: mine.started_at || null, expires_at: mine.expires_at || null,
                 subscribed, limits: plan ? limits : null, student_price: mine.note === "student price",
             },
+            // Pictures and files one message may carry (the chat boxes read it; services/plan-limits.service.js)
+            files_per_message: await filesPerMessage(user).catch(() => DEFAULT_FILES_PER_MESSAGE),
             balance: {
                 topup: paidOk ? (user.ai_tokens?.ai_credits_balance || 0) : 0,
                 promotion: promoOk ? (user.ai_tokens?.promotion_credits_balance || 0) : 0,

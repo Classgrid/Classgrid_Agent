@@ -58,6 +58,22 @@ export async function planLimit(user, field, fallback = undefined) {
 
 export const isUnlimited = (v) => Number(v) === -1;
 
+// ── Pictures and files in one message (owner, 2026-11-19: "6 for Free, 12 for Pro, 15 for Max; not hard-coded, in the
+// super admin's plans so we can adjust it") ──
+/** Used when a plan row has no value yet (the schema's default). */
+export const DEFAULT_FILES_PER_MESSAGE = 6;
+/**
+ * How many pictures and files one message may carry: the user's plan's files_per_message. With no plan row (plans
+ * switched off, Classgrid staff) no plan limits them, so they get the most any plan allows.
+ */
+export async function filesPerMessage(user) {
+    const valueOf = (p) => { const n = Math.floor(Number(p?.files_per_message)); return Number.isFinite(n) && n > 0 ? n : null; };
+    const plan = await planOf(user);
+    if (plan) return valueOf(plan) ?? DEFAULT_FILES_PER_MESSAGE;
+    const all = Object.values((await planTable()).plans || {}).map(valueOf).filter(Boolean);
+    return all.length ? Math.max(...all) : DEFAULT_FILES_PER_MESSAGE;
+}
+
 // ── Uploads (owner, 2026-11-14: the plan's upload limits are enforced) ──
 // Every upload (the chat's attach button and the Library page) asks this first. Plans off, or Classgrid staff: no limit.
 // Checks, in order: the largest file (upload_max_mb), the files uploaded in the plan's session window

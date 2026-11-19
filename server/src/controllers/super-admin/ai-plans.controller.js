@@ -16,7 +16,7 @@ const NUMBER_FIELDS = [
     "calls_per_week", "calls_per_month", "call_tasks_per_call", "call_tasks_at_once", "call_task_max_minutes",
     "whatsapp_per_day", "whatsapp_per_period", "whatsapp_reset_value",
     "projects_max", "sandbox_hours_per_month", "sandbox_sessions",
-    "uploads_per_window", "upload_max_mb", "library_storage_mb", "devices_max",
+    "uploads_per_window", "upload_max_mb", "files_per_message", "library_storage_mb", "devices_max",
 ];
 const UNIT_FIELDS = ["window_reset_unit", "images_reset_unit", "call_reset_unit", "whatsapp_reset_unit"];
 const TEXT_FIELDS = ["name", "tagline", "default_model", "support_level"];

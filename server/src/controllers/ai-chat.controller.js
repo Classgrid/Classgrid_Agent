@@ -82,7 +82,7 @@ import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpo
 import { cfAiFetch, providersWithoutCappedCloudflare, isCfNeuronCapError } from "../services/cf-neuron-cap.service.js";
 import { usageParts, claudeSwitches, keepsCloudflareRounds, CAP_REFUSED_WHY } from "../services/cap-fallback.service.js";
 import * as eleven from "../services/elevenlabs.service.js";
-import { planOf, isUnlimited } from "../services/plan-limits.service.js";
+import { planOf, isUnlimited, filesPerMessage } from "../services/plan-limits.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
@@ -1917,6 +1917,17 @@ export const streamAskAi = async (req, res) => {
     // Fable comes with the plan when the plan has a Fable share (then it is paid from the plan's credits, not from
     // paid credits only)
     const planRow = await planOf(req.user).catch(() => null);
+    // The plan's pictures and files in one message (PlanConfig files_per_message; the chat boxes stop there too, this
+    // is for any app that sends more)
+    {
+        const sent = Array.isArray(body.attachments) ? body.attachments.length : 0;
+        const most = sent ? await filesPerMessage(req.user).catch(() => null) : null;
+        if (most && sent > most) {
+            res.writeHead(402, { "Content-Type": "application/json" });
+            res.end(JSON.stringify({ error: `You can attach up to ${most} pictures or files in one message${planRow ? ` on your ${planRow.name} plan` : ""}. Send the rest in another message.`, code: "files_per_message", limit: most, plan: planRow?.key || null }));
+            return;
+        }
+    }
     // Plans on: a thinking level outside the plan (Deep on Free) answers at Normal instead
     if (planRow && Array.isArray(planRow.thinking_modes) && planRow.thinking_modes.length) {
         const mode = thinking === "high" ? "deep" : thinking === "low" ? "fast" : "normal";

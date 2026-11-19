@@ -11,6 +11,8 @@ export type PlanOverview = {
     key: string; name: string; tagline: string; status: string; billing: string; started_at: string | null; expires_at: string | null;
     subscribed: boolean; limits: Record<string, any> | null; student_price?: boolean;
   };
+  // Pictures and files one message may carry (the plan's files_per_message; the most any plan allows with no plan)
+  files_per_message?: number;
   balance: { topup: number; promotion: number; credits_per_inr: number; extra: { image: number; whatsapp: number; voicereply: number; voiceinput: number } };
   usage: {
     credits_window: Meter; credits_week: Meter; claude_week: Meter; fable_week: Meter;
