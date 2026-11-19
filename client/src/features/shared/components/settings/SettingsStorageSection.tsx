@@ -90,7 +90,6 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
   const left = Math.max(0, data.max_bytes - data.used_bytes);
   const barColor = pct > 90 ? "bg-red-500" : pct > 80 ? "bg-amber-400" : "bg-[#7aa7ff]";
   const used = data.used_bytes || 0;
-  const share = (b: number) => (used > 0 ? Math.max(b > 0 ? 2 : 0, (b / used) * 100) : 0);
   const rows = [
     { key: "uploaded", label: "Uploaded files", hint: "Files you added to the Library or a chat", icon: FileUp, part: data.uploaded || { bytes: 0, count: 0 }, color: "bg-[#7aa7ff]" },
     { key: "generated", label: "AI-generated files", hint: "Pictures, PDFs and documents Classgrid AI made for you", icon: Sparkles, part: data.generated || { bytes: 0, count: 0 }, color: "bg-violet-400" },
@@ -134,12 +133,6 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
           </>
         )}
 
-        {/* What fills it: one bar split by who made the files */}
-        {used > 0 && (
-          <div className="mt-5 h-1.5 rounded-full overflow-hidden flex bg-black/[0.05] dark:bg-white/[0.06]">
-            {rows.map((r) => <div key={r.key} className={`h-full ${r.color}`} style={{ width: `${share(r.part.bytes)}%` }} />)}
-          </div>
-        )}
       </div>
 
       {/* The breakdown */}
@@ -148,7 +141,6 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
         {rows.map((r) => (
           <button key={r.key} type="button" disabled={noLibraryLink} onClick={() => openLibrary(`?source=${r.key}`)}
             className="w-full text-left flex items-center gap-3 px-5 py-4 enabled:hover:bg-muted/50 enabled:cursor-pointer first:rounded-t-xl last:rounded-b-xl">
-            <span className={`size-2.5 shrink-0 rounded-full ${r.color}`} />
             <r.icon className="size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <div className="text-sm text-foreground">{r.label}</div>
@@ -164,7 +156,6 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
         {!noLibraryLink && (
           <button type="button" onClick={openTrash}
             className="w-full text-left flex items-center gap-3 px-5 py-4 hover:bg-muted/50 cursor-pointer last:rounded-b-xl">
-            <span className="size-2.5 shrink-0" />
             <Trash2 className="size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
               <div className="text-sm text-foreground">Trash</div>
