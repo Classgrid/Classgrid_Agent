@@ -12,7 +12,7 @@
  */
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useState, useEffect, useCallback } from 'react';
-import { Upload, Search, FileImage, FileVideo, FileText, FileAudio, File as FileIcon, FileQuestion, MessageSquare, Download, Trash2, MoreVertical, X, Music, ArrowLeft, RotateCcw } from 'lucide-react';
+import { Upload, Search, FileImage, FileVideo, FileText, FileAudio, File as FileIcon, FileQuestion, MessageSquare, Download, Trash2, MoreVertical, X, Music, RotateCcw } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/marketing_ui/popover';
@@ -67,8 +67,9 @@ export function LibraryPage() {
     const q = new URLSearchParams(window.location.search).get('source');
     return q === 'uploaded' || q === 'generated' ? q : 'all';
   });
-  // The Trash: AI-generated files you deleted, kept 30 days (owner, 2026-11-19: "trash only for AI-generated files")
-  const [showTrash, setShowTrash] = useState(() => new URLSearchParams(window.location.search).get('trash') === '1');
+  // The Trash: AI-generated files you deleted, kept 30 days (owner, 2026-11-19: "trash only for AI-generated files").
+  // It is the route /library/trash (the top bar's breadcrumb shows "Library / Trash"), not a query param.
+  const [showTrash, setShowTrash] = useState(false);
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'image' | 'video' | 'pdf' | 'doc' | 'audio'>('all');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'largest'>('newest');
@@ -88,6 +89,15 @@ export function LibraryPage() {
   const baseAgentPath = agentIndex !== -1
     ? pathParts.slice(0, agentIndex + 1).join('/')
     : location.pathname;
+  // /library/trash: the Trash (the top bar's breadcrumb shows "Library / Trash")
+  const onTrashRoute = /(^|\/)trash\/?$/.test(location.pathname);
+  useEffect(() => { setShowTrash(onTrashRoute); }, [onTrashRoute]);
+  // The top bar's "Library" in "Library / Trash" (the breadcrumb) goes back to the files
+  useEffect(() => {
+    const back = () => navigate(`${baseAgentPath}/library`);
+    window.addEventListener("toolpage:back", back);
+    return () => window.removeEventListener("toolpage:back", back);
+  }, [navigate, baseAgentPath]);
 
   const endpointPrefix = typeof import.meta !== "undefined" && import.meta.env
     ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in")
@@ -267,7 +277,7 @@ export function LibraryPage() {
   };
 
   if (showTrash) {
-    return <LibraryTrash endpointPrefix={endpointPrefix} formatBytes={formatBytes} onBack={() => { setShowTrash(false); fetchLibrary(); }} />;
+    return <LibraryTrash endpointPrefix={endpointPrefix} formatBytes={formatBytes} onBack={() => navigate(`${baseAgentPath}/library`)} />;
   }
 
   return (
@@ -314,7 +324,7 @@ export function LibraryPage() {
             </div>
             <button
               type="button"
-              onClick={() => setShowTrash(true)}
+              onClick={() => navigate(`${baseAgentPath}/library/trash`)}
               title="Trash: AI-generated files you deleted, kept 30 days"
               className="flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-medium border border-border/50 bg-accent/50 hover:bg-accent transition-colors whitespace-nowrap cursor-pointer"
             >
@@ -692,16 +702,7 @@ function LibraryTrash({ endpointPrefix, formatBytes, onBack }: { endpointPrefix:
       {/* (solid, not see-through: the blue file icons scrolling under it used to tint it blue) */}
       <div className="px-6 pt-4 pb-5 border-b border-border/50 sticky top-0 bg-background z-40">
         <div className="max-w-6xl mx-auto w-full flex flex-col gap-4">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div className="flex items-center gap-2 min-w-0">
-              <button type="button" onClick={onBack} title="Back to Library"
-                className="size-9 shrink-0 flex items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer">
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-              <button type="button" onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground cursor-pointer">Library</button>
-              <span className="text-sm text-muted-foreground">/</span>
-              <span className="text-lg font-semibold">Trash</span>
-            </div>
+          <div className="flex justify-end">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <input type="text" placeholder="Search trash" value={search} onChange={(e) => setSearch(e.target.value)}

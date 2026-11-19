@@ -61,8 +61,9 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
     return () => { socket.off("ai_library_updated", onLibraryUpdate); };
   }, [load]);
 
-  // (?source= opens the Library on that kind of file, ?trash=1 on its Trash)
+  // (?source= opens the Library on that kind of file; /library/trash is the Trash route)
   const openLibrary = (q = "") => navigate(`${DESKTOP ? "/c/studio" : "/c/agent"}/library${q}`);
+  const openTrash = () => navigate(`${DESKTOP ? "/c/studio" : "/c/agent"}/library/trash`);
 
   if (!data && !failed) {
     return (
@@ -161,7 +162,7 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
           </button>
         ))}
         {!noLibraryLink && (
-          <button type="button" onClick={() => openLibrary("?trash=1")}
+          <button type="button" onClick={openTrash}
             className="w-full text-left flex items-center gap-3 px-5 py-4 hover:bg-muted/50 cursor-pointer last:rounded-b-xl">
             <span className="size-2.5 shrink-0" />
             <Trash2 className="size-4 shrink-0 text-muted-foreground" />

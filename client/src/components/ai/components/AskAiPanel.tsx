@@ -7222,6 +7222,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           <BreadcrumbPage className="max-w-[40vw] truncate">{callTitle || (sessionId === "calls" ? "Call" : "Schedule")}</BreadcrumbPage>
                         </BreadcrumbItem>
                       </>
+                    ) : sessionId === "library" && detailId === "trash" ? (
+                      // The Library's Trash: "Library / Trash" (Library goes back to the files)
+                      <>
+                        <BreadcrumbItem>
+                          <button type="button" className="transition-colors hover:text-foreground cursor-pointer" onClick={() => window.dispatchEvent(new Event("toolpage:back"))}>Library</button>
+                        </BreadcrumbItem>
+                        <BreadcrumbSeparator />
+                        <BreadcrumbItem>
+                          <BreadcrumbPage>Trash</BreadcrumbPage>
+                        </BreadcrumbItem>
+                      </>
                     ) : (
                       <BreadcrumbItem>
                         <BreadcrumbPage>{sessionId === "schedule" ? "Schedule" : sessionId === "calls" ? "Calls" : "Library"}</BreadcrumbPage>
