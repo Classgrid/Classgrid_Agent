@@ -42,7 +42,10 @@ const aiLibraryFileSchema = new mongoose.Schema({
   size_bytes: { type: Number, default: 0 },
   source: { type: String, enum: ['uploaded', 'generated'], default: 'uploaded' },
   thumbnail_url: { type: String },
-  created_at: { type: Date, default: Date.now }
+  created_at: { type: Date, default: Date.now },
+  // In the Trash since (an AI-generated file only: owner, 2026-11-19, "trash only for AI-generated files; a file you
+  // uploaded is deleted right away"). It can be restored for 30 days, then it is deleted for good. null = not deleted.
+  deleted_at: { type: Date, default: null }
 });
 
 export default mongoose.model('AiLibraryFile', aiLibraryFileSchema);

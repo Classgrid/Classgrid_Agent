@@ -31,13 +31,16 @@
 import express from 'express';
 import { isAuthenticated } from '../middleware/auth.middleware.js';
 import multer from 'multer';
-import { uploadToLibrary, getLibrary, deleteFromLibrary, getQuota } from '../controllers/ai-library.controller.js';
+import { uploadToLibrary, getLibrary, deleteFromLibrary, getQuota, restoreFromTrash, emptyTrash } from '../controllers/ai-library.controller.js';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 200 * 1024 * 1024 } }); // 200MB per file
 const router = express.Router();
 
 router.post('/upload', isAuthenticated, upload.single('file'), uploadToLibrary);
 router.get('/', isAuthenticated, getLibrary);
+// (before /:id, so "trash" is never taken for a file id)
+router.delete('/trash', isAuthenticated, emptyTrash);
+router.post('/:id/restore', isAuthenticated, restoreFromTrash);
 router.delete('/:id', isAuthenticated, deleteFromLibrary);
 router.get('/quota', isAuthenticated, getQuota);
 

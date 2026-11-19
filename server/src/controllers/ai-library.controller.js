@@ -117,12 +117,26 @@ export const uploadToLibrary = async (req, res) => {
   }
 };
 
+// The Trash (AI-generated files only, see the model): kept 30 days, then deleted for good. Cleared whenever the Library
+// is listed, so nothing older than that is ever shown or restored.
+const TRASH_DAYS = 30;
+const inTrash = { source: 'generated', deleted_at: { $ne: null } };
+async function purgeOldTrash(userId) {
+  const before = new Date(Date.now() - TRASH_DAYS * 24 * 60 * 60 * 1000);
+  await AiLibraryFile.deleteMany({ user_id: userId, ...inTrash, deleted_at: { $ne: null, $lt: before } }).catch(() => {});
+}
+const libraryChanged = (userId) => {
+  try { getIO().to(userId.toString()).emit("ai_library_updated"); } catch (err) { console.error("Failed to emit socket event:", err); }
+};
+
 export const getLibrary = async (req, res) => {
   try {
     const userId = req.user._id;
     const { type, sort } = req.query;
+    await purgeOldTrash(userId);
 
-    let query = { user_id: userId };
+    // ?trash=1: the files in the Trash; otherwise the files not in it
+    let query = req.query.trash === '1' ? { user_id: userId, ...inTrash } : { user_id: userId, deleted_at: null };
     if (type && type !== 'all') {
       query.file_type = type;
     }
@@ -152,6 +166,15 @@ export const deleteFromLibrary = async (req, res) => {
     const file = await AiLibraryFile.findOne({ _id: id, user_id: userId });
     if (!file) return res.status(404).json({ error: 'File not found' });
 
+    // An AI-generated file goes to the Trash first (restorable for 30 days); deleting it from the Trash, or deleting a
+    // file the user uploaded, deletes it for good
+    if (file.source === 'generated' && !file.deleted_at) {
+      file.deleted_at = new Date();
+      await file.save();
+      libraryChanged(userId);
+      return res.status(200).json({ success: true, trashed: true, quota: await libraryStorageFor(req.user) });
+    }
+
     if (file.file_key && file.source === 'uploaded') {
       try {
         await deleteFromR2(file.file_key);
@@ -178,6 +201,33 @@ export const deleteFromLibrary = async (req, res) => {
     return res.status(200).json({ success: true, quota: await libraryStorageFor(req.user) });
   } catch (error) {
     console.error('Error in deleteFromLibrary:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// POST /api/ai/library/:id/restore: a file in the Trash goes back to the Library
+export const restoreFromTrash = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const file = await AiLibraryFile.findOneAndUpdate({ _id: req.params.id, user_id: userId, ...inTrash }, { $set: { deleted_at: null } }, { new: true });
+    if (!file) return res.status(404).json({ error: 'This file is no longer in the Trash' });
+    libraryChanged(userId);
+    return res.status(200).json({ success: true, file, quota: await libraryStorageFor(req.user) });
+  } catch (error) {
+    console.error('Error in restoreFromTrash:', error);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+};
+
+// DELETE /api/ai/library/trash: every file in the Trash is deleted for good
+export const emptyTrash = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { deletedCount } = await AiLibraryFile.deleteMany({ user_id: userId, ...inTrash });
+    libraryChanged(userId);
+    return res.status(200).json({ success: true, deleted: deletedCount || 0, quota: await libraryStorageFor(req.user) });
+  } catch (error) {
+    console.error('Error in emptyTrash:', error);
     return res.status(500).json({ error: 'Internal server error' });
   }
 };

@@ -3,7 +3,7 @@
 // services/plan-limits.service.js libraryStorageFor), split into files you uploaded and files Classgrid AI made.
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileUp, HardDrive, RefreshCw, Sparkles } from "lucide-react";
+import { ChevronRight, FileUp, HardDrive, RefreshCw, Sparkles, Trash2 } from "lucide-react";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { fetchWithRescue } from "@/lib/rescue";
 
@@ -53,7 +53,8 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const openLibrary = () => navigate(`${DESKTOP ? "/c/studio" : "/c/agent"}/library`);
+  // (?source= opens the Library on that kind of file, ?trash=1 on its Trash)
+  const openLibrary = (q = "") => navigate(`${DESKTOP ? "/c/studio" : "/c/agent"}/library${q}`);
 
   if (!data && !failed) {
     return (
@@ -142,7 +143,8 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
       <h3 className="text-[13px] font-semibold text-foreground mt-7 mb-2">What's using your storage</h3>
       <div className="rounded-xl border border-border bg-card divide-y divide-border">
         {rows.map((r) => (
-          <div key={r.key} className="flex items-center gap-3 px-5 py-4">
+          <button key={r.key} type="button" disabled={noLibraryLink} onClick={() => openLibrary(`?source=${r.key}`)}
+            className="w-full text-left flex items-center gap-3 px-5 py-4 enabled:hover:bg-muted/50 enabled:cursor-pointer first:rounded-t-xl last:rounded-b-xl">
             <span className={`size-2.5 shrink-0 rounded-full ${r.color}`} />
             <r.icon className="size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
@@ -153,13 +155,26 @@ export function SettingsStorageSection({ noLibraryLink = false }: { noLibraryLin
               <div className="text-sm text-foreground">{bytesText(r.part.bytes)}</div>
               <div className="text-[12px] text-muted-foreground">{r.part.count} file{r.part.count === 1 ? "" : "s"}</div>
             </div>
-          </div>
+            {!noLibraryLink && <ChevronRight className="size-4 shrink-0 text-muted-foreground" />}
+          </button>
         ))}
+        {!noLibraryLink && (
+          <button type="button" onClick={() => openLibrary("?trash=1")}
+            className="w-full text-left flex items-center gap-3 px-5 py-4 hover:bg-muted/50 cursor-pointer last:rounded-b-xl">
+            <span className="size-2.5 shrink-0" />
+            <Trash2 className="size-4 shrink-0 text-muted-foreground" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm text-foreground">Trash</div>
+              <div className="text-[12px] text-muted-foreground truncate">AI-generated files you deleted, kept 30 days</div>
+            </div>
+            <ChevronRight className="size-4 shrink-0 text-muted-foreground" />
+          </button>
+        )}
       </div>
 
       {!noLibraryLink && (
         <div className="mt-5 flex justify-end">
-          <button type="button" onClick={openLibrary}
+          <button type="button" onClick={() => openLibrary()}
             className="h-9 px-4 rounded-full text-sm font-medium bg-foreground text-background hover:opacity-90 cursor-pointer">
             Manage files in Library
           </button>

@@ -12,7 +12,7 @@
  */
 // CLASSGRID USES CLOUDFLARE USAGE TO CALCULATE TOKENS, NOT GPT-TOKENIZER (WHICH IS ONLY A FALLBACK)
 import React, { useState, useEffect, useCallback } from 'react';
-import { Upload, Search, FileImage, FileVideo, FileText, FileAudio, File as FileIcon, FileQuestion, MessageSquare, Download, Trash2, MoreVertical, X, Music } from 'lucide-react';
+import { Upload, Search, FileImage, FileVideo, FileText, FileAudio, File as FileIcon, FileQuestion, MessageSquare, Download, Trash2, MoreVertical, X, Music, ArrowLeft, RotateCcw } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { format } from 'date-fns';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/marketing_ui/popover';
@@ -42,6 +42,7 @@ interface LibraryFile {
   source: 'uploaded' | 'generated';
   thumbnail_url?: string;
   created_at: string;
+  deleted_at?: string | null;
 }
 
 interface Quota {
@@ -61,7 +62,13 @@ export function LibraryPage() {
   const [files, setFiles] = useState<LibraryFile[]>(() => readPageCache<{ files: LibraryFile[] }>("library:newest:all")?.files || []);
   // (max_bytes 0 = not known yet: nothing is shown until the server says the plan's room)
   const [quota, setQuota] = useState<Quota>({ used_bytes: 0, max_bytes: 0, percentage: 0 });
-  const [source, setSource] = useState<SourceFilter>('all');
+  // (?source=uploaded / generated: Settings > Storage opens the Library on one kind)
+  const [source, setSource] = useState<SourceFilter>(() => {
+    const q = new URLSearchParams(window.location.search).get('source');
+    return q === 'uploaded' || q === 'generated' ? q : 'all';
+  });
+  // The Trash: AI-generated files you deleted, kept 30 days (owner, 2026-11-19: "trash only for AI-generated files")
+  const [showTrash, setShowTrash] = useState(() => new URLSearchParams(window.location.search).get('trash') === '1');
   const [search, setSearch] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'image' | 'video' | 'pdf' | 'doc' | 'audio'>('all');
   const [sort, setSort] = useState<'newest' | 'oldest' | 'largest'>('newest');
@@ -180,8 +187,11 @@ export function LibraryPage() {
   // The file leaves the list at once; the server deletes it behind (it comes back if that fails)
   const handleDelete = async (id: string) => {
     const before = files;
+    const gone = files.find(f => f._id === id);
     setFiles(files.filter(f => f._id !== id));
-    toast.success("File deleted");
+    // (an AI-generated file goes to the Trash and can come back; a file you uploaded is deleted for good)
+    if (gone && isGenerated(gone)) toast.success("Moved to Trash", { description: "It stays there for 30 days.", action: { label: "Undo", onClick: () => restoreFile(id) } });
+    else toast.success("File deleted");
     setIsDeleting(true);
     try {
       const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library/${id}`, {
@@ -202,6 +212,18 @@ export function LibraryPage() {
     } finally {
       setIsDeleting(false);
       setDeleteId(null);
+    }
+  };
+
+  // A file from the Trash goes back to the Library
+  const restoreFile = async (id: string) => {
+    try {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library/${id}/restore`, { method: 'POST', credentials: 'include' });
+      if (!res.ok) { toast.error("Could not restore the file."); return; }
+      toast.success("Restored to your Library");
+      fetchLibrary();
+    } catch {
+      toast.error("Could not restore the file.");
     }
   };
 
@@ -229,6 +251,8 @@ export function LibraryPage() {
   });
   const sourceCounts = { all: files.length, uploaded: files.filter(f => !isGenerated(f)).length, generated: files.filter(isGenerated).length };
 
+  const deleteIsGenerated = !!deleteId && !!files.find(f => f._id === deleteId && isGenerated(f));
+
   const getFileIcon = (type: string) => {
     switch (type) {
       case 'image': return <FileImage className="w-8 h-8 text-blue-500" />;
@@ -240,6 +264,10 @@ export function LibraryPage() {
       default: return <FileQuestion className="w-8 h-8 text-gray-500" />;
     }
   };
+
+  if (showTrash) {
+    return <LibraryTrash endpointPrefix={endpointPrefix} formatBytes={formatBytes} onBack={() => { setShowTrash(false); fetchLibrary(); }} />;
+  }
 
   return (
     <div className="flex flex-col h-full bg-background text-foreground overflow-y-auto">
@@ -282,6 +310,15 @@ export function LibraryPage() {
                 className="pl-9 pr-4 py-2 bg-accent/50 hover:bg-accent focus:bg-accent rounded-full border border-border/50 focus:outline-none focus:ring-1 focus:ring-ring w-[240px] text-sm transition-colors"
               />
             </div>
+            <button
+              type="button"
+              onClick={() => setShowTrash(true)}
+              title="Trash: AI-generated files you deleted, kept 30 days"
+              className="flex items-center gap-2 px-3.5 py-2 rounded-full text-sm font-medium border border-border/50 bg-accent/50 hover:bg-accent transition-colors whitespace-nowrap cursor-pointer"
+            >
+              <Trash2 className="w-4 h-4" />
+              Trash
+            </button>
             <div {...getRootProps()} className="cursor-pointer">
               <input {...getInputProps()} />
               <button className="flex items-center gap-2 bg-foreground text-background px-4 py-2 rounded-full font-medium text-sm hover:opacity-90 transition-opacity whitespace-nowrap">
@@ -540,10 +577,14 @@ export function LibraryPage() {
         onOpenChange={(open) => {
           if (!open) setDeleteId(null);
         }}
-        title="Delete File"
-        description="Are you sure you want to permanently delete this file? This action cannot be undone."
-        warningMessage="This file will be permanently removed from your library and storage quota."
-        actionLabel="Delete"
+        title={deleteIsGenerated ? "Move to Trash?" : "Delete File"}
+        description={deleteIsGenerated
+          ? "This AI-generated file goes to the Trash. You can restore it there for 30 days."
+          : "Are you sure you want to permanently delete this file? This action cannot be undone."}
+        warningMessage={deleteIsGenerated
+          ? "After 30 days in the Trash it is deleted for good."
+          : "This file will be permanently removed from your library and storage quota."}
+        actionLabel={deleteIsGenerated ? "Move to Trash" : "Delete"}
         isLoading={isDeleting}
         onConfirm={() => {
           if (deleteId) handleDelete(deleteId);
@@ -578,6 +619,172 @@ export function LibraryPage() {
           renderThumbnails={() => null} // Thumbnails are rendered inline in the grid
         />
       )}
+    </div>
+  );
+}
+
+// The Trash (AI-generated files you deleted): restore one, delete one for good, or empty it. Each file is deleted for
+// good 30 days after it was deleted (the server clears them, controllers/ai-library.controller.js). Files you uploaded
+// never come here: they are deleted right away (owner, 2026-11-19).
+const TRASH_DAYS = 30;
+function LibraryTrash({ endpointPrefix, formatBytes, onBack }: { endpointPrefix: string; formatBytes: (b: number) => string; onBack: () => void }) {
+  const [items, setItems] = useState<LibraryFile[] | null>(null);
+  const [search, setSearch] = useState('');
+  const [forever, setForever] = useState<LibraryFile | null>(null);
+  const [emptying, setEmptying] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library?trash=1&sort=newest`, { credentials: 'include' });
+      const data = res.ok ? await res.json() : null;
+      const list: LibraryFile[] = data?.files || [];
+      list.sort((a, b) => String(b.deleted_at || '').localeCompare(String(a.deleted_at || '')));
+      setItems(list);
+    } catch {
+      setItems([]);
+      toast.error("Could not load the Trash.");
+    }
+  }, [endpointPrefix]);
+  useEffect(() => { load(); }, [load]);
+
+  const daysLeft = (f: LibraryFile) => {
+    const at = new Date(f.deleted_at || f.created_at).getTime();
+    return Math.max(0, Math.ceil(TRASH_DAYS - (Date.now() - at) / 86400000));
+  };
+
+  const restore = async (f: LibraryFile) => {
+    setItems((l) => (l || []).filter((x) => x._id !== f._id));
+    const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library/${f._id}/restore`, { method: 'POST', credentials: 'include' }).catch(() => null);
+    if (!res?.ok) { toast.error("Could not restore the file."); load(); return; }
+    toast.success("Restored to your Library");
+  };
+
+  const deleteForever = async () => {
+    if (!forever) return;
+    const target = forever;
+    setBusy(true);
+    const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library/${target._id}`, { method: 'DELETE', credentials: 'include' }).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) { toast.error("Could not delete the file."); return; }
+    setItems((l) => (l || []).filter((x) => x._id !== target._id));
+    setForever(null);
+    toast.success("Deleted for good");
+  };
+
+  const emptyAll = async () => {
+    setBusy(true);
+    const res = await fetchWithRescue(`${endpointPrefix}/api/ai/library/trash`, { method: 'DELETE', credentials: 'include' }).catch(() => null);
+    setBusy(false);
+    if (!res?.ok) { toast.error("Could not empty the Trash."); return; }
+    setItems([]);
+    setEmptying(false);
+    toast.success("Trash emptied");
+  };
+
+  const shown = (items || []).filter((f) => f.original_name.toLowerCase().includes(search.toLowerCase()));
+  const count = items?.length || 0;
+
+  return (
+    <div className="flex flex-col h-full bg-background text-foreground overflow-y-auto">
+      <div className="px-6 pt-4 pb-5 border-b border-border/50 sticky top-0 bg-background/95 backdrop-blur z-40">
+        <div className="max-w-6xl mx-auto w-full flex flex-col gap-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-2 min-w-0">
+              <button type="button" onClick={onBack} title="Back to Library"
+                className="size-9 shrink-0 flex items-center justify-center rounded-full text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer">
+                <ArrowLeft className="w-4 h-4" />
+              </button>
+              <button type="button" onClick={onBack} className="text-sm text-muted-foreground hover:text-foreground cursor-pointer">Library</button>
+              <span className="text-sm text-muted-foreground">/</span>
+              <span className="text-lg font-semibold">Trash</span>
+            </div>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+              <input type="text" placeholder="Search trash" value={search} onChange={(e) => setSearch(e.target.value)}
+                className="pl-9 pr-4 py-2 bg-accent/50 hover:bg-accent focus:bg-accent rounded-full border border-border/50 focus:outline-none focus:ring-1 focus:ring-ring w-[240px] text-sm transition-colors" />
+            </div>
+          </div>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl bg-accent/50 border border-border/50 px-4 py-3">
+            <p className="text-sm text-muted-foreground">
+              AI-generated files you delete stay here for {TRASH_DAYS} days, then they're deleted for good. Files you uploaded are deleted right away.
+            </p>
+            <button type="button" onClick={() => setEmptying(true)} disabled={!count}
+              className="shrink-0 h-9 px-4 rounded-full text-sm font-medium bg-foreground text-background hover:opacity-90 disabled:opacity-40 cursor-pointer disabled:cursor-default">
+              Empty Trash
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex-1 p-6 max-w-6xl mx-auto w-full">
+        {items === null ? (
+          <div className="flex flex-col gap-3">{[1, 2, 3].map((i) => <Skeleton key={i} className="h-12 w-full rounded-xl" />)}</div>
+        ) : !shown.length ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="w-16 h-16 bg-accent rounded-full flex items-center justify-center mb-4">
+              <Trash2 className="w-7 h-7 text-muted-foreground" />
+            </div>
+            <h3 className="text-lg font-medium mb-1">{search ? "Nothing matches" : "Trash is empty"}</h3>
+            <p className="text-muted-foreground text-sm max-w-sm">{search ? "No file in the Trash has that name." : "AI-generated files you delete show up here for 30 days."}</p>
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-border/50 overflow-hidden">
+            <div className="hidden sm:grid grid-cols-[1fr_110px_110px_auto] gap-4 px-4 py-2.5 text-xs font-medium text-muted-foreground border-b border-border/50 bg-accent/30">
+              <span>Name</span><span>Size</span><span>Deleted</span><span className="w-[230px]" />
+            </div>
+            {shown.map((f) => {
+              const left = daysLeft(f);
+              return (
+                <div key={f._id} className="grid grid-cols-[1fr_auto] sm:grid-cols-[1fr_110px_110px_auto] items-center gap-4 px-4 py-3 border-b border-border/40 last:border-b-0">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="size-10 shrink-0 rounded-lg overflow-hidden bg-accent flex items-center justify-center">
+                      {f.file_type === 'image' ? <img src={f.cdn_url} alt="" className="w-full h-full object-cover" /> : <FileIcon className="w-5 h-5 text-muted-foreground" />}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium truncate" title={f.original_name}>{f.original_name}</p>
+                      <p className="text-xs text-muted-foreground">{left} day{left === 1 ? '' : 's'} left</p>
+                    </div>
+                  </div>
+                  <span className="hidden sm:block text-sm text-muted-foreground tabular-nums">{formatBytes(f.size_bytes)}</span>
+                  <span className="hidden sm:block text-sm text-muted-foreground">{f.deleted_at ? format(new Date(f.deleted_at), 'MMM d') : ''}</span>
+                  <div className="flex items-center gap-2 justify-end sm:w-[230px]">
+                    <button type="button" onClick={() => restore(f)}
+                      className="h-8 px-3 rounded-full text-[13px] font-medium bg-accent hover:bg-accent/70 flex items-center gap-1.5 cursor-pointer">
+                      <RotateCcw className="w-3.5 h-3.5" />Restore
+                    </button>
+                    <button type="button" onClick={() => setForever(f)}
+                      className="h-8 px-3 rounded-full text-[13px] font-medium bg-red-500/10 hover:bg-red-500/20 text-red-500 cursor-pointer whitespace-nowrap">
+                      Delete forever
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <DangerConfirmDialog
+        open={!!forever}
+        onOpenChange={(o) => { if (!o && !busy) setForever(null); }}
+        title="Delete forever?"
+        description={forever ? `"${forever.original_name}"` : undefined}
+        warningMessage="This file is deleted for good. This can't be undone."
+        actionLabel="Delete forever"
+        isLoading={busy}
+        onConfirm={deleteForever}
+      />
+      <DangerConfirmDialog
+        open={emptying}
+        onOpenChange={(o) => { if (!busy) setEmptying(o); }}
+        title="Empty the Trash?"
+        description={`${count} file${count === 1 ? '' : 's'}`}
+        warningMessage="Every file in the Trash is deleted for good. This can't be undone."
+        actionLabel="Empty Trash"
+        isLoading={busy}
+        onConfirm={emptyAll}
+      />
     </div>
   );
 }
