@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { ArrowUpDown, Check, ChevronDown, Folder, MessageSquare, Search } from "lucide-react";
+import { ArrowUpDown, Check, ChevronDown, Folder, Search } from "lucide-react";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/marketing_ui/dropdown-menu";
@@ -39,6 +39,12 @@ const dateTimeText = (iso: string) => {
 // dropdown the chat uses")
 const menuCard = "z-[100] bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-2 shadow-2xl data-closed:animate-none";
 const menuItem = "gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors";
+// The chat list's own chat icon (AgentSidebar.tsx ChatBubbleIcon), so an archived chat looks like a chat
+const ChatBubbleIcon = ({ className }: { className?: string }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className={className}>
+    <path fill="none" d="M2.992 16.342a2 2 0 0 1 .094 1.167l-1.065 3.29a1 1 0 0 0 1.236 1.168l3.413-.998a2 2 0 0 1 1.099.092a10 10 0 1 0-4.777-4.719" />
+  </svg>
+);
 const SORTS: { id: SortBy; label: string }[] = [
   { id: "updated", label: "Updated" },
   { id: "created", label: "Created" },
@@ -168,7 +174,7 @@ export function SettingsArchivedChatsSection() {
               </DropdownMenuItem>
               <DropdownMenuSeparator className="my-1 bg-slate-200 dark:bg-white/10" />
               <DropdownMenuItem className={menuItem} onClick={() => setPlace(NO_PROJECT)}>
-                <MessageSquare className="size-4" /><span className="flex-1">No project</span>{place === NO_PROJECT && <Check className="size-4" />}
+                <ChatBubbleIcon className="w-[15px] h-[15px] shrink-0 text-muted-foreground/80" /><span className="flex-1">No project</span>{place === NO_PROJECT && <Check className="size-4" />}
               </DropdownMenuItem>
               {projectsInList.map((p) => (
                 <DropdownMenuItem key={p.id} className={menuItem} onClick={() => setPlace(p.id)}>
@@ -200,7 +206,7 @@ export function SettingsArchivedChatsSection() {
             <div className="divide-y divide-border">
               {g.chats.map((c) => (
                 <div key={c.id} className="flex items-center gap-3 py-3">
-                  <MessageSquare className="size-4 shrink-0 text-muted-foreground" />
+                  <ChatBubbleIcon className="w-[15px] h-[15px] shrink-0 text-muted-foreground/80" />
                   <button type="button" onClick={() => openChat(c)} className="flex-1 min-w-0 text-left cursor-pointer group">
                     <span className="block truncate text-sm font-medium text-[#3b82f6] group-hover:underline underline-offset-2">{cleanTitle(c.title) || "Untitled chat"}</span>
                     <span className="block text-[12px] text-muted-foreground truncate tabular-nums">{dateTimeText(whenOf(c, sort))}</span>
