@@ -5442,6 +5442,31 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         }
 
         if (streamError) {
+          // The chat on screen is another account's (the account was switched while it was open, and the message went
+          // out before the panel found that out): it goes on under this account from its copy on this computer, and
+          // the same message is sent there, like switching accounts in Claude Code (owner, 2026-11-19: the first
+          // message after switching accounts in VS Code got "Unauthorized", the second went on)
+          if (streamError.startsWith("Unauthorized. You do not have permission to view this chat") && replySession && keepsChatCopies() && !isIncognito && !options?.hidden && !options?.isEdit) {
+            const other = await findOtherChat(replySession).catch(() => null);
+            const copy = other ? await readOtherChatCopy(other.userId, other.chatId).catch(() => null) : null;
+            if (other && copy && !isStale()) {
+              const newId = await continueChatCopy({ ...other, email: copy.email || other.email }, copy.messages).catch(() => null);
+              if (newId && !isStale()) {
+                // (the question and its answer come off: the question is sent again, in the continued chat)
+                setMessages((prev) => {
+                  const last = prev[prev.length - 1];
+                  const before = prev[prev.length - 2];
+                  return last?.role === "assistant" && before?.role === "user" ? prev.slice(0, -2) : prev;
+                });
+                setOtherCopy(null);
+                setSessionId(newId);
+                setEndedCheckedFor(newId);
+                window.dispatchEvent(new CustomEvent("agent:session-created", { detail: { id: newId, title: other.title } }));
+                window.dispatchEvent(new Event("agent:refresh-sessions"));
+                return askQuestion(question, { ...options, explicitSessionId: newId });
+              }
+            }
+          }
           throw new Error(streamError);
         }
 
