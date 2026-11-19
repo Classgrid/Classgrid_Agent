@@ -35,6 +35,10 @@ const dateTimeText = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleString([], { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 };
+// The same menu look as the chat menu (StudioChatMenu.tsx), not the plain dark one (owner, 2026-11-19: "use the
+// dropdown the chat uses")
+const menuCard = "z-[100] bg-white dark:bg-[#202123] text-slate-700 dark:text-[#ececf1] border border-slate-200 dark:border-white/10 rounded-2xl p-2 shadow-2xl data-closed:animate-none";
+const menuItem = "gap-3 py-2 px-3 text-[14px] cursor-pointer hover:bg-slate-100 dark:hover:bg-[#343541] focus:bg-slate-100 dark:focus:bg-[#343541] focus:text-slate-900 dark:focus:text-[#ececf1] rounded-xl transition-colors";
 const SORTS: { id: SortBy; label: string }[] = [
   { id: "updated", label: "Updated" },
   { id: "created", label: "Created" },
@@ -145,10 +149,10 @@ export function SettingsArchivedChatsSection() {
             <DropdownMenuTrigger className={pill}>
               <ArrowUpDown className="size-3.5" />{SORTS.find((s) => s.id === sort)?.label}<ChevronDown className="size-3.5 text-muted-foreground" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+            <DropdownMenuContent align="end" sideOffset={6} className={`w-[200px] ${menuCard}`}>
+              <DropdownMenuLabel className="px-3 pt-1.5 pb-1 text-[12px]">Sort by</DropdownMenuLabel>
               {SORTS.map((s) => (
-                <DropdownMenuItem key={s.id} onClick={() => setSort(s.id)}>
+                <DropdownMenuItem key={s.id} className={menuItem} onClick={() => setSort(s.id)}>
                   <span className="flex-1">{s.label}</span>{sort === s.id && <Check className="size-4" />}
                 </DropdownMenuItem>
               ))}
@@ -158,16 +162,16 @@ export function SettingsArchivedChatsSection() {
             <DropdownMenuTrigger className={pill}>
               <Folder className="size-3.5" /><span className="max-w-[140px] truncate">{placeLabel}</span><ChevronDown className="size-3.5 text-muted-foreground" />
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-56">
-              <DropdownMenuItem onClick={() => setPlace("all")}>
+            <DropdownMenuContent align="end" sideOffset={6} className={`w-[240px] ${menuCard}`}>
+              <DropdownMenuItem className={menuItem} onClick={() => setPlace("all")}>
                 <span className="flex-1">All projects</span>{place === "all" && <Check className="size-4" />}
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => setPlace(NO_PROJECT)}>
+              <DropdownMenuSeparator className="my-1 bg-slate-200 dark:bg-white/10" />
+              <DropdownMenuItem className={menuItem} onClick={() => setPlace(NO_PROJECT)}>
                 <MessageSquare className="size-4" /><span className="flex-1">No project</span>{place === NO_PROJECT && <Check className="size-4" />}
               </DropdownMenuItem>
               {projectsInList.map((p) => (
-                <DropdownMenuItem key={p.id} onClick={() => setPlace(p.id)}>
+                <DropdownMenuItem key={p.id} className={menuItem} onClick={() => setPlace(p.id)}>
                   <Folder className="size-4" /><span className="flex-1 truncate">{p.name}</span>{place === p.id && <Check className="size-4" />}
                 </DropdownMenuItem>
               ))}
