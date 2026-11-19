@@ -83,8 +83,6 @@ const SECTIONS: Section[] = [
   ] },
   { title: "Projects and coding", icon: FolderGit2, fields: [
     { key: "projects_max", label: "Cloud projects", type: "number", unlimited: true },
-    { key: "coding_runs_per_month", label: "Coding agent runs per month", type: "number", unlimited: true },
-    { key: "premium_runs_per_month", label: "Premium (Sonnet) runs per month", type: "number", unlimited: true, none: true },
     { key: "sandbox_hours_per_month", label: "Cloud computer hours per month", type: "number", unlimited: true },
     { key: "sandbox_sessions", label: "Cloud computers at once", type: "number" },
   ] },

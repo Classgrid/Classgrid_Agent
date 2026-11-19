@@ -2728,18 +2728,10 @@ You are currently talking to Nikhil Shinde (nikhil.shinde@classgrid.in), the CRE
             res.write(`data: ${JSON.stringify({ type: "error", error: getFeatureFlagDefinition("projects").message, code: "feature_off", feature: "projects" })}\n\n`);
             return;
         }
-        // Plans on: the plan's coding agent runs a month, and its runs with a Claude model (one run = one message in a
-        // Project Mode chat; services/coding-run-limit.service.js). The run is counted here when it is let through.
-        // Like the refusal above, the answer has started streaming, so it ends with the error.
-        if (isProjectChat && planRow) {
-            const { takeCodingRun } = await import("../services/coding-run-limit.service.js");
-            const run = await takeCodingRun(userId, planRow, { premium: !claudeByCap && CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "") });
-            if (!run.allowed) {
-                res.write(`data: ${JSON.stringify({ type: "error", error: run.error, code: run.code, plan: planRow.key })}\n\n`);
-                res.end();
-                return;
-            }
-        }
+        // No limit per message in a project (owner, 2026-11-19: "no limit per message; the limit is the credits and the
+        // usage"): the plan's credits, Claude credits and Fable share limit project work like any other chat. The
+        // coding agent runs a month and runs with a Claude model (one run = one message, 100 a month on Max) stopped
+        // the owner himself with credits left; they are gone, not only raised.
         tailPrompt += projectContext; // (the editor notes change with every message)
         // The three modes of the app and the one the user is in now, so the AI knows what the user can see and do
         const appMode = ["agent", "project", "studio"].includes(body.appMode) ? body.appMode : null;

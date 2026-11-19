@@ -38,7 +38,7 @@ const PLAN_FIELDS = [
     "call_minutes_per_period", "call_reset_value", "call_reset_unit", "calls_per_day", "call_max_minutes",
     "calls_per_week", "calls_per_month", "call_tasks_per_call", "call_tasks_at_once", "call_task_max_minutes",
     "whatsapp_per_day", "whatsapp_per_period", "whatsapp_reset_value", "whatsapp_reset_unit",
-    "projects_max", "coding_runs_per_month", "premium_runs_per_month", "sandbox_hours_per_month", "sandbox_sessions",
+    "projects_max", "sandbox_hours_per_month", "sandbox_sessions",
     "uploads_per_window", "upload_max_mb", "library_storage_mb", "devices_max", "priority", "support_level", "features_text",
     "price_inr_monthly", "price_inr_yearly", "student_price_inr_monthly", "student_price_inr_yearly", "tagline", "coming_soon",
 ];
@@ -96,10 +96,8 @@ export async function planOverviewFor(userId) {
         const callSeconds = callReset && callReset.getTime() > now ? (user.ai_call_seconds_used || 0) : 0;
 
         // Projects and storage (the Library: uploaded files and generated pictures)
-        const [projects, runsUsed, cloudHours, storage, generated] = await Promise.all([
+        const [projects, cloudHours, storage, generated] = await Promise.all([
             IdeProject.countDocuments({ owner: userId, location: { $ne: "local" } }).catch(() => 0),
-            // Coding agent runs and runs with a Claude model this month (services/coding-run-limit.service.js)
-            import("../services/coding-run-limit.service.js").then((m) => m.codingRunsUsed(userId)).catch(() => ({ runs: 0, premium: 0 })),
             // Hours of cloud computer this month (services/cloud-computer-limit.service.js)
             import("../services/cloud-computer-limit.service.js").then((m) => m.cloudHoursUsed(userId)).catch(() => 0),
             AiLibraryFile.aggregate([
@@ -148,8 +146,6 @@ export async function planOverviewFor(userId) {
                 call_minutes: { used: Math.round((callSeconds / 60) * 10) / 10, limit: lim(callLimit), resetAt: callReset && callReset.getTime() > now ? callReset.toISOString() : null, periodText: callPeriod.label.replace(/^every /, ""), callsPerDay: plan ? num(plan.calls_per_day, null) : null, maxMinutes: plan ? num(plan.call_max_minutes, null) : null },
                 projects: { used: projects, limit: plan ? num(plan.projects_max, 0) : null },
                 // (they start again on the 1st of the month, India time)
-                coding_runs: plan ? { used: runsUsed.runs, limit: num(plan.coding_runs_per_month, -1), resetAt: nextIstMonthStart().toISOString() } : null,
-                premium_runs: plan ? { used: runsUsed.premium, limit: num(plan.premium_runs_per_month, -1), resetAt: nextIstMonthStart().toISOString() } : null,
                 cloud_hours: plan ? { used: cloudHours, limit: num(plan.sandbox_hours_per_month, -1), resetAt: nextIstMonthStart().toISOString(), atOnce: num(plan.sandbox_sessions, 1) } : null,
                 storage: { usedMb: mb(files.bytes + images.bytes), limit: storageCap, files: { count: files.count, mb: mb(files.bytes) }, images: { count: images.count, mb: mb(images.bytes) }, generatedImages: generated },
             },
