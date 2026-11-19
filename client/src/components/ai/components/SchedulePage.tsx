@@ -251,12 +251,9 @@ export const SchedulePage: React.FC = () => {
 
   return (
     <div className="h-full flex flex-col bg-background relative z-10 p-6 md:p-8 max-w-3xl mx-auto w-full overflow-y-auto">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-2">
-        {/* (desktop app, Studio: the name is in the top bar above instead) */}
-        {import.meta.env.VITE_DESKTOP === "1" && location.pathname.split("/").includes("studio")
-          ? <span />
-          : <h1 className="text-2xl font-bold tracking-tight">Scheduled</h1>}
+      {/* Header (no page name: the top bar above already says "Schedule", owner 2026-11-19: "remove duplicate
+          schedule name") */}
+      <div className="flex items-center justify-end mb-2">
         {activeCount > 0 && (
           <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#2C2C2C] dark:bg-[#F0EFED] text-[#F0EFED] dark:text-[#2C2C2C] text-xs font-medium">
             <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />

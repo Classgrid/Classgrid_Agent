@@ -7202,9 +7202,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             )}
             {/* Desktop app: Schedule and Library in Studio have the same top bar as Grids, Requests and Audit Logs
                 (DashboardLayout): the sidebar button on the left and the page name in the middle */}
-            {/* The same top bar on the website too (owner, 2026-11-09): inside one item it reads "Schedule / <name>" */}
+            {/* The same top bar on the website too (owner, 2026-11-09): inside one item it reads "Schedule / <name>".
+                Solid, not see-through: the blue icons scrolling under it used to tint it blue (owner, 2026-11-19) */}
             {isToolPage(sessionId) && (
-              <header className="flex h-14 shrink-0 items-center justify-center border-b border-border/50 px-4 bg-background/80 backdrop-blur-md relative z-20">
+              <header className="flex h-14 shrink-0 items-center justify-center border-b border-border/50 px-4 bg-background relative z-20">
                 <div className="absolute left-4 flex items-center gap-2">
                   <SidebarTrigger />
                   <Separator orientation="vertical" className="h-4" />
