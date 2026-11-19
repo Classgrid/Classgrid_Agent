@@ -60,8 +60,10 @@ async function activate(context) {
   }
   parts = { runner, chats, memory, version, context };
   try { storage = JSON.parse((await context.secrets.get(STORAGE_KEY)) || "{}"); } catch { storage = {}; }
-  // (the Classgrid app logged out: Classgrid Code too, now and whenever it happens while the editor is open)
-  if (process.env.APPDATA) {
+  // (the Classgrid app logged out: Classgrid Code too, now and whenever it happens while the editor is open. Only
+  // Classgrid Code shares the app's login; the extension in VS Code, Cursor or Antigravity signed in by itself in the
+  // browser, so the app logging out leaves it signed in: sharedLogin)
+  if (process.env.APPDATA && sharedLogin()) {
     followAppSignOut();
     fs.watchFile(SIGNED_OUT_NOTE, { interval: 2000 }, followAppSignOut);
     context.subscriptions.push({ dispose: () => fs.unwatchFile(SIGNED_OUT_NOTE, followAppSignOut) });
@@ -586,6 +588,11 @@ async function coverWithStrip(webview, on) {
 // and our screens show the sign-in note. When the Classgrid app logs out it leaves a note in its data folder
 // (desktop/codeeditor.js), and Classgrid Code logs out too if it signed in before that.
 const SIGNED_OUT_NOTE = path.join(process.env.APPDATA || "", "Classgrid", "signed-out.json");
+// Classgrid Code (the full editor) has the Classgrid app's own login, handed over by the app. The extension in any other
+// editor (VS Code, Cursor, Antigravity...) has its own sign-in from the browser: logging out there must not log out the
+// Classgrid app, Classgrid Code or the other editors (owner, 2026-11-19: he logged out of a demo account in Antigravity
+// and his Classgrid app and every editor logged out with it)
+const sharedLogin = () => /classgrid/i.test(vscode.env.appName || "");
 async function forgetLogin() {
   const keep = {};
   for (const k of ["theme", "cg_editor_theme"]) if (k in storage) keep[k] = storage[k];
@@ -838,9 +845,11 @@ const HANDLERS = {
     // (remembered for this folder: Classgrid Code opens on it next time)
     parts?.context.workspaceState.update(LAST_CHAT_KEY, id ? String(id) : undefined).then(undefined, () => {});
   },
-  // Settings → Log out: one login for Classgrid Code and the Classgrid app, so both log out (the website stays signed in)
+  // Settings → Log out: one login for Classgrid Code and the Classgrid app, so both log out (the website stays signed in).
+  // In another editor only this editor logs out (sharedLogin).
   signOut: async () => {
     await forgetLogin();
+    if (!sharedLogin()) return;
     try { fs.writeFileSync(SIGNED_OUT_NOTE, JSON.stringify({ at: Date.now() })); } catch { /* the app is told below too */ }
     await vscode.env.openExternal(vscode.Uri.parse("classgrid://logout")).then(undefined, () => {});
   },

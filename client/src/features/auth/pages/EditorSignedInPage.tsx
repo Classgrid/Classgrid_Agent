@@ -20,6 +20,14 @@ export function EditorSignInWatcher() {
     const check = () => {
       if (window.location.pathname === PAGE || WAIT_ON.test(window.location.pathname)) return false;
       if (!pendingEditorSignIn()) return true; // nothing to do: stop checking
+      // A Google / GitHub sign-in has just come back with its token in the address (?token=): that token is the one
+      // handed over, saved first (as useCurrentUser saves it). The token still saved here is the browser's earlier
+      // sign-in, which the new one has just replaced (one sign-in per browser), so handing it over failed with "Your
+      // sign-in here has expired" (owner, 2026-11-19: every sign-in started from the editor in a browser that was
+      // already signed in)
+      const q = new URLSearchParams(window.location.search);
+      const fresh = q.get("token") || q.get("sso_token");
+      if (fresh) localStorage.setItem("token", fresh);
       if (!localStorage.getItem("token")) return false;
       navigate(PAGE, { replace: true });
       return true;
