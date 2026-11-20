@@ -29,7 +29,22 @@ export async function aiPricingData() {
     // billing.classgrid.in. Free: the chat itself. Not buyable (coming soon, contact us): null.
     const chatApp = String(process.env.CHAT_APP_URL || "https://chat.classgrid.in").replace(/\/$/, "");
     const buyUrl = (p, term) => (!p.coming_soon && p.key !== "free" && Number(term === "year" ? p.price_inr_yearly : p.price_inr_monthly) > 0) ? `${chatApp}/agent?buy=${encodeURIComponent(p.key)}&term=${term}&back=pricing` : null;
-    const plans = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0)).map((p) => ({
+    const publicPlans = Object.values(plansNow.plans || {}).filter((p) => p.is_public !== false).sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0));
+    // How much usage a plan has, as a multiple of the first plan that has any (Free: 1). The feed is public, so it
+    // carries these and never the credit numbers themselves (owner, 2026-11-21: "don't show how many credits; show it
+    // like Claude does, 5x, 20x"): -1 = unlimited, 0 = not in the plan, null = not set.
+    const usageX = (field) => {
+      const base = publicPlans.map((p) => Number(p[field])).find((n) => Number.isFinite(n) && n > 0);
+      return (p) => {
+        const n = Number(p[field]);
+        if (p[field] === undefined || p[field] === null || !Number.isFinite(n)) return null;
+        if (n < 0) return -1;
+        if (n === 0 || !base) return 0;
+        return Math.round((n / base) * 100) / 100;
+      };
+    };
+    const sessionX = usageX("tokens_per_window"), weeklyX = usageX("tokens_per_week"), claudeX = usageX("claude_credits_per_week");
+    const plans = publicPlans.map((p) => ({
       key: p.key, name: p.name, tagline: p.tagline, comingSoon: !!p.coming_soon,
       buyUrlMonthly: buyUrl(p, "month"), buyUrlYearly: buyUrl(p, "year"), startUrl: p.key === "free" ? `${chatApp}/` : null,
       // The same at the student price (the chat asks the visitor to confirm a student email first if needed)
@@ -40,7 +55,7 @@ export async function aiPricingData() {
       features: p.features_text || [],
       // The models the plan lets a person pick (empty = every model); the picker's plan tags come from modelPlans below
       modelsAllowed: Array.isArray(p.models_allowed) ? p.models_allowed : [],
-      limits: { chatsPerWindow: p.chats_per_window, chatsPerWeek: p.chats_per_week, windowHours: p.window_reset_unit === "hour" ? p.window_reset_value : null, claudeCreditsPerWeek: p.claude_credits_per_week, fableSharePercent: p.fable_share_percent, contextTokens: p.context_tokens, helpersPerChat: p.helpers_per_chat, imagesPerPeriod: p.images_per_period, imagesPeriod: `${p.images_reset_value} ${p.images_reset_unit}`, voiceRepliesPerDay: p.voice_replies_per_day, voiceInputMinutesPerDay: p.voice_input_minutes_per_day, callMinutesPerPeriod: p.call_minutes_per_period, callsPerDay: p.calls_per_day, callMaxMinutes: p.call_max_minutes, callsPerWeek: p.calls_per_week, callsPerMonth: p.calls_per_month, callTasksPerCall: p.call_tasks_per_call, callTasksAtOnce: p.call_tasks_at_once, callTaskMaxMinutes: p.call_task_max_minutes, whatsappPerDay: p.whatsapp_per_day, projectsMax: p.projects_max, sandboxHoursPerMonth: p.sandbox_hours_per_month, uploadMaxMb: p.upload_max_mb, libraryStorageMb: p.library_storage_mb, devicesMax: p.devices_max, support: p.support_level },
+      limits: { chatsPerWindow: p.chats_per_window, chatsPerWeek: p.chats_per_week, windowHours: p.window_reset_unit === "hour" ? p.window_reset_value : null, sessionUsageX: sessionX(p), weeklyUsageX: weeklyX(p), claudeUsageX: claudeX(p), fableSharePercent: p.fable_share_percent, contextTokens: p.context_tokens, helpersPerChat: p.helpers_per_chat, imagesPerPeriod: p.images_per_period, imagesPeriod: `${p.images_reset_value} ${p.images_reset_unit}`, voiceRepliesPerDay: p.voice_replies_per_day, voiceInputMinutesPerDay: p.voice_input_minutes_per_day, callMinutesPerPeriod: p.call_minutes_per_period, callsPerDay: p.calls_per_day, callMaxMinutes: p.call_max_minutes, callsPerWeek: p.calls_per_week, callsPerMonth: p.calls_per_month, callTasksPerCall: p.call_tasks_per_call, callTasksAtOnce: p.call_tasks_at_once, callTaskMaxMinutes: p.call_task_max_minutes, whatsappPerDay: p.whatsapp_per_day, projectsMax: p.projects_max, sandboxHoursPerMonth: p.sandbox_hours_per_month, uploadMaxMb: p.upload_max_mb, libraryStorageMb: p.library_storage_mb, devicesMax: p.devices_max, support: p.support_level },
     }));
     // For every model, the plans (in plan order) that include it, by the same rules POST /api/ai/ask uses
     // (ai-chat.controller.js): the plan's models_allowed (empty = all), a Claude model only when the plan's
