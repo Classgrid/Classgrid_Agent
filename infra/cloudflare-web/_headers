@@ -1,0 +1,5 @@
+# Cloudflare Pages header rules for the web app (copied into the build by .github/workflows/deploy-web-cloudflare.yml).
+# The same rule client/vercel.json gives the pages on Vercel: the sign-in consent pages are never shown inside a frame.
+/oauth/*
+  Content-Security-Policy: frame-ancestors 'none'
+  X-Frame-Options: DENY
