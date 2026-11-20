@@ -171,14 +171,27 @@ export const getPlanOverview = async (req, res) => {
 // same history.
 export const getUsageHistory = async (req, res) => {
     try {
-        res.json(await usageHistoryFor(req.user._id, req.query));
+        res.json(await usageHistoryFor(req.user._id, req.query, { ownNames: true }));
     } catch (err) {
         console.error("[usage history]", err);
         res.status(500).json({ error: err.message });
     }
 };
 
-export async function usageHistoryFor(userId, query = {}) {
+// What a user sees as the model of a voice, speech or picture request: Classgrid's own name, never the provider's
+// model (owner, 2026-11-20: the Usage page showed "Eleven V4 Turbo" for a read-aloud, which tells anyone who makes our
+// voice). Chat models keep their names (the user picks those in the model picker). The super admin's user page asks
+// without ownNames and keeps the real model and provider.
+const PICTURE_MODEL = /image|flux|dall|imagen|stable-diffusion|sdxl/i;
+function ownName(e) {
+    const model = String(e.model || "");
+    if (PICTURE_MODEL.test(model)) return "Classgrid Image";
+    if (/scribe|whisper|deepgram\/nova/i.test(model)) return "Classgrid Speech";
+    if (e.provider === "elevenlabs" || /^eleven[_-]|deepgram\/aura|melotts/i.test(model)) return "Classgrid Voice";
+    return null;
+}
+
+export async function usageHistoryFor(userId, query = {}, { ownNames = false } = {}) {
         const days = Math.min(90, Math.max(1, parseInt(query.days, 10) || 14));
         const limit = Math.min(50, Math.max(1, parseInt(query.limit, 10) || 15));
         const page = Math.max(1, parseInt(query.page, 10) || 1);
@@ -211,14 +224,18 @@ export async function usageHistoryFor(userId, query = {}) {
             if (kind === "call") return "WhatsApp call";
             if (e.feature === "chat_ai") return "Chat";
             // feature "other": a picture (image models), else the chat's title (a few hundred credits)
-            if (/image|flux|dall|imagen|stable-diffusion|sdxl/i.test(String(e.model || ""))) return "Image";
+            if (PICTURE_MODEL.test(String(e.model || ""))) return "Image";
             return (e.totalTokens || 0) <= 2000 ? "Chat title" : "Chat";
+        };
+        const shown = (e) => {
+            const own = ownNames ? ownName(e) : null;
+            return own ? { model: own, provider: "classgrid" } : { model: e.model, provider: e.provider };
         };
         return {
             days, since: since.toISOString(),
             total: { credits: totals[0]?.credits || 0, requests: totals[0]?.requests || 0 },
             perDay: list,
-            events: events.map((e) => ({ at: e.createdAt, model: e.model, provider: e.provider, what: what(e), credits: e.totalTokens || 0 })),
+            events: events.map((e) => ({ at: e.createdAt, ...shown(e), what: what(e), credits: e.totalTokens || 0 })),
             page, limit, eventsTotal, pages: Math.max(1, Math.ceil(eventsTotal / limit)), asOf: new Date().toISOString(),
         };
 }
