@@ -1954,7 +1954,7 @@ export const streamAskAi = async (req, res) => {
         const onPool = past > 0 && claudeCreditsAfter ? toPool : toPool + past;
         if (onPool > 0) await User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": onPool, ...(/claude-fable/.test(model) ? { "ai_tokens.fable_week_used": onPool } : {}) } });
         if (past > 0 && claudeCreditsAfter) {
-            await deductTokens(userId, orgId, past, claudeCreditsAfter.source);
+            await deductTokens(userId, orgId, past, claudeCreditsAfter.source, { label: { model, what: "Chat" } });
             console.log(`[AI-TOKEN] Past the plan's weekly Claude credits: ${past} charged to the person's ${claudeCreditsAfter.source} credits (${model})`);
         }
     };
@@ -2203,7 +2203,7 @@ export const streamAskAi = async (req, res) => {
                 const summary = answer.replace(/["'*]/g, "").trim().slice(0, 60);
                 if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "answer", answer: summary })}\n\n`);
                 if (userId && usage?.total_tokens > 0) {
-                    deductTokens(userId, orgId, chargeableTokens(usage, titleModel), tokenSource).catch(() => {});
+                    deductTokens(userId, orgId, chargeableTokens(usage, titleModel), tokenSource, { label: { model: titleModel, what: "Chat title" } }).catch(() => {});
                     AiUsageLog.create({
                         organization_id: orgId || null, userId, provider: titleProvider, model: titleModel, feature: 'other',
                         promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens, success: true
@@ -4251,7 +4251,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 ? await streamClaudeChat({ ...readerArgs, model })
                                 // (capStandIn: the cap had no room for this read, or was reached in the middle of it: Claude Haiku reads on)
                                 : await streamChat({ ...readerArgs, provider: cloudflareStreamProvider(model), temperature: 0.2, capStandIn: capStandInFor("small", "File reader") });
-                            if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource).catch(() => {});
+                            if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource, { label: { model: part.model, what: "Chat" } }).catch(() => {});
                             const answer = String(r.answer || "").trim();
                             if (answer) return { answer, model: r.standIn?.model || model };
                             lastError = "no answer";
@@ -4587,7 +4587,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             // (capStandIn: the cap refuses a round of this helper: Claude Sonnet goes on with its work from where it
                                             // stands, instead of the helper starting again on the next model)
                                             : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), capStandIn: capStandInFor("helper", `Helper ${h.no}`, (m) => { h.nowModel = m; return {}; }), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
-                                        if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource).catch(() => {});
+                                        if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource, { label: { model: part.model, what: "Chat" } }).catch(() => {});
                                         h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0) + (r.standIn?.before?.usage?.total_tokens || 0); // shown in the chat's Agent map
                                         if (!String(r.answer || "").trim()) { onlyCapRefusals = false; lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
                                         h.usedModel = r.standIn?.model || model;
@@ -7140,7 +7140,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     if (claudePooled(m)) {
                         await chargeClaudePool(cost, m);
                     } else {
-                        await deductTokens(userId, orgId, cost, tokenSource);
+                        await deductTokens(userId, orgId, cost, tokenSource, { label: { model: m, what: "Chat" } });
                     }
                     console.log(`[AI-TOKEN] Stopped answer charged: ${cost} (${m}, real tokens ${u.total_tokens})`);
                 } catch (err) {
@@ -7230,7 +7230,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             chargeClaudePool(detachedTokens, claudeModel)
                                 .catch((err) => console.error("[AI-TOKEN] Claude week count (detached) failed:", err.message));
                         } else {
-                            deductTokens(userId, orgId, detachedTokens, tokenSource)
+                            deductTokens(userId, orgId, detachedTokens, tokenSource, { label: { model: claudeModel, what: "Chat" } })
                                 .catch(err => console.error("[AI-TOKEN] Failed to deduct detached Claude usage:", err));
                         }
                         AiUsageLog.create({
@@ -7607,7 +7607,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             .catch((err) => console.error("[AI-TOKEN] Claude week count failed:", err.message));
                         deductionResult = { success: true, uncharged: 0, type: "claude_pool" };
                     } else {
-                        deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource);
+                        deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource, { label: { model: usedModel, what: "Chat" } });
                     }
                     flushPlaygroundText();
                     playground("end", {
@@ -9196,7 +9196,7 @@ export const generateImage = async (req, res) => {
         imageSlotUserId = null;
 
         if (imageTokenCharge) {
-            await deductTokens(imageTokenCharge.userId, imageTokenCharge.orgId, imageTokenCharge.amount, imageTokenCharge.source, { noSpill: !!imageTokenCharge.noSpill }).catch((e) => console.error("Image token deduction error:", e));
+            await deductTokens(imageTokenCharge.userId, imageTokenCharge.orgId, imageTokenCharge.amount, imageTokenCharge.source, { noSpill: !!imageTokenCharge.noSpill, label: { model: "Classgrid Image", what: "Image" } }).catch((e) => console.error("Image token deduction error:", e));
         }
 
         // Log it for dashboard analytics (every call, chat tool included).

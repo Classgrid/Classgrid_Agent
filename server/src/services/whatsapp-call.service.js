@@ -105,7 +105,7 @@ export function callsBackAt(enough, free, nowMs = Date.now()) {
 function chargeCall(call, usage, model) {
     const at = call.endedAt || Date.now();
     if (call.freeUntil && at < call.freeUntil) return;
-    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens(usage, model), call.tokenSource)
+    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens(usage, model), call.tokenSource, { label: { model, what: "WhatsApp call" } })
         .catch((e) => console.error("[WA call] token charge failed:", e.message));
 }
 

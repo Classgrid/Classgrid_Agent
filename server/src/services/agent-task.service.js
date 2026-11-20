@@ -84,7 +84,7 @@ async function smallModel(user, system, text) {
             messages: [{ role: "system", content: system }, { role: "user", content: text }],
         });
         if (r.usage?.total_tokens > 0) {
-            deductTokens(user._id, user.organization_id || null, chargeableTokens(r.usage, stand), tokens.source).catch(() => {});
+            deductTokens(user._id, user.organization_id || null, chargeableTokens(r.usage, stand), tokens.source, { label: { model: stand, what: "Chat" } }).catch(() => {});
             AiUsageLog.create({
                 organization_id: user.organization_id || null, userId: user._id, provider: "anthropic", model: stand, feature: "other",
                 promptTokens: r.usage.prompt_tokens || 0, completionTokens: r.usage.completion_tokens || 0, totalTokens: r.usage.total_tokens, success: true,
@@ -116,7 +116,7 @@ async function smallModel(user, system, text) {
     const data = await res.json().catch(() => ({}));
     const usage = data.usage || {};
     if (usage.total_tokens || usage.prompt_tokens) {
-        deductTokens(user._id, user.organization_id || null, chargeableTokens(usage, CHECK_MODEL), tokens.source).catch(() => {});
+        deductTokens(user._id, user.organization_id || null, chargeableTokens(usage, CHECK_MODEL), tokens.source, { label: { model: CHECK_MODEL, what: "Chat" } }).catch(() => {});
         AiUsageLog.create({
             organization_id: user.organization_id || null, userId: user._id, provider: "cloudflare", model: CHECK_MODEL, feature: "other",
             promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0,

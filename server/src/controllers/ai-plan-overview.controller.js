@@ -8,6 +8,7 @@ import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import AiLibraryFile from "../models/AiLibraryFile.js";
 import IdeProject from "../models/IdeProject.js";
 import AiUsageLog from "../models/AiUsageLog.js";
+import AiCreditSpend from "../models/AiCreditSpend.js";
 import { planOf, planKeyOf, plansEnabled, filesPerMessage, DEFAULT_FILES_PER_MESSAGE } from "../services/plan-limits.service.js";
 import { freeWindow, weekCounters, tokenWindowEnd } from "../services/ai-credits.service.js";
 import { resolveFeatureLimit, resolveResetPeriod, checkWhatsappLimit, formatPeriodLength } from "../services/ai-feature-limits.js";
@@ -166,12 +167,17 @@ export const getPlanOverview = async (req, res) => {
 };
 
 // The Usage page's history (GET /api/ai/plan/usage-history?days=14&page=1&limit=15): credits per day (India time)
-// for the last days, the totals, and the AI requests with their model and credits (from AiUsageLog), newest first,
-// one page at a time. usageHistoryFor is shared with the super admin's user page (Plans & Usage), so both show the
-// same history.
+// for the last days, the totals, and the rows with their model and credits, newest first, one page at a time.
+//
+// For the person themselves (this route) it is the credits they SPENT (owner, 2026-11-20: "a person who uses only
+// their plan sees 0; a person who buys Rs. 500 of credits sees only what they spent from those credits"): the rows
+// are the charges to their credits (AiCreditSpend, written by deductTokens), never what the plan covered. The plan's
+// own limits are the bars at the top of the page. The record starts on 2026-11-20: nothing before it was kept.
+// usageHistoryFor is shared with the super admin's user page (Plans & Usage), which asks without these options and
+// shows every AI request from the usage log (AiUsageLog) with its real model.
 export const getUsageHistory = async (req, res) => {
     try {
-        res.json(await usageHistoryFor(req.user._id, req.query, { ownNames: true }));
+        res.json(await usageHistoryFor(req.user._id, req.query, { ownNames: true, creditsOnly: true }));
     } catch (err) {
         console.error("[usage history]", err);
         res.status(500).json({ error: err.message });
@@ -191,23 +197,26 @@ function ownName(e) {
     return null;
 }
 
-export async function usageHistoryFor(userId, query = {}, { ownNames = false } = {}) {
+export async function usageHistoryFor(userId, query = {}, { ownNames = false, creditsOnly = false } = {}) {
         const days = Math.min(90, Math.max(1, parseInt(query.days, 10) || 14));
         const limit = Math.min(50, Math.max(1, parseInt(query.limit, 10) || 15));
         const page = Math.max(1, parseInt(query.page, 10) || 1);
         const since = new Date(Date.now() - days * 86400000);
         // (an id given as text, from the super admin's page, made an ObjectId: aggregate does not cast it)
         const uid = typeof userId === "string" && mongoose.Types.ObjectId.isValid(userId) ? new mongoose.Types.ObjectId(userId) : userId;
-        const match = { userId: uid, createdAt: { $gte: since }, success: { $ne: false } };
+        // creditsOnly: the charges to the person's credits (AiCreditSpend); otherwise every AI request (AiUsageLog)
+        const Rows = creditsOnly ? AiCreditSpend : AiUsageLog;
+        const amount = creditsOnly ? "$credits" : "$totalTokens";
+        const match = creditsOnly ? { userId: uid, createdAt: { $gte: since } } : { userId: uid, createdAt: { $gte: since }, success: { $ne: false } };
         const [perDay, events, totals, eventsTotal] = await Promise.all([
-            AiUsageLog.aggregate([
+            Rows.aggregate([
                 { $match: match },
-                { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Kolkata" } }, credits: { $sum: "$totalTokens" }, requests: { $sum: 1 } } },
+                { $group: { _id: { $dateToString: { format: "%Y-%m-%d", date: "$createdAt", timezone: "Asia/Kolkata" } }, credits: { $sum: amount }, requests: { $sum: 1 } } },
                 { $sort: { _id: 1 } },
             ]),
-            AiUsageLog.find(match).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).select("createdAt provider model feature totalTokens metadata").lean(),
-            AiUsageLog.aggregate([{ $match: match }, { $group: { _id: null, credits: { $sum: "$totalTokens" }, requests: { $sum: 1 } } }]),
-            AiUsageLog.countDocuments(match),
+            Rows.find(match).sort({ createdAt: -1 }).skip((page - 1) * limit).limit(limit).select(creditsOnly ? "createdAt model what credits" : "createdAt provider model feature totalTokens metadata").lean(),
+            Rows.aggregate([{ $match: match }, { $group: { _id: null, credits: { $sum: amount }, requests: { $sum: 1 } } }]),
+            Rows.countDocuments(match),
         ]);
         const byDay = new Map(perDay.map((d) => [d._id, d]));
         const list = [];
@@ -235,7 +244,10 @@ export async function usageHistoryFor(userId, query = {}, { ownNames = false } =
             days, since: since.toISOString(),
             total: { credits: totals[0]?.credits || 0, requests: totals[0]?.requests || 0 },
             perDay: list,
-            events: events.map((e) => ({ at: e.createdAt, ...shown(e), what: what(e), credits: e.totalTokens || 0 })),
+            events: creditsOnly
+                // (a charge says what it paid for itself, the label deductTokens was given; "Chat" when it has none)
+                ? events.map((e) => ({ at: e.createdAt, ...shown({ model: e.model || "", provider: "" }), what: e.what || "Chat", credits: e.credits || 0 }))
+                : events.map((e) => ({ at: e.createdAt, ...shown(e), what: what(e), credits: e.totalTokens || 0 })),
             page, limit, eventsTotal, pages: Math.max(1, Math.ceil(eventsTotal / limit)), asOf: new Date().toISOString(),
         };
 }

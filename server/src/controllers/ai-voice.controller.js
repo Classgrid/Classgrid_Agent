@@ -473,7 +473,7 @@ export const voiceTurn = async (req, res) => {
             User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": credits, ...(isFableModel(model) ? { "ai_tokens.fable_week_used": credits } : {}) } })
                 .catch((e) => console.error("[voice turn] Claude week count failed:", e.message));
         } else if (credits > 0) {
-            deductTokens(userId, orgId, credits, tokenSource).then(async (r) => {
+            deductTokens(userId, orgId, credits, tokenSource, { label: { model, what: "Chat" } }).then(async (r) => {
                 if (!r?.success) return;
                 const { getIO } = await import("../services/socket.service.js");
                 const io = getIO();

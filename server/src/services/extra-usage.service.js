@@ -16,6 +16,14 @@ export const EXTRA_KINDS = {
     voiceinput: { field: "extra_voice_input_credits_per_minute", unit: "minute of voice input" },
 };
 
+// What an extra shows as in the person's record of credits spent (the Usage page's rows: its Model and What columns)
+const EXTRA_LABELS = {
+    image: { model: "Classgrid Image", what: "Image" },
+    whatsapp: { model: "", what: "WhatsApp" },
+    voicereply: { model: "Classgrid Voice", what: "Read aloud" },
+    voiceinput: { model: "Classgrid Speech", what: "Voice input" },
+};
+
 /** The price in credits of one extra `kind` (0 = extras off) */
 export async function extraPrice(kind, config = null) {
     const k = EXTRA_KINDS[kind];
@@ -44,7 +52,7 @@ export async function chargeExtra(user, kind, count = 1, price = null) {
     if (total <= 0) return 0;
     // The pool that started first pays; what it can't cover comes from the other one (never the plan's free limit)
     const credits = await creditsAvailable(user._id).catch(() => null);
-    await deductTokens(user._id, user.organization_id || null, total, credits?.source || "personal")
+    await deductTokens(user._id, user.organization_id || null, total, credits?.source || "personal", { label: EXTRA_LABELS[kind] || null })
         .catch((e) => console.error(`[extra usage] could not charge ${total} credits for ${kind}:`, e.message));
     console.log(`[extra usage] ${total} credits for ${Math.ceil(count)} extra ${EXTRA_KINDS[kind]?.unit || kind}${Math.ceil(count) === 1 ? "" : "s"} (${user.email || user._id})`);
     return total;
