@@ -40,6 +40,8 @@ mock.module("../src/models/User.js", {
 });
 mock.module("../src/models/Organization.js", { defaultExport: { findById: () => chain(null) } });
 mock.module("../src/models/GlobalAiConfig.js", { defaultExport: { findOne: () => chain(() => config) } });
+// (deductTokens records each credit charge, tests/credit-spend-record.test.mjs: a stand-in, so nothing waits for a database)
+mock.module("../src/models/AiCreditSpend.js", { defaultExport: { create: async () => ({}) } });
 mock.module("../src/services/email-queue.service.js", { namedExports: { enqueueEmail: async () => {}, enqueueBulkEmails: async () => {} } });
 mock.module("../src/services/plan-limits.service.js", { namedExports: { planOf: async () => null, isUnlimited: (v) => v === -1 || v === null } });
 mock.module("../src/config/redis.js", { defaultExport: { get: async () => null, set: async () => null, hgetall: async () => null } });

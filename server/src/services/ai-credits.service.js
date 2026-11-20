@@ -40,6 +40,7 @@ import Organization from "../models/Organization.js";
  */
 
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
+import AiCreditSpend from "../models/AiCreditSpend.js";
 import { enqueueEmail } from "./email-queue.service.js";
 import { resetPeriodMs, RESET_UNITS } from "./ai-feature-limits.js";
 import { planOf, isUnlimited } from "./plan-limits.service.js";
@@ -464,9 +465,26 @@ export async function creditsAvailable(userId) {
     return { total: gifted + bought, gifted, bought, source: pickCreditSource(user) };
 }
 
+// The record of credits really spent (models/AiCreditSpend.js): `credits` is the exact number that just left the
+// balance. It is written after the balance changed and never waited for: a record that cannot be saved is logged and
+// the charge stands as it is (the balance is the money; this is only the history of it).
+function recordCreditSpend(userId, orgId, credits, pool, label) {
+    if (!(credits > 0)) return;
+    try {
+        AiCreditSpend.create({
+            userId, orgId: orgId || null, credits, pool,
+            model: String(label?.model || "").slice(0, 120),
+            what: String(label?.what || "").slice(0, 40),
+            logId: label?.logId || null,
+        }).catch((e) => console.error("[credit spend] could not be recorded:", e.message));
+    } catch (e) {
+        console.error("[credit spend] could not be recorded:", e.message);
+    }
+}
+
 // A credit pool that ran out during a request: the rest goes to the other credit pool (granted <-> top-up), if it has
 // anything left, so an answer is never left unpaid while the user still has credits
-async function spillToOtherPool(userId, orgId, rest, from) {
+async function spillToOtherPool(userId, orgId, rest, from, label = null) {
     if (!(rest > 0)) return null;
     const other = from === "promotion" ? "personal" : "promotion";
     const user = await User.findById(userId).select("ai_tokens");
@@ -475,11 +493,13 @@ async function spillToOtherPool(userId, orgId, rest, from) {
         ? (t.promotion_credits_balance || 0) > 0 && !(t.promotion_credits_end_date && new Date(t.promotion_credits_end_date).getTime() < Date.now())
         : (t.ai_credits_balance || 0) > 0 && !(t.ai_credits_end_date && new Date(t.ai_credits_end_date).getTime() < Date.now());
     if (!ok) return null;
-    const spill = await deductTokens(userId, orgId, rest, other, { noSpill: true });
+    const spill = await deductTokens(userId, orgId, rest, other, { noSpill: true, label });
     return { to: other, tokens: rest, spill };
 }
 
-export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill = false } = {}) => {
+// `label` ({ model, what, logId }, optional) says what the credits pay for; it only goes into the record of credits
+// spent (recordCreditSpend) and follows the charge when it spills into another pool.
+export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill = false, label = null } = {}) => {
     try {
         let result = { success: false, remaining: 0, type: "unknown" };
 
@@ -501,12 +521,13 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
                 }, { returnDocument: 'after' });
             }
             if (actualDeduction <= 0 || !updatedUser) {
-                const spilled = noSpill ? null : await spillToOtherPool(userId, orgId, tokenAmount, "personal");
+                const spilled = noSpill ? null : await spillToOtherPool(userId, orgId, tokenAmount, "personal", label);
                 return { success: true, remaining: 0, limit: 0, type: "personal", uncharged: spilled ? (spilled.spill?.uncharged || 0) : tokenAmount, ...(spilled ? { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill } : {}) };
             }
+            recordCreditSpend(userId, orgId, actualDeduction, "bought", label);
             result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.ai_credits_balance), limit: updatedUser.ai_tokens.ai_credits_balance + actualDeduction, type: "personal", uncharged: tokenAmount - actualDeduction };
             if (result.uncharged > 0 && !noSpill) {
-                const spilled = await spillToOtherPool(userId, orgId, result.uncharged, "personal");
+                const spilled = await spillToOtherPool(userId, orgId, result.uncharged, "personal", label);
                 if (spilled) Object.assign(result, { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill, uncharged: spilled.spill?.uncharged || 0 });
             }
             triggerEmailAlerts(userId, orgId, "personal", currentBalance, result.remaining, user?.ai_tokens?.total_ai_credits_purchased || currentBalance);
@@ -527,12 +548,13 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
                 }, { returnDocument: 'after' });
             }
             if (actualDeduction <= 0 || !updatedUser) {
-                const spilled = noSpill ? null : await spillToOtherPool(userId, orgId, tokenAmount, "promotion");
+                const spilled = noSpill ? null : await spillToOtherPool(userId, orgId, tokenAmount, "promotion", label);
                 return { success: true, remaining: 0, limit: 0, type: "promotion", uncharged: spilled ? (spilled.spill?.uncharged || 0) : tokenAmount, ...(spilled ? { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill } : {}) };
             }
+            recordCreditSpend(userId, orgId, actualDeduction, "gifted", label);
             result = { success: true, remaining: Math.max(0, updatedUser.ai_tokens.promotion_credits_balance), limit: updatedUser.ai_tokens.promotion_credits_balance + actualDeduction, type: "promotion", uncharged: tokenAmount - actualDeduction };
             if (result.uncharged > 0 && !noSpill) {
-                const spilled = await spillToOtherPool(userId, orgId, result.uncharged, "promotion");
+                const spilled = await spillToOtherPool(userId, orgId, result.uncharged, "promotion", label);
                 if (spilled) Object.assign(result, { spilledTo: spilled.to, spilledTokens: spilled.tokens, spill: spilled.spill, uncharged: spilled.spill?.uncharged || 0 });
             }
             triggerEmailAlerts(userId, orgId, "promotion", currentBalance, result.remaining, user?.ai_tokens?.total_promotion_credits_granted || currentBalance);
@@ -574,7 +596,7 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
             if (overflow > 0) {
                 const next = pickCreditSource(user);
                 if (next) {
-                    const spill = await deductTokens(userId, orgId, overflow, next);
+                    const spill = await deductTokens(userId, orgId, overflow, next, { label });
                     result.spilledTo = next;
                     result.spilledTokens = overflow;
                     result.spill = spill;
