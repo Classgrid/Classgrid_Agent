@@ -180,17 +180,39 @@ export function SettingsBillingSection() {
     setBuyOpen(true);
     const p = new URLSearchParams(params); p.delete("topup"); setParams(p, { replace: true });
   }, [topupStart]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Back from the payment page (?ai_payment=success|failed)
+  // Back from the payment page (?ai_payment=success|failed, and &plan=<key> for a plan). The address only says what
+  // to look for: "You're subscribed" and "Payment successful" are said when the ACCOUNT shows it (the plan it is on,
+  // or a top-up in its payment history, both read from the server), never because the address says so (owner,
+  // 2026-11-20: a cancelled payment came back with ai_payment=success and this page said "You're subscribed to Pro"
+  // on an account still on Free; typing the address did the same). The payment is put on the account when it is
+  // confirmed, which can be a moment after this page opens, so the account is read again for half a minute.
+  const [paidReturn, setPaidReturn] = useState<{ plan: string; until: number; since: number } | null>(null);
   useEffect(() => {
     const r = params.get("ai_payment");
     if (!r) return;
-    const paidPlan = params.get("plan") || "";
-    if (r === "success" && paidPlan) toast.success(`You're subscribed to ${paidPlan.charAt(0).toUpperCase() + paidPlan.slice(1)}. The receipt is in your email.`);
-    else if (r === "success") { toast.success("Payment successful! AI Credits have been added to your account."); setTab("invoices"); }
+    const paidPlan = (params.get("plan") || "").toLowerCase();
+    // (Free is never bought: an address naming it says nothing)
+    if (r === "success") { if (paidPlan !== "free") setPaidReturn({ plan: paidPlan, until: Date.now() + 30000, since: Date.now() - 15 * 60000 }); }
     else toast.error("Payment failed or was cancelled.");
     qc.invalidateQueries({ queryKey: ["ai-plan-overview"] }); qc.invalidateQueries({ queryKey: ["my-ai-history"] }); qc.invalidateQueries({ queryKey: ["my-ai-balance"] });
     const p = new URLSearchParams(params); p.delete("ai_payment"); p.delete("plan"); setParams(p, { replace: true });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const planNow = data?.enabled ? String(data.plan?.key || "") : "";
+  const toppedUp = !!paidReturn && (Array.isArray(history) ? history : []).some((t: any) => t?.type === "topup" && t?.status === "success" && new Date(t.createdAt).getTime() >= paidReturn.since);
+  useEffect(() => {
+    if (!paidReturn) return;
+    if (paidReturn.plan ? planNow === paidReturn.plan : toppedUp) {
+      if (paidReturn.plan) toast.success(`You're subscribed to ${paidReturn.plan.charAt(0).toUpperCase() + paidReturn.plan.slice(1)}. The receipt is in your email.`);
+      else { toast.success("Payment successful! AI Credits have been added to your account."); setTab("invoices"); }
+      setPaidReturn(null);
+      return;
+    }
+    const again = window.setInterval(() => {
+      if (Date.now() >= paidReturn.until) { setPaidReturn(null); return; }
+      qc.invalidateQueries({ queryKey: ["ai-plan-overview"] }); qc.invalidateQueries({ queryKey: ["my-ai-history"] }); qc.invalidateQueries({ queryKey: ["my-ai-balance"] });
+    }, 2000);
+    return () => window.clearInterval(again);
+  }, [paidReturn, planNow, toppedUp, qc]);
   useEffect(() => {
     // A payment finished somewhere else (the payment page sends this to its opener)
     const onMsg = (e: MessageEvent) => { if (e.data?.type === "CLASSGRID_PAYMENT_SUCCESS") { qc.invalidateQueries({ queryKey: ["ai-plan-overview"] }); qc.invalidateQueries({ queryKey: ["my-ai-history"] }); } };
