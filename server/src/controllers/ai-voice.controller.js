@@ -75,7 +75,7 @@ import redis from "../config/redis.js";
 import { createSession, saveMessage, getSessionById, chatsStartedSince, memoryText } from "../services/ai-chat.service.js";
 import { getHistory, appendToHistory } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap } from "../services/ai-chat-grid.service.js";
-import { hasEnoughTokens, deductTokens, countClaudeOnPlan } from "../services/ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, chargeClaudeOnPlan, creditsAvailable } from "../services/ai-credits.service.js";
 import { chargeableTokens } from "../services/ai-token-pricing.js";
 import { planOf } from "../services/plan-limits.service.js";
 import { textToSpeech, elevenLabsEnabled, TTS_MODEL } from "../services/elevenlabs.service.js";
@@ -299,9 +299,13 @@ export const voiceTurn = async (req, res) => {
     // Cloudflare model (services/cap-fallback.service.js). The system's choice, so it is counted on the person's
     // normal limits, never on the plan's weekly Claude credits.
     let claudeByCap = false;
+    // The plan's weekly Claude credits (or Fable's share) are used up and the person has credits: they pay for this
+    // turn, as in a typed chat (owner, 2026-11-17: "Claude and Fable take from credits when their limit is over";
+    // until 2026-11-21 a voice turn was refused here even with credits)
+    let claudeCredits = null;
     // (with the session window or the week used up, `check` allows the turn only on the person's credits: then they
     // pay for it and nothing is counted on the plan)
-    const claudePooled = (model) => !claudeByCap && !!plan && CLAUDE_CHAT_MODELS.has(model) && Number(plan.claude_credits_per_week) !== 0 && check?.source === "weekly_free";
+    const claudePooled = (model) => !claudeByCap && !claudeCredits && !!plan && CLAUDE_CHAT_MODELS.has(model) && Number(plan.claude_credits_per_week) !== 0 && check?.source === "weekly_free";
     if (picked) {
         const claudeLimited = !!plan && CLAUDE_CHAT_MODELS.has(picked) && Number(plan.claude_credits_per_week) > 0;
         const counters = claudeLimited ? await weekCounters(userId, user.ai_tokens).catch(() => null) : null;
@@ -314,7 +318,11 @@ export const voiceTurn = async (req, res) => {
             counters,
             refillText: counters?.weekEnd ? counters.weekEnd.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "",
         });
-        if (refusedModel) return refusal(res, refusedModel.status, refusedModel.message, refusedModel.code, { plan: refusedModel.plan });
+        if (refusedModel?.code === "claude_cap_reached") {
+            const credits = await creditsAvailable(userId).catch(() => null);
+            if (credits?.source && credits.total > 0) claudeCredits = credits;
+        }
+        if (refusedModel && !claudeCredits) return refusal(res, refusedModel.status, refusedModel.message, refusedModel.code, { plan: refusedModel.plan });
     }
     // (the session window and the week stop every model, a Claude model too)
     if (!check.allowed) {
@@ -325,7 +333,7 @@ export const voiceTurn = async (req, res) => {
         const out = check.reason === "Insufficient tokens.";
         return refusal(res, 429, out ? await limitUsedText(user, backAt) : String(check.reason || "Classgrid AI is not available for your account right now."), out ? "ai_quota_exceeded" : "ai_blocked", { resetDate: resetDate.toISOString() });
     }
-    const tokenSource = check.source;
+    const tokenSource = claudeCredits ? claudeCredits.source : check.source;
     if (!isNew) {
         if (!session) return refusal(res, 404, "This chat was not found.", "chat_not_found");
         if (!userEmail || !(await canAccessSession(session, userEmail))) {
@@ -474,7 +482,7 @@ export const voiceTurn = async (req, res) => {
         if (credits > 0 && claudePooled(model)) {
             // A Claude answer on a plan with Claude: the plan's weekly Claude credits (and Fable's share), the session
             // window and the week, together, as in a chat
-            countClaudeOnPlan(userId, orgId, credits, { fable: isFableModel(model) })
+            chargeClaudeOnPlan(userId, orgId, credits, { fable: isFableModel(model), label: { model, what: "Chat" } })
                 .catch((e) => console.error("[voice turn] Claude week count failed:", e.message));
         } else if (credits > 0) {
             deductTokens(userId, orgId, credits, tokenSource, { label: { model, what: "Chat" } }).then(async (r) => {

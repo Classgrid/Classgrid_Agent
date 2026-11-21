@@ -54,7 +54,7 @@ import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSt
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
-import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, splitPoolCharge, claudeInsidePlan } from "../services/answer-meter.js";
+import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, claudeInsidePlan } from "../services/answer-meter.js";
 import { withMadePictures as withMadePicturesOf } from "../utils/made-pictures.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
@@ -87,7 +87,7 @@ import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWS
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
-import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd, rememberDevice, countClaudeOnPlan } from "../services/ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd, rememberDevice, chargeClaudeOnPlan } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
 import { sendEmail } from "../services/aws-ses.service.js";
 import mongoose from "mongoose";
@@ -1943,26 +1943,21 @@ export const streamAskAi = async (req, res) => {
     // add them, are part of the session and the weekly limit; the Claude limit is only a cap inside them; with the
     // session or the week at 100 percent no model works"). So with a plan that includes Claude, a Claude answer is
     // checked against and counted on the plan's weekly Claude credits AND the session window AND the week
-    // (countClaudeOnPlan). From 2026-11-14 until that day it counted on the Claude credits only.
+    // (chargeClaudeOnPlan). From 2026-11-14 until that day it counted on the Claude credits only.
     // (not while this answer is paid from the person's credits: see claudeOnCredits)
     const claudePooled = (model) => !claudeOnCredits && !claudeByCap && !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
     let claudeSeparate = false; // this request picked a Claude model the plan includes
-    // A pooled Claude cost (claudePooled): to the plan (its weekly Claude credits, its session window and its week,
-    // together) up to what this answer had left of them, the rest to the person's credits (gifted or bought). With no
-    // credits, the rest is counted on the plan as well (it is not charged anywhere else).
+    // A pooled Claude cost (claudePooled) is charged the plan's way (ai-credits.service.js chargeClaudeOnPlan): to the
+    // plan (its weekly Claude credits, its session window and its week, together) as far as each has room at that
+    // moment, the rest to the person's credits (gifted or bought), and with no credits to the session window and the
+    // week alone. The answer itself, a stopped answer, and a helper on a Claude model are all charged this way.
     const chargeClaudePool = async (cost, model) => {
-        if (claudeCreditsAfterP) await claudeCreditsAfterP;
-        const { toPool, past } = splitPoolCharge(claudePoolRoom, cost);
-        if (claudePoolRoom !== undefined) claudePoolRoom -= toPool;
-        const onPool = past > 0 && claudeCreditsAfter ? toPool : toPool + past;
-        if (onPool > 0) await countClaudeOnPlan(userId, orgId, onPool, { fable: /claude-fable/.test(model) });
+        const r = await chargeClaudeOnPlan(userId, orgId, cost, { fable: /claude-fable/.test(model), label: { model, what: "Chat" } });
         // (the session and the week just moved: the next message's usage check is made for real, not taken from the
         // one kept for half a minute)
-        if (onPool > 0) forgetKept(`quota:${userId}:${orgId || "-"}:0`);
-        if (past > 0 && claudeCreditsAfter) {
-            await deductTokens(userId, orgId, past, claudeCreditsAfter.source, { label: { model, what: "Chat" } });
-            console.log(`[AI-TOKEN] Past the plan's weekly Claude credits: ${past} charged to the person's ${claudeCreditsAfter.source} credits (${model})`);
-        }
+        forgetKept(`quota:${userId}:${orgId || "-"}:0`);
+        if (r?.spilledTo) console.log(`[AI-TOKEN] Past the plan's room for Claude: ${r.spilledTokens} charged to the person's ${r.spilledTo} credits (${model})`);
+        return r;
     };
     // The plan's weekly Claude credits (or Fable's share of them) are used up and the person has credits: this answer
     // is paid from the credits (gifted or bought) at the model's own rate, like any other use past a plan limit
@@ -1977,8 +1972,8 @@ export const streamAskAi = async (req, res) => {
     let capDisabled = []; // the models turned off in the Model manager, as read when the stand-in was picked
     let selectedBeforeCap = null; // what the person had picked ("auto" or a Cloudflare model), for what is remembered
     let claudePoolLeft; // what is left of the plan's weekly Claude credits (undefined = unlimited)
-    // This answer's Claude use is charged to the plan's Claude credits only up to what was left of them when it
-    // started (claudePoolRoom, counted down as it is charged); the rest is past them and paid from the person's credits
+    // This answer may use of the plan what its Claude credits, its session window and its week had left when it
+    // started (claudePoolRoom, the live meter's room); what it uses past that is paid from the person's credits
     // (claudeCreditsAfter: { source, total }, read at the start; the live meter carries the answer on with them).
     let claudePoolRoom;
     let claudeCreditsAfter = null;
@@ -4451,13 +4446,31 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         const offModels = [...(await disabledModels().catch(() => []))];
                         const familyOff = await offFeatures().catch(() => flagsOff);
                         for (const m of [...CF_PICKER_MODELS.keys(), ...CLAUDE_CHAT_MODELS]) if (familyOff.has(modelFlagKey(m)) && !offModels.includes(m)) offModels.push(m);
+                        // (plans on) A helper runs on a Claude model only when the person's plan has that model and the plan's
+                        // weekly Claude credits have room, or the person's credits can pay for it. Owner, 2026-11-21: the
+                        // Claude limit is a cap on every Claude use. Before that day a helper's Claude use was never counted
+                        // on the Claude credits, and a plan without Claude still got helpers on Claude (three of the five
+                        // default helper models are Claude models). Not while Claude stands in for capped Cloudflare
+                        // (claudeByCap: the system's choice, counted on the normal limits).
+                        let claudeHelpers = true;
+                        if (helperPlan && !claudeByCap) {
+                            const pool = Number(helperPlan.claude_credits_per_week);
+                            if (pool === 0) claudeHelpers = false;
+                            else if (pool > 0 && !claudeOnCredits) {
+                                const { weekCounters, creditsAvailable } = await import("../services/ai-credits.service.js");
+                                const fresh = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
+                                const counters = fresh ? await weekCounters(userId, fresh.ai_tokens).catch(() => null) : null;
+                                if (counters && counters.claude_week_used >= pool) claudeHelpers = ((await creditsAvailable(userId).catch(() => null))?.total || 0) > 0;
+                            }
+                        }
+                        const helperMayUse = (m) => !CLAUDE_CHAT_MODELS.has(m) || (claudeHelpers && (!helperPlan || claudeByCap || planAllowsModel(helperPlan.models_allowed, m)));
                         const pickModel = (wanted, i) => {
-                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => !/claude-fable/.test(m))].filter((m) => !offModels.includes(m));
+                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => !/claude-fable/.test(m))].filter((m) => !offModels.includes(m) && helperMayUse(m));
                             const w = wanted.toLowerCase();
                             const byName = Object.entries(MODEL_DISPLAY_NAMES).find(([, name]) => name.toLowerCase() === w)?.[0];
                             const id = allowed.find((m) => m.toLowerCase() === w) || (byName && allowed.includes(byName) ? byName : "");
                             const defaults = [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL];
-                            return id || [defaults[i], ...defaults].find((m) => m && !offModels.includes(m)) || HELPER_GLM_MODEL;
+                            return id || [defaults[i], ...defaults].find((m) => m && !offModels.includes(m) && helperMayUse(m)) || HELPER_GLM_MODEL;
                         };
                         const readOnly = ["list_project_files", "view_project_file", "search_project", "find_project_files"];
                         const editTools = ["write_project_file", "edit_project_file", "start_background_command", "check_background_command", "stop_background_command"];
@@ -4580,7 +4593,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const helperStand = CLAUDE_CHAT_MODELS.has(pickedFirst) ? null
                                 : await import("../services/cap-fallback.service.js").then((m) => m.claudeWhenCapped("helper", { claudeOff: familyOff.has(modelFlagKey("claude-sonnet-5-5")), disabled: offModels })).catch(() => null);
                             const firstModel = helperStand || pickedFirst;
-                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])].filter((m, k) => k === 0 || !offModels.includes(m));
+                            // (Claude Sonnet takes over only where a helper may run on Claude: helperMayUse)
+                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) || !helperMayUse("claude-sonnet-5-5") ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])].filter((m, k) => k === 0 || !offModels.includes(m));
                             let lastError = "";
                             // When every model failed, the helper restarts by itself (up to 2 more times), carrying on from
                             // the files it already made
@@ -4628,7 +4642,14 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             // (capStandIn: the cap refuses a round of this helper: Claude Sonnet goes on with its work from where it
                                             // stands, instead of the helper starting again on the next model)
                                             : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), capStandIn: capStandInFor("helper", `Helper ${h.no}`, (m) => { h.nowModel = m; return {}; }), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
-                                        if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource, { label: { model: part.model, what: "Chat" } }).catch(() => {});
+                                        // A helper on a Claude model of the plan is charged the plan's way, counted on the Claude credits too
+                                        // (chargeClaudePool). Not a Claude stand-in for capped Cloudflare (helperStand, or r.standIn in
+                                        // the middle of the job): the system's choice, charged like the model it stands in for.
+                                        const helperOnPlanClaude = !r.standIn && model !== helperStand && claudePooled(model);
+                                        if (userId) for (const part of usageParts(r, model)) {
+                                            const cost = chargeableTokens(part.usage, part.model);
+                                            (helperOnPlanClaude ? chargeClaudePool(cost, part.model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model: part.model, what: "Chat" } })).catch(() => {});
+                                        }
                                         h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0) + (r.standIn?.before?.usage?.total_tokens || 0); // shown in the chat's Agent map
                                         if (!String(r.answer || "").trim()) { onlyCapRefusals = false; lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
                                         h.usedModel = r.standIn?.model || model;
@@ -7645,9 +7666,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     // hasEnoughTokens).
                     let deductionResult = null;
                     if (claudePooled(usedModel) && poolTokens > 0) {
-                        await chargeClaudePool(poolTokens, usedModel)
-                            .catch((err) => console.error("[AI-TOKEN] Claude week count failed:", err.message));
-                        deductionResult = { success: true, uncharged: 0, type: "claude_pool" };
+                        const planCharge = await chargeClaudePool(poolTokens, usedModel)
+                            .catch((err) => { console.error("[AI-TOKEN] Claude week count failed:", err.message); return null; });
+                        deductionResult = { success: true, uncharged: planCharge?.uncharged || 0, type: "claude_pool" };
                     } else {
                         deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource, { label: { model: usedModel, what: "Chat" } });
                     }

@@ -649,48 +649,108 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
 };
 
 /**
- * A Claude answer paid from the plan (a plan that includes Claude) is counted in three places at once: the plan's
- * weekly Claude credits (and Fable's share of them when `fable`), the session limit and the weekly limit. Owner,
- * 2026-11-21: "session limit and weekly limit are for every model, Claude and any model added later; the Claude limit
- * is only a cap inside them. With the session or the week at 100 percent no model works." From 2026-11-14 until that
- * day a Claude answer counted on the Claude credits only, so Claude went on answering with both limits used up.
- * One write, so the three counts cannot drift apart. The computer's free count and the "limit used up" email follow,
- * as they do for every other answer (deductTokens, weekly_free); they are not waited for.
+ * A Claude or Fable use on a plan that includes Claude, charged the plan's way. Owner, 2026-11-21: "the session limit
+ * and the weekly limit are for every model, Claude and any model added later; the Claude limit is only a cap inside
+ * them; with the session or the week at 100 percent no model works." From 2026-11-14 until that day a Claude answer
+ * counted on the plan's weekly Claude credits only, so Claude went on answering with both limits used up, and a
+ * helper on a Claude model was not counted on the Claude credits at all.
+ *
+ * The cost goes, in this order:
+ *   1. to the plan: counted on the weekly Claude credits (and Fable's share of them when `fable`), the session window
+ *      and the week together, in one write, up to the smallest room of them;
+ *   2. the rest to the person's credits (gifted or bought, the older first), at the same number;
+ *   3. with no credits: the rest is counted on the session window and the week alone, as far as they have room (the
+ *      Claude credits are over, the plan is not);
+ *   4. what is left after that is not charged: every bar ends at 100 percent, and the next message is refused.
+ * The account's lifetime total goes up by everything the plan paid. The computer's free count and the "limit used up"
+ * email follow as for any other answer (deductTokens, weekly_free).
+ * Returns { success, type: "claude_plan", onPlan, onPlanOnly, uncharged, remaining, limit, spilledTo?, spilledTokens? }.
  */
-export async function countClaudeOnPlan(userId, orgId, amount, { fable = false } = {}) {
-    const credits = Number(amount) || 0;
-    if (!userId || !(credits > 0)) return;
-    await User.updateOne({ _id: userId }, {
-        $inc: {
-            "ai_tokens.claude_week_used": credits,
-            ...(fable ? { "ai_tokens.fable_week_used": credits } : {}),
-            "ai_tokens.used_this_week": credits,
-            "ai_tokens.week_used": credits,
-        },
-    });
-    afterPlanUse(userId, orgId, credits).catch((e) => console.error("[plan limits] after a Claude answer:", e.message));
-    import("../services/socket.service.js").then(({ getIO }) => {
-        const io = getIO();
-        if (io) {
-            io.to(userId.toString()).emit("ai_token_update");
-            io.to("superadmin:ai_usage").emit("ai_usage_updated");
+export async function chargeClaudeOnPlan(userId, orgId, cost, { fable = false, label = null } = {}) {
+    const credits = Number(cost) || 0;
+    const result = { success: true, type: "claude_plan", onPlan: 0, onPlanOnly: 0, uncharged: 0 };
+    if (!userId || !(credits > 0)) return result;
+    try {
+        const [user, org, globalConfig] = await Promise.all([
+            User.findById(userId).select("ai_tokens plan role email"),
+            orgId ? Organization.findById(orgId).select("ai_config").lean() : null,
+            GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean(),
+        ]);
+        if (!user) return { ...result, success: false, uncharged: credits };
+        const config = globalConfig || {};
+        const [plan, window, week] = await Promise.all([planOf(user), freeWindow(user, org, config, orgId), weekCounters(userId, user.ai_tokens)]);
+        // What each limit still has
+        const pool = plan ? Number(plan.claude_credits_per_week) : -1;
+        const claudeLeft = !(pool >= 0) ? Infinity : Math.max(0, pool - week.claude_week_used);
+        const fableLeft = fable && pool >= 0 ? Math.max(0, Math.round(pool * (Number(plan.fable_share_percent) || 0) / 100) - week.fable_week_used) : Infinity;
+        const usedOnComputer = config.free_limit_per_computer === true ? await deviceFreeUsed(userId) : null;
+        const weekLeft = window.weekCap === null ? Infinity : Math.max(0, window.weekCap - week.week_used);
+        const planLeft = Math.max(0, Math.min(window.limit - (user.ai_tokens?.used_this_week || 0), usedOnComputer === null ? Infinity : window.limit - usedOnComputer, weekLeft));
+
+        // 1. the plan: the Claude credits, the session window and the week together
+        const onPlan = Math.min(credits, claudeLeft, fableLeft, planLeft);
+        let rest = credits - onPlan;
+        // 2. the person's credits
+        const next = rest > 0 ? pickCreditSource(user) : null;
+        // 3. no credits: the session window and the week alone
+        const onPlanOnly = rest > 0 && !next ? Math.min(rest, planLeft - onPlan) : 0;
+        const planPaid = onPlan + onPlanOnly;
+        if (planPaid > 0) {
+            await User.updateOne({ _id: userId }, {
+                $inc: {
+                    ...(onPlan > 0 ? { "ai_tokens.claude_week_used": onPlan, ...(fable ? { "ai_tokens.fable_week_used": onPlan } : {}) } : {}),
+                    "ai_tokens.used_this_week": planPaid,
+                    "ai_tokens.week_used": planPaid,
+                    "ai_tokens.total_ai_tokens_used": planPaid,
+                },
+            });
+            await addDeviceFree(userId, planPaid, window.periodMs);
+            triggerEmailAlerts(userId, orgId, "free", planLeft, Math.max(0, planLeft - planPaid), window.limit);
         }
-    }).catch((err) => console.error("Socket error in countClaudeOnPlan:", err));
+        Object.assign(result, { onPlan, onPlanOnly, remaining: Math.max(0, planLeft - planPaid), limit: window.limit });
+        if (next) {
+            const spill = await deductTokens(userId, orgId, rest, next, { label });
+            Object.assign(result, { spilledTo: next, spilledTokens: rest, spill, uncharged: spill?.uncharged || 0 });
+        } else {
+            result.uncharged = rest - onPlanOnly;
+        }
+        import("../services/socket.service.js").then(({ getIO }) => {
+            const io = getIO();
+            if (io) {
+                io.to(userId.toString()).emit("ai_token_update");
+                io.to("superadmin:ai_usage").emit("ai_usage_updated");
+            }
+        }).catch((err) => console.error("Socket error in chargeClaudeOnPlan:", err));
+        return result;
+    } catch (error) {
+        console.error("Error charging a Claude use to the plan:", error);
+        return { ...result, success: false, uncharged: credits };
+    }
 }
-// What follows a count on the session and weekly limits made outside deductTokens: the computer's free count, and the
-// email when this use is what used the session window or the week up.
-async function afterPlanUse(userId, orgId, credits) {
-    const [user, org, globalConfig] = await Promise.all([
-        User.findById(userId).select("ai_tokens plan role email"),
-        orgId ? Organization.findById(orgId).select("ai_config").lean() : null,
-        GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean(),
-    ]);
-    if (!user) return;
-    const window = await freeWindow(user, org, globalConfig || {}, orgId);
-    await addDeviceFree(userId, credits, window.periodMs);
-    const weekUsedNow = window.weekCap === null ? 0 : await weekUsed(userId, user.ai_tokens);
-    const leftOf = (back) => Math.max(0, Math.min(window.limit - ((user.ai_tokens?.used_this_week || 0) - back), window.weekCap === null ? Infinity : window.weekCap - (weekUsedNow - back)));
-    triggerEmailAlerts(userId, orgId, "free", leftOf(credits), leftOf(0), window.limit);
+
+/**
+ * Takes up to `amount` off a person's gifted credits and returns what was really taken: never more than the balance
+ * holds, so the balance never goes below zero. A gift that was partly spent has only its rest to give back. Before
+ * 2026-11-21 Remove and Pause subtracted the whole gift whatever was left of it: a gift of 1,00,000 with 80,000 spent
+ * left the balance at -80,000, which then ate the person's next gift. The balance is changed only while it still
+ * covers the amount (an answer may be charging it at the same moment), else it is read again.
+ */
+export async function takeFromGifted(userId, amount) {
+    const want = Math.max(0, Number(amount) || 0);
+    for (let attempt = 0; attempt < 4 && want > 0; attempt++) {
+        const row = await User.findById(userId).select("ai_tokens.promotion_credits_balance").lean();
+        const take = Math.min(want, Math.max(0, Number(row?.ai_tokens?.promotion_credits_balance) || 0));
+        if (!(take > 0)) return 0;
+        const done = await User.findOneAndUpdate({ _id: userId, "ai_tokens.promotion_credits_balance": { $gte: take } }, { $inc: { "ai_tokens.promotion_credits_balance": -take } });
+        if (done) return take;
+    }
+    return 0;
+}
+// The "gifted in all" figure follows a gift that is removed or paused, and never goes below zero either
+export async function lowerGiftedTotal(userId, amount) {
+    const row = await User.findById(userId).select("ai_tokens.total_promotion_credits_granted").lean();
+    const total = Math.max(0, (Number(row?.ai_tokens?.total_promotion_credits_granted) || 0) - Math.max(0, Number(amount) || 0));
+    await User.updateOne({ _id: userId }, { $set: { "ai_tokens.total_promotion_credits_granted": total } });
 }
 
 export const addCredits = async (userId, amountToAdd) => {
