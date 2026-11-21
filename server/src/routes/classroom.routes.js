@@ -160,12 +160,13 @@ router.get("/proxy/pdf", isAuthenticated, async (req, res) => {
 
 // ─────────────────────────────────────────────
 import { getChatReply } from "../services/chat.js";
+import { retiredAiRoute } from "../utils/retired-route.js";
 
 // ─────────────────────────────────────────────
 // GROQ/Cloudflare SUMMARIZE PROXY (Replaces Hugging Face)
 // Frontend sends text chunk → backend calls Groq → returns summary
 // ─────────────────────────────────────────────
-router.post("/hf-summarize", isAuthenticated, async (req, res) => {
+router.post("/hf-summarize", isAuthenticated, retiredAiRoute, async (req, res) => {
     try {
         const { text, title } = req.body;
         if (!text || typeof text !== "string") {

@@ -808,10 +808,25 @@ export async function generateSessionTitle(sessionId, question, userId = null) {
             ? ` The user already has chats with these titles: ${taken.slice(0, 40).join("; ")}. Do not reuse any of them: if this chat is on the same topic, add the word that makes it different (what exactly it is about).`
             : "";
         const titleRule = "You are a title generator. Generate a VERY SHORT 2-3 word title for what this conversation is about. Output ONLY the raw words. DO NOT output '**Title:**'. DO NOT use quotes. Ignore greetings unless the conversation is only a greeting.";
-        let { answer } = await generateShortTitleText(titleRule + avoid, question);
+        // A title the model wrote is charged like any other answer, on the person's session and week (owner,
+        // 2026-11-21: "what are more cases where a model answers and the limit is not cut?"; until that day a
+        // chat's automatic title cut nothing, on DeepSeek or on Claude Haiku).
+        const chargeTitle = (made) => {
+            if (!userId || !(made?.usage?.total_tokens > 0)) return;
+            User.findById(userId).select("organization_id").lean()
+                .then((u) => deductTokens(userId, u?.organization_id || null, chargeableTokens(made.usage, made.model), "weekly_free", { label: { model: made.model, what: "Chat title" } }))
+                .catch(() => {});
+        };
+        const first = await generateShortTitleText(titleRule + avoid, question);
+        chargeTitle(first);
+        let { answer } = first;
         // With nothing new to say (e.g. a second "hello"), the model can return no title: ask again without the
         // list; the number added below then keeps it different
-        if (avoid && !String(answer || "").replace(/\*\*Title:\*\*|Title:|["'*]/gi, "").trim()) ({ answer } = await generateShortTitleText(titleRule, question));
+        if (avoid && !String(answer || "").replace(/\*\*Title:\*\*|Title:|["'*]/gi, "").trim()) {
+            const again = await generateShortTitleText(titleRule, question);
+            chargeTitle(again);
+            answer = again.answer;
+        }
         if (answer && !answer.includes("[RATE_LIMITED]")) {
             let cleanTitle = answer.trim().replace(/^["']|["']$/g, '');
             // Strip common AI prefixes anywhere in the string
