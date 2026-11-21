@@ -116,6 +116,7 @@ import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, ARTIFACT_DOC_NAMES, runPublishPage, runReadPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 import { isWebsite } from "../utils/client-app.js";
+import { confirmedEmails, cleanEmail as cleanAccountEmail } from "../utils/account-email.js";
 import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
 import { takeInlineImages, findInlineImage, withInlineImages, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
 
@@ -3076,6 +3077,12 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                 // Staff label from the database role only.
                 if (isStaffRole(req.user.role)) {
                     volatilePrompt += ` (SUPER ADMIN / PLATFORM OWNER)`;
+                }
+                // The emails the person added to this account (Settings > Account > Emails), so the AI knows every
+                // email that is theirs and not only the main one (owner, 2026-11-22: "AI must know added emails too")
+                const addedEmails = confirmedEmails(latestUserResult || req.user).filter((e) => e !== cleanAccountEmail(userEmail));
+                if (addedEmails.length) {
+                    volatilePrompt += `\nTheir other emails on this same account (added and confirmed by them): ${addedEmails.join(", ")}`;
                 }
             }
             if (req.user && req.user._id) {
