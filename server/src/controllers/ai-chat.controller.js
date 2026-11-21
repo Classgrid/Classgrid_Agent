@@ -54,7 +54,7 @@ import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSt
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
-import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, splitPoolCharge } from "../services/answer-meter.js";
+import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, splitPoolCharge, claudeInsidePlan } from "../services/answer-meter.js";
 import { withMadePictures as withMadePicturesOf } from "../utils/made-pictures.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
@@ -87,7 +87,7 @@ import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWS
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
-import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd, rememberDevice } from "../services/ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd, rememberDevice, countClaudeOnPlan } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
 import { sendEmail } from "../services/aws-ses.service.js";
 import mongoose from "mongoose";
@@ -1939,20 +1939,26 @@ export const streamAskAi = async (req, res) => {
         return;
     }
     const fableByPlan = !!planRow && Number(planRow.fable_share_percent) > 0;
-    // Claude is separate from the other models (owner, 2026-11-14): with a plan that includes Claude, a Claude answer
-    // is checked against and counted on the plan's weekly Claude credits only, never the window / weekly credits
+    // The session limit and the weekly limit are for every model (owner, 2026-11-21: "Claude, and GPT or Gemini if we
+    // add them, are part of the session and the weekly limit; the Claude limit is only a cap inside them; with the
+    // session or the week at 100 percent no model works"). So with a plan that includes Claude, a Claude answer is
+    // checked against and counted on the plan's weekly Claude credits AND the session window AND the week
+    // (countClaudeOnPlan). From 2026-11-14 until that day it counted on the Claude credits only.
     // (not while this answer is paid from the person's credits: see claudeOnCredits)
     const claudePooled = (model) => !claudeOnCredits && !claudeByCap && !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
     let claudeSeparate = false; // this request picked a Claude model the plan includes
-    // A pooled Claude cost (claudePooled): to the plan's weekly Claude credits up to what this answer had left of them,
-    // the rest to the person's credits (gifted or bought). With no credits, the rest is counted on the Claude credits
-    // as before (it is not charged anywhere else).
+    // A pooled Claude cost (claudePooled): to the plan (its weekly Claude credits, its session window and its week,
+    // together) up to what this answer had left of them, the rest to the person's credits (gifted or bought). With no
+    // credits, the rest is counted on the plan as well (it is not charged anywhere else).
     const chargeClaudePool = async (cost, model) => {
         if (claudeCreditsAfterP) await claudeCreditsAfterP;
         const { toPool, past } = splitPoolCharge(claudePoolRoom, cost);
         if (claudePoolRoom !== undefined) claudePoolRoom -= toPool;
         const onPool = past > 0 && claudeCreditsAfter ? toPool : toPool + past;
-        if (onPool > 0) await User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": onPool, ...(/claude-fable/.test(model) ? { "ai_tokens.fable_week_used": onPool } : {}) } });
+        if (onPool > 0) await countClaudeOnPlan(userId, orgId, onPool, { fable: /claude-fable/.test(model) });
+        // (the session and the week just moved: the next message's usage check is made for real, not taken from the
+        // one kept for half a minute)
+        if (onPool > 0) forgetKept(`quota:${userId}:${orgId || "-"}:0`);
         if (past > 0 && claudeCreditsAfter) {
             await deductTokens(userId, orgId, past, claudeCreditsAfter.source, { label: { model, what: "Chat" } });
             console.log(`[AI-TOKEN] Past the plan's weekly Claude credits: ${past} charged to the person's ${claudeCreditsAfter.source} credits (${model})`);
@@ -1977,6 +1983,11 @@ export const streamAskAi = async (req, res) => {
     let claudePoolRoom;
     let claudeCreditsAfter = null;
     let claudeCreditsAfterP = null;
+    const noteCreditsAfter = (c) => {
+        if (claudeOnCredits) return; // (this answer is already paid from the credits: nothing comes after them)
+        claudeCreditsAfter = c?.source && c.total > 0 ? { source: c.source, total: c.total } : null;
+        if (claudeCreditsAfter) liveMeter.afterPool = claudeCreditsAfter.total;
+    };
     // The plan's weekly Claude pool, and Fable's share of it (a Claude model picked by name; -1 = unlimited)
     if (planRow && typeof body.selectedModel === "string" && CLAUDE_CHAT_MODELS.has(body.selectedModel)) {
         const pool = Number(planRow.claude_credits_per_week);
@@ -2013,10 +2024,7 @@ export const streamAskAi = async (req, res) => {
                 res.end(JSON.stringify({ error: `You've used this week's Claude Fable share of your ${planRow.name} plan. It refills on ${when} (India time). Upgrade your plan, or pick Sonnet or Opus.`, code: "fable_cap_reached", plan: planRow.key }));
                 return;
             }
-            if (!claudeOnCredits) claudeCreditsAfterP = creditsP.then((c) => {
-                claudeCreditsAfter = c?.source && c.total > 0 ? { source: c.source, total: c.total } : null;
-                if (claudeCreditsAfter) liveMeter.afterPool = claudeCreditsAfter.total;
-            });
+            if (!claudeOnCredits) claudeCreditsAfterP = creditsP.then(noteCreditsAfter);
             if (!claudeOnCredits) claudePoolRoom = claudePoolLeft = Math.max(1, wantsFable ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used) : pool - counters.claude_week_used);
         }
     }
@@ -2082,9 +2090,42 @@ export const streamAskAi = async (req, res) => {
         // balance is always checked for real)
         // (the database is 150 ms away per read, measured 2026-11-10; this check alone is three reads)
         const quotaKey = `quota:${userId}:${orgId || "-"}:${fablePaidOnly ? 1 : 0}`;
-        const check = claudeSeparate && !fablePaidOnly
-            ? { allowed: true, source: claudeOnCredits ? claudeCreditSource : "weekly_free", remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true } // (the Claude credits, or the person's credits past them, were checked above)
-            : await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly }));
+        let check;
+        if (claudeSeparate && !fablePaidOnly && claudeOnCredits) {
+            // (the plan's Claude credits are used up and the person's credits pay: checked above)
+            check = { allowed: true, source: claudeCreditSource, remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true };
+        } else if (claudeSeparate && !fablePaidOnly) {
+            // The plan's Claude credits have room (checked above). The session window and the week must have room
+            // too: a Claude answer is inside both (see claudePooled). Always asked for real: what is left decides how
+            // far this answer may go.
+            const inside = claudeInsidePlan(claudePoolLeft, await hasEnoughTokens(userId, orgId, 1));
+            if (inside.refuse) {
+                check = inside.refuse; // refused like any other model: the limit card with the time it comes back
+            } else if (inside.onCredits) {
+                // The session or the week is used up and the person has credits: they pay for this answer, at the
+                // model's own rate, as for any other model past a plan limit
+                if (claudeCreditsAfterP) await claudeCreditsAfterP.catch(() => {});
+                claudeOnCredits = true;
+                claudeCreditSource = inside.onCredits;
+                claudePoolLeft = inside.spendable;
+                claudePoolRoom = undefined;
+                claudeCreditsAfter = null;
+                liveMeter.afterPool = 0;
+                check = { allowed: true, source: claudeCreditSource, remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true };
+                console.log(`[AI-TOKEN] The session or weekly limit is used up: this Claude answer is paid from the person's ${claudeCreditSource} credits`);
+            } else {
+                claudePoolRoom = claudePoolLeft = inside.room;
+                // (the person's credits carry the answer on when the plan's room ends in the middle of it; read here
+                // when the plan's Claude credits have no end, else already read above)
+                if (!claudeCreditsAfterP) {
+                    const { creditsAvailable } = await import("../services/ai-credits.service.js");
+                    claudeCreditsAfterP = creditsAvailable(userId).catch(() => null).then(noteCreditsAfter);
+                }
+                check = { allowed: true, source: "weekly_free", remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true };
+            }
+        } else {
+            check = await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly }));
+        }
         if (!check.claudePool && (!check.allowed || ((check.spendable ?? check.remaining) !== undefined && (check.spendable ?? check.remaining) < 50000))) forgetKept(quotaKey);
         firstCheck = check;
         if (deviceNoted) await deviceNoted;
@@ -7598,9 +7639,10 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     const User = (await import("../models/User.js")).default;
                     const Organization = (await import("../models/Organization.js")).default;
 
-                    // A Claude answer on a plan that includes Claude counts only against the plan's weekly Claude
-                    // credits (and Fable's share of them): separate from the other models' credits. Every other
-                    // answer is paid from the credits (the tokenSource was determined earlier via hasEnoughTokens).
+                    // A Claude answer on a plan that includes Claude counts on the plan's weekly Claude credits (and
+                    // Fable's share of them) and on the session window and the week, together (chargeClaudePool).
+                    // Every other answer is paid from the credits (the tokenSource was determined earlier via
+                    // hasEnoughTokens).
                     let deductionResult = null;
                     if (claudePooled(usedModel) && poolTokens > 0) {
                         await chargeClaudePool(poolTokens, usedModel)
@@ -7774,14 +7816,20 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             // answer, with the reset time and the top-up button
             if (limitEnded) {
                 // (which limit ran out decides the time the card shows. A Claude answer on a plan with Claude stops
-                // when the week's Claude credits are used up: they come back at the end of the Claude week. Any other
-                // answer: the session window or the week, asked again now that this answer is charged.)
+                // when the week's Claude credits are used up, or the session window, or the week: asked again now
+                // that this answer is charged. The Claude credits come back at the end of the week; when they are
+                // not what ran out, the session window or the week is. Any other answer: the session window or the
+                // week.)
                 let resetAt;
                 if (claudePooled(usedModel) || (claudeOnCredits && CLAUDE_CHAT_MODELS.has(usedModel))) {
                     const fresh = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
                     const { weekCounters } = await import("../services/ai-credits.service.js");
                     const counters = await weekCounters(userId, fresh?.ai_tokens).catch(() => null);
-                    if (counters?.weekEnd) resetAt = new Date(counters.weekEnd).toISOString();
+                    const pool = Number(planRow?.claude_credits_per_week);
+                    const claudeOut = !!counters && pool > 0 && (counters.claude_week_used >= pool || (/claude-fable/.test(usedModel) && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100));
+                    const now = claudeOut ? null : await hasEnoughTokens(userId, orgId, 1).catch(() => null);
+                    if (now && !now.allowed && now.resetAt) resetAt = now.resetAt;
+                    else if (counters?.weekEnd) resetAt = new Date(counters.weekEnd).toISOString();
                 } else {
                     const now = await hasEnoughTokens(userId, orgId, 1).catch(() => null);
                     if (now && !now.allowed) resetAt = now.resetAt;

@@ -325,11 +325,13 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // spendable: what one answer may use in total: the free pool, then the granted credits, then the top-up credits
     // (deductTokens spills from one into the next as each runs out). The live token check during an answer stops
     // only at this number, so an answer goes on across the pools and stops only when everything is used up.
+    // planLeft (in every allowed answer below): what is left of the plan's own limits alone, the session window and
+    // the week, without any credits. A Claude answer on the plan's Claude credits may use no more than this.
     const freeHeadroom = Math.max(0, freeLeft);
     const spendable = freeHeadroom + promoBalance + paidBalance;
 
     if (requiredTokens <= freeLeft) {
-        return { allowed: true, source: "weekly_free", remaining: freeLeft, spendable };
+        return { allowed: true, source: "weekly_free", remaining: freeLeft, spendable, planLeft: freeHeadroom };
     }
 
     // 3. FIFO LOGIC: Determine which came FIRST between Top-Up (Paid) and Granted (Promotion)
@@ -339,22 +341,22 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // Whichever was purchased/granted FIRST gets used FIRST (FIFO)
     if (promoBalance >= requiredTokens && paidBalance >= requiredTokens) {
         if (promoStart <= paidStart) {
-            return { allowed: true, source: "promotion", remaining: promoBalance, spendable };
+            return { allowed: true, source: "promotion", remaining: promoBalance, spendable, planLeft: freeHeadroom };
         } else {
-            return { allowed: true, source: "personal", remaining: paidBalance, spendable };
+            return { allowed: true, source: "personal", remaining: paidBalance, spendable, planLeft: freeHeadroom };
         }
     } else if (promoBalance >= requiredTokens) {
-        return { allowed: true, source: "promotion", remaining: promoBalance, spendable };
+        return { allowed: true, source: "promotion", remaining: promoBalance, spendable, planLeft: freeHeadroom };
     } else if (paidBalance >= requiredTokens) {
-        return { allowed: true, source: "personal", remaining: paidBalance, spendable };
+        return { allowed: true, source: "personal", remaining: paidBalance, spendable, planLeft: freeHeadroom };
     }
 
     // No single pool covers it, but the pools together may: each pool spills over into the next when it runs out
     // (see deductTokens), so the free headroom and both credit pools count together.
     if (spendable >= requiredTokens) {
-        if (freeHeadroom > 0) return { allowed: true, source: "weekly_free", remaining: spendable, spendable };
+        if (freeHeadroom > 0) return { allowed: true, source: "weekly_free", remaining: spendable, spendable, planLeft: freeHeadroom };
         const first = pickCreditSource(user);
-        if (first) return { allowed: true, source: first, remaining: spendable, spendable };
+        if (first) return { allowed: true, source: first, remaining: spendable, spendable, planLeft: freeHeadroom };
     }
 
     // When the limit comes back, for the message the person is shown: the week's end when the weekly limit is what
@@ -645,6 +647,51 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
         return { success: false, remaining: 0, type: "unknown" };
     }
 };
+
+/**
+ * A Claude answer paid from the plan (a plan that includes Claude) is counted in three places at once: the plan's
+ * weekly Claude credits (and Fable's share of them when `fable`), the session limit and the weekly limit. Owner,
+ * 2026-11-21: "session limit and weekly limit are for every model, Claude and any model added later; the Claude limit
+ * is only a cap inside them. With the session or the week at 100 percent no model works." From 2026-11-14 until that
+ * day a Claude answer counted on the Claude credits only, so Claude went on answering with both limits used up.
+ * One write, so the three counts cannot drift apart. The computer's free count and the "limit used up" email follow,
+ * as they do for every other answer (deductTokens, weekly_free); they are not waited for.
+ */
+export async function countClaudeOnPlan(userId, orgId, amount, { fable = false } = {}) {
+    const credits = Number(amount) || 0;
+    if (!userId || !(credits > 0)) return;
+    await User.updateOne({ _id: userId }, {
+        $inc: {
+            "ai_tokens.claude_week_used": credits,
+            ...(fable ? { "ai_tokens.fable_week_used": credits } : {}),
+            "ai_tokens.used_this_week": credits,
+            "ai_tokens.week_used": credits,
+        },
+    });
+    afterPlanUse(userId, orgId, credits).catch((e) => console.error("[plan limits] after a Claude answer:", e.message));
+    import("../services/socket.service.js").then(({ getIO }) => {
+        const io = getIO();
+        if (io) {
+            io.to(userId.toString()).emit("ai_token_update");
+            io.to("superadmin:ai_usage").emit("ai_usage_updated");
+        }
+    }).catch((err) => console.error("Socket error in countClaudeOnPlan:", err));
+}
+// What follows a count on the session and weekly limits made outside deductTokens: the computer's free count, and the
+// email when this use is what used the session window or the week up.
+async function afterPlanUse(userId, orgId, credits) {
+    const [user, org, globalConfig] = await Promise.all([
+        User.findById(userId).select("ai_tokens plan role email"),
+        orgId ? Organization.findById(orgId).select("ai_config").lean() : null,
+        GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean(),
+    ]);
+    if (!user) return;
+    const window = await freeWindow(user, org, globalConfig || {}, orgId);
+    await addDeviceFree(userId, credits, window.periodMs);
+    const weekUsedNow = window.weekCap === null ? 0 : await weekUsed(userId, user.ai_tokens);
+    const leftOf = (back) => Math.max(0, Math.min(window.limit - ((user.ai_tokens?.used_this_week || 0) - back), window.weekCap === null ? Infinity : window.weekCap - (weekUsedNow - back)));
+    triggerEmailAlerts(userId, orgId, "free", leftOf(credits), leftOf(0), window.limit);
+}
 
 export const addCredits = async (userId, amountToAdd) => {
     try {

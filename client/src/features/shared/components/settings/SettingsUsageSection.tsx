@@ -74,10 +74,11 @@ export function SettingsUsageSection() {
       {weekEnd && <p className="text-[15px] text-foreground mt-2">Your weekly limit resets {whenText(weekEnd)}.</p>}
 
       <div className="rounded-xl border border-border bg-card mt-5">
-        {u.credits_window && <Bar name="Session limit" m={u.credits_window} line={`Mid models (DeepSeek, GLM and others) · ${u.credits_window.periodText || "5 hours"} from your first message · ${u.credits_window.resetAt ? `Resets ${inText(u.credits_window.resetAt)}` : ""}`} />}
-        {/* "Weekly limit", next to "Session limit" (owner, 2026-11-21: "after the session limit it shows Mid models
-            limit, for normal persons it has no sense"); the line under it still says which models it counts */}
-        {u.credits_week && <Bar name="Weekly limit"m={u.credits_week} line={`DeepSeek, GLM and other models · Weekly · ${weekLine}`} />}
+        {u.credits_window && <Bar name="Session limit" m={u.credits_window} line={`All models · ${u.credits_window.periodText || "5 hours"} from your first message · ${u.credits_window.resetAt ? `Resets ${inText(u.credits_window.resetAt)}` : ""}`} />}
+        {/* The session limit and the weekly limit count every model, Claude and Fable too (owner, 2026-11-21: "session
+            limit and weekly limit are for all"; the server counts a Claude answer on both since that day). The Claude
+            and Fable bars under them are caps inside these two. */}
+        {u.credits_week && <Bar name="Weekly limit" m={u.credits_week} line={`All models · Weekly · ${weekLine}`} />}
         {u.claude_week && <Bar name="Claude limit" m={u.claude_week} line={`Sonnet, Opus and Haiku · Weekly · ${weekLine}`} />}
         {u.fable_week && <Bar name="Fable limit" m={u.fable_week} line={`Up to ${data.plan.limits?.fable_share_percent ?? 50}% of your Claude limit · Weekly · ${weekLine}`} />}
       </div>
