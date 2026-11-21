@@ -91,14 +91,15 @@ let zoom = 1;
 let pointerAt = 0;
 
 // ── The keyboard stays where the user put it ────────────────────────────────────────────────────────────────
-// Only a click in the page gives the page the keyboard. A page that gets it any other way (it loaded again, or its
-// own script asked for it) hands it straight back to the app. (Owner, 2026-11-21: a tester's page reloaded itself
-// every 5 seconds, and at each reload the keyboard left the chat box, so he had to click the box again every few
-// words and lost letters.)
+// A page that loads (or loads again) never takes the keyboard from the app: when it gets the keyboard around a load
+// without the user having clicked in it, the keyboard goes straight back to the app. A click in the page gives the
+// page the keyboard as always. (Owner, 2026-11-21: a tester's page reloaded itself every 5 seconds, and at each
+// reload the keyboard left the chat box, so he had to click the box again every few words and lost letters.)
 let pageHasKeyboard = false; // the user clicked in the page, and has not clicked in the app since
 let pagePressAt = 0; // the user's last mouse press or touch in the page
 let agentInputAt = 0; // the agent's last click in the page (its clicks are not the user's)
 let appTypingAtLoad = false; // the app had the keyboard when the page began to load
+let pageLoadAt = 0; // the page's last load step (start, new address, ready, finished)
 const PRESS_EVENTS = new Set(["mouseDown", "touchStart", "gestureTapDown", "pointerDown"]);
 const appInFront = () => !!win && !win.isDestroyed() && win.isFocused() && !win.webContents.isDestroyed();
 function userPressedInPage(type) {
@@ -246,11 +247,12 @@ function ensureView() {
   // The keyboard (see "The keyboard stays where the user put it"): a press in the page is the user choosing the page
   wc.on("input-event", (_e, input) => userPressedInPage(input?.type));
   wc.on("before-mouse-event", (_e, mouse) => userPressedInPage(mouse?.type));
-  // The page got the keyboard. A click in the page gives it the keyboard a moment before the click itself is seen
-  // here, so the check waits for it; with no click, the keyboard goes back to the app
-  wc.on("focus", () => { setTimeout(() => { if (Date.now() - pagePressAt > 1000) keyboardBackToApp(); }, 60); });
+  // The page got the keyboard while it was loading, with no click in it: the keyboard goes back to the app. (A click
+  // in the page gives it the keyboard a moment before the click itself is seen here, so the check waits for it. Away
+  // from a load nothing is taken back, so a click is never undone.)
+  wc.on("focus", () => { setTimeout(() => { if (Date.now() - pageLoadAt < 1500 && Date.now() - pagePressAt > 1000) keyboardBackToApp(); }, 60); });
   // A page that loads while the user is typing in the app never takes the keyboard with it
-  const keepTyping = () => { if (appTypingAtLoad) keyboardBackToApp(); };
+  const keepTyping = () => { pageLoadAt = Date.now(); if (appTypingAtLoad) keyboardBackToApp(); };
   for (const loaded of ["did-navigate", "dom-ready", "did-finish-load", "did-stop-loading"]) wc.on(loaded, keepTyping);
   wc.on("did-stop-loading", () => setTimeout(keepTyping, 150));
   // Console messages (warnings and errors) and failed requests of the page
@@ -273,6 +275,7 @@ function ensureView() {
   wc.on("did-navigate-in-page", onNav);
   wc.on("page-title-updated", () => { titleHistory(wc.getURL(), wc.getTitle()); tell(navInfo()); });
   wc.on("did-start-loading", () => {
+    pageLoadAt = Date.now();
     appTypingAtLoad = !pageHasKeyboard && appInFront() && win.webContents.isFocused();
     tell(navInfo());
   });
