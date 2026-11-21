@@ -64,7 +64,6 @@ process.env.AWS_SDK_JS_SUPPRESS_MAINTENANCE_MODE_MESSAGE = "1";
 
 import util from "util";
 import "./env.js"; // 🔥 Load env first so MONGODB_URI is available
-import "this-module-does-not-exist-forcing-a-crash"; // DEMO CRASH (owner, 2026-11-21: "crash it"): the status page test of AI_SESSION_MEMORY.md section 4. Taken out again in the next commit.
 // The Cloudflare daily Neuron cap: installs the gated fetch for Cloudflare AI before any module makes a client
 import "./src/services/cf-neuron-cap.service.js";
 import accessLogger from "./src/config/logger.js";
