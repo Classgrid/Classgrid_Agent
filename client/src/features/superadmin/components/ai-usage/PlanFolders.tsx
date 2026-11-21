@@ -135,7 +135,7 @@ export function PlanMeters({ overview }: { overview?: PlanOverview | null }) {
     <>
       {/* The same names and lines as the person's own Settings > Usage page, so it is clear which models each limit is for */}
       <MeterRow label="Session limit" note={`Mid models (DeepSeek, GLM and others) · ${u.credits_window?.periodText || "5 hours"}`} meter={u.credits_window} unit="" />
-      <MeterRow label="Mid models limit" note="DeepSeek, GLM and other models · Weekly" meter={u.credits_week} unit="" />
+      <MeterRow label="Weekly limit"note="DeepSeek, GLM and other models · Weekly" meter={u.credits_week} unit="" />
       <MeterRow label="Claude limit" note="Sonnet, Opus and Haiku · Weekly" meter={u.claude_week} unit="" />
       <MeterRow label="Cloud computer limit" note="Time code, projects and the live browser ran in the cloud · this month" meter={u.cloud_hours} unit="hours" />
       <MeterRow label="Pictures" meter={u.images} unit="pictures" />
