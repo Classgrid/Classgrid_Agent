@@ -37,6 +37,7 @@ import { sendEmail } from "../../services/aws-ses.service.js";
 import { parseResetPeriodInput } from "../../services/ai-feature-limits.js";
 import { getAiCreditGrantedHtml, getAiCreditGrantedPlainText, getSuperAdminSecurityOtpHtml, getSuperAdminSecurityOtpPlainText, USAGE_URL } from "../../services/email-templates.service.js";
 import { planOf } from "../../services/plan-limits.service.js";
+import { takeFromGifted, lowerGiftedTotal } from "../../services/ai-credits.service.js";
 
 /**
  * PHASE 9: Super Admin AI Credits Admin Controller
@@ -637,16 +638,18 @@ export const removeGrantedCredits = async (req, res) => {
             return res.status(400).json({ success: false, error: "Transaction not found or already revoked" });
         }
 
+        // (a paused gift was already taken off the balance when it was paused: removing it takes nothing more.
+        // Before 2026-11-21 it was subtracted a second time)
+        const wasPaused = txn.status === "paused";
         txn.status = "revoked";
         await txn.save();
 
         const User = (await import("../../models/User.js")).default;
-        const user = await User.findByIdAndUpdate(userId, {
-            $inc: {
-                "ai_tokens.promotion_credits_balance": -(txn.credits_added || 0),
-                "ai_tokens.total_promotion_credits_granted": -(txn.credits_added || 0)
-            }
-        }, { returnDocument: 'after' });
+        if (!wasPaused) {
+            await takeFromGifted(userId, txn.credits_added);
+            await lowerGiftedTotal(userId, txn.credits_added);
+        }
+        const user = await User.findById(userId);
 
         await AiCreditTransaction.create({
             userId: user._id,
@@ -710,14 +713,14 @@ export const pauseGrantedCredits = async (req, res) => {
         const user = await User.findById(userId);
 
         if (isPaused && txn.status !== "paused") {
+            // What is left of the gift is held back (never more than the balance holds), and that number is kept
+            // with the gift, so Resume gives back exactly what Pause took
+            const held = await takeFromGifted(userId, txn.credits_added);
+            await lowerGiftedTotal(userId, txn.credits_added);
             txn.status = "paused";
+            txn.metadata = { ...(txn.metadata || {}), held };
+            txn.markModified("metadata");
             await txn.save();
-            await User.findByIdAndUpdate(userId, {
-                $inc: {
-                    "ai_tokens.promotion_credits_balance": -(txn.credits_added || 0),
-                    "ai_tokens.total_promotion_credits_granted": -(txn.credits_added || 0)
-                }
-            });
             await AiCreditTransaction.create({
                 userId: user._id,
                 orgId: user.organization_id || null,
@@ -733,11 +736,14 @@ export const pauseGrantedCredits = async (req, res) => {
                 }
             });
         } else if (!isPaused && txn.status === "paused") {
+            // (a gift paused before 2026-11-21 has no `held`: the whole gift was subtracted then, so the whole comes back)
+            const kept = Number(txn.metadata?.held);
+            const back = Number.isFinite(kept) && kept >= 0 ? kept : (txn.credits_added || 0);
             txn.status = "success";
             await txn.save();
             await User.findByIdAndUpdate(userId, {
                 $inc: {
-                    "ai_tokens.promotion_credits_balance": (txn.credits_added || 0),
+                    "ai_tokens.promotion_credits_balance": back,
                     "ai_tokens.total_promotion_credits_granted": (txn.credits_added || 0)
                 }
             });
