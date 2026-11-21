@@ -775,7 +775,8 @@ function timeUp(call) {
         if (call.ended) return;
         const talking = call.speech.active || call.busy || aiIsTalking(call);
         if (talking && Date.now() < limit) call.hardStop = setTimeout(check, 500);
-        else endCall(call.id, call.freeUntil && maxMs <= Math.max(10000, call.freeUntil - call.startedAt) + 1000 && !call.paidOk ? "free minutes used" : "time limit");
+        // (ended because the period's call minutes ran out, not because of the longest call: the caller is told so)
+        else endCall(call.id, call.freeUntil && maxMs <= Math.max(10000, call.freeUntil - call.startedAt) + 1000 ? "free minutes used" : "time limit");
     };
     check();
 }
@@ -1465,14 +1466,26 @@ export async function handleCallsWebhook(value) {
             // not taken, call minutes left or not. (Until 2026-11-21 a call inside the plan's call minutes was taken
             // and answered with the session at 100 percent.) The call minutes still say how long the calls of the
             // month may be in all.
-            const free = await freeCallSeconds(user).catch(() => ({ left: 0, limitMinutes: 0, resetAt: null }));
+            const free = await freeCallSeconds(user).catch(() => null);
             const enough = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => null);
-            if (!enough?.allowed) {
+            if (!enough?.allowed || !free) {
                 await callAction(c.id, "reject").catch(() => {});
                 const { plan, paidNames } = await planWording(user).catch(() => ({ plan: null, paidNames: [] }));
-                await sendWhatsappText(from, /insufficient/i.test(enough?.reason || "")
+                await sendWhatsappText(from, enough && /insufficient/i.test(enough.reason || "")
                     ? callRefusedLimitText({ plan, paidNames, backAt: callsBackAt(enough, null) })
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
+                continue;
+            }
+            // The plan's call minutes are a real limit (owner, 2026-11-21: "you are not cutting the minutes talked from
+            // the total minutes, so all the WhatsApp limits are fake"). The minutes were counted, but they stopped
+            // nobody: a caller with credit left in the session could call on after the period's minutes were used up
+            // (they only decided when credits began to be cut). Now no call is taken once the period's minutes are
+            // used up, and a call ends when they run out (maxMs below). (The minutes that could not be read: no call,
+            // above.)
+            if (free.left <= 0) {
+                await callAction(c.id, "reject").catch(() => {});
+                const { plan, paidNames } = await planWording(user).catch(() => ({ plan: null, paidNames: [] }));
+                await sendWhatsappText(from, callMinutesUsedUpText({ plan, paidNames, backAt: free.resetAt }));
                 continue;
             }
             // Calls per day, week and month (owner, 2026-11-17: each can be set, a call is taken only when every set
@@ -1498,12 +1511,12 @@ export async function handleCallsWebhook(value) {
             // The plan's limits for tasks from this call: how many it may start, how many may run at once, and the
             // minutes of work each may use (call-limits.service.js)
             const taskCaps = callTaskCaps(callPlan);
-            // With no tokens to pay with, the call ends when the free minutes do
-            const maxMs = enough?.allowed ? planMaxMs : Math.min(planMaxMs, Math.max(10000, free.left * 1000));
+            // A call ends at the plan's longest call or when the period's call minutes run out, whichever is first
+            const maxMs = Math.min(planMaxMs, Math.max(10000, free.left * 1000));
             const freeUntil = free.left > 0 ? Date.now() + free.left * 1000 : 0;
             markBusy(number, maxMs / 1000 + 120);
             const callsLine = callsLineText(countCaps, callTimes);
-            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: enough?.allowed ? null : callsBackAt(enough, free), taskCaps, taskLimitsLine: callTaskLimitsLine(taskCaps, callPlan) });
+            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: free.resetAt, taskCaps, taskLimitsLine: callTaskLimitsLine(taskCaps, callPlan) });
             if (answered) redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);
