@@ -212,13 +212,25 @@ function withQuietProgress(tool, payload) {
 // was asked, so a chat "never came back" (2026-11-09: three dead connections ahead of the app, 4 minutes per browser
 // step, 33 minutes per command). Before a step, every connection is asked at once for a quick answer, and the ones
 // that don't answer are dropped and disconnected, so only live ones are asked.
+//
+// A connection that answered a moment ago and misses one quick check is busy, not dead: the app was doing a step that
+// keeps it from answering for some seconds (a search through a big folder without ripgrep reads every file in one go).
+// On 2026-11-21 five helpers searched the owner's project at once, another helper's quick check got no answer within
+// 4 seconds, and the server cut the app's only connection: every helper then failed with "the Classgrid desktop app
+// isn't open there" (three times that morning, 40 to 75 seconds after helpers started, with no server restart near).
+// So a connection is dropped only when it has answered nothing for BUSY_GRACE_MS; until then it is kept and asked.
 const PROBE_MS = 4000;
+export const BUSY_GRACE_MS = 3 * 60 * 1000;
+const answeredNow = (s) => { try { if (s.data) s.data.lastAnswerAt = Date.now(); } catch { /* a connection on another process */ } };
+const lastHeardFrom = (s) => Math.max(Number(s.data?.lastAnswerAt) || 0, Number(s.handshake?.issued) || 0);
 async function liveSockets(here) {
     const checked = await Promise.all(here.map(async (s) => {
         try {
             await s.timeout(PROBE_MS).emitWithAck("local-tool", { tool: "ping", args: {} }); // any answer counts, even "can't run"
+            answeredNow(s);
             return s;
         } catch {
+            if (Date.now() - lastHeardFrom(s) < BUSY_GRACE_MS) return s; // busy with a step: still the app
             try { s.disconnect(true); } catch { /* already gone */ }
             return null;
         }
@@ -258,6 +270,7 @@ async function askRunnerOnce(userId, tool, payload) {
             for (const s of here) {
                 try {
                     reply = await s.timeout(timeoutFor(tool, payload?.args)).emitWithAck("local-tool", payload);
+                    answeredNow(s);
                 } catch (err) {
                     lastError = err;
                     reply = null;
@@ -294,9 +307,36 @@ export async function runnerOnline(userId) {
     }
 }
 
-/** Runs one tool in the user's desktop app for this local project. Returns the tool's text. */
+// The app's connection can be away for some seconds while the app is open: the server it was connected to restarted
+// for a new version (the app connects again by itself), or the computer's internet dropped for a moment. An AI step
+// sent in those seconds used to fail at once with "the Classgrid desktop app isn't open there", in the middle of an
+// answer with the app open on the screen (owner, 2026-11-21: a helper's command failed that way 10 seconds after a
+// new server version went live: "I don't want this issue"). Such a step now waits for the app to be back, up to a
+// minute, and is then sent. `everyMs` and `forMs` are only changed by the tests.
+export const APP_BACK_WAIT = { forMs: 60 * 1000, everyMs: 2000 };
+async function askWhenAppIsBack(userId, tool, payload) {
+    const until = Date.now() + APP_BACK_WAIT.forMs;
+    while (Date.now() < until) {
+        await wait(APP_BACK_WAIT.everyMs);
+        if (!(await runnerOnline(userId))) continue;
+        const reply = await askRunner(userId, tool, payload);
+        if (reply) {
+            console.log(`[local-runner] the desktop app was away for a moment and is back: ${tool} went through after ${Math.round((Date.now() - (until - APP_BACK_WAIT.forMs)) / 1000)} s`);
+            return reply;
+        }
+    }
+    return null;
+}
+
+/**
+ * Runs one tool in the user's desktop app for this local project. Returns the tool's text. A step of an answer (`chat`
+ * given) waits up to a minute for an app whose connection is away for a moment (askWhenAppIsBack); a button in the
+ * app or on the website (no chat) and the editor's state read before every answer get their answer at once.
+ */
 export async function callLocal(project, tool, args = {}, chat = null) {
-    const reply = await askRunner(project.owner, tool, { tool, args: args || {}, projectId: String(project._id), root: project.localPath, ...(chat ? { chat: String(chat) } : {}) });
+    const payload = { tool, args: args || {}, projectId: String(project._id), root: project.localPath, ...(chat ? { chat: String(chat) } : {}) };
+    let reply = await askRunner(project.owner, tool, payload);
+    if (!reply && chat && tool !== "editor_context") reply = await askWhenAppIsBack(project.owner, tool, payload);
     return reply ? reply.text : "Error: this project is a folder on the user's computer, and the Classgrid desktop app isn't open there. Ask the user to open the Classgrid app on that computer, then try again.";
 }
 
