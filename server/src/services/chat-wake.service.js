@@ -28,6 +28,27 @@ const tell = (userId, data) => { try { getIO().to(String(userId)).emit("chat:wok
 const LIVE_EVENTS = new Set(["token", "thought", "tool_start", "tool_result", "status"]);
 
 /**
+ * What the person's open app is told while a chat is being woken by something other than runWake below: the same
+ * three things runWake sends (the chat woke, the answer's thinking, steps and words as they are written, the answer
+ * ended), so the answer appears in the open chat by itself. Used by a background task's wake-up (agent-task.service.js
+ * wakeTask: a chat whose AI used sleep_until). Until 2026-11-21 that wake-up ran the answer and saved it in the chat
+ * but told the app nothing, so the person saw no answer until they sent a message themselves (owner: "he never wakes
+ * up now, he needs my own message to wake up"; the server's log showed him woken and answering on time).
+ */
+export function wokenChatEvents(userId, sessionId) {
+    let open = false;
+    return {
+        start(note) { open = true; tell(userId, { sessionId, phase: "start", note }); },
+        event(data) {
+            if (!open || !LIVE_EVENTS.has(data?.type)) return;
+            const event = data.type === "tool_result" ? { ...data, result: String(data.result ?? "").slice(0, 4000) } : data;
+            try { getIO().to(String(userId)).emit("chat:woke-live", { sessionId, event }); } catch { /* no socket server */ }
+        },
+        end() { if (open) { open = false; tell(userId, { sessionId, phase: "end" }); } },
+    };
+}
+
+/**
  * Background work of a chat finished. note: what finished and its result (plain text for the AI).
  * The chat is woken now, or when its current answer ends.
  */
