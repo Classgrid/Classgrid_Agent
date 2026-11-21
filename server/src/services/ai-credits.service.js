@@ -222,7 +222,7 @@ export const hasEnoughTokens = async (userId, orgId, requiredTokens = 1, { paidO
     // The three reads (user, global settings, organization) are 150 ms away each; they run together, not one after
     // another (measured 2026-11-10: 450 ms -> 150 ms)
     const [user, globalConfig, org] = await Promise.all([
-        User.findById(userId).select('ai_tokens role status plan'),
+        User.findById(userId).select('ai_tokens role status plan email'), // (role and email: planOf's staff rule)
         GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit global_ai_blocked free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit global_image_reset_value global_image_reset_unit classgrid_image_reset_value classgrid_image_reset_unit").lean() || {},
         orgId ? Organization.findById(orgId).select('ai_config status').lean() : null,
     ]);
@@ -563,12 +563,20 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
 
         } else if (source === "weekly_free") {
             // Free tier, with the same dashboard limit the pre-request check uses.
-            const user = await User.findById(userId).select("ai_tokens plan");
+            // (role and email too: planOf leaves staff out of the plan by them. Without them a staff account was
+            // charged against a plan the Usage page says it does not have)
+            const user = await User.findById(userId).select("ai_tokens plan role email");
             const org = orgId ? await Organization.findById(orgId).select("ai_config").lean() : null;
             const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).select("global_user_weekly_limit free_limit_per_computer classgrid_custom_limits_enabled classgrid_user_weekly_limit global_token_reset_value global_token_reset_unit classgrid_token_reset_value classgrid_token_reset_unit").lean() || {};
             const window = await freeWindow(user, org, globalConfig, orgId);
             const weeklyLimit = window.limit;
-            const currentUsed = user?.ai_tokens?.used_this_week || 0;
+            // The session window by the same rule the check before a message uses (tokenWindowEnd): a charge that lands
+            // after the window ended belongs to a new window, which starts with it. Until 2026-11-21 only the check
+            // started a new window, so an answer that ran over the window's end was counted on the old, nearly full
+            // one: the person's credits paid while the new session was empty.
+            const nowMs = Date.now();
+            const windowOver = nowMs >= tokenWindowEnd(user?.ai_tokens, window.periodMs, nowMs);
+            const currentUsed = windowOver ? 0 : (user?.ai_tokens?.used_this_week || 0);
             // The free limit is shared by all accounts on the same computer, when the dashboard's switch is on
             const usedOnComputer = globalConfig.free_limit_per_computer === true ? await deviceFreeUsed(userId) : null;
             const weekLeft = window.weekCap === null ? Infinity : Math.max(0, window.weekCap - (await weekUsed(userId, user?.ai_tokens)));
@@ -577,7 +585,17 @@ export const deductTokens = async (userId, orgId, tokenAmount, source, { noSpill
             const overflow = tokenAmount - actualDeduction;
 
             if (actualDeduction > 0) {
-                const updatedUser = await User.findByIdAndUpdate(userId, {
+                const updatedUser = await User.findByIdAndUpdate(userId, windowOver ? {
+                    $set: {
+                        "ai_tokens.used_this_week": actualDeduction,
+                        "ai_tokens.window_start": new Date(nowMs),
+                        "ai_tokens.week_reset_date": new Date(nowMs + window.periodMs)
+                    },
+                    $inc: {
+                        "ai_tokens.week_used": actualDeduction,
+                        "ai_tokens.total_ai_tokens_used": actualDeduction
+                    }
+                } : {
                     $inc: {
                         "ai_tokens.used_this_week": actualDeduction,
                         "ai_tokens.week_used": actualDeduction,
@@ -685,7 +703,11 @@ export async function chargeClaudeOnPlan(userId, orgId, cost, { fable = false, l
         const fableLeft = fable && pool >= 0 ? Math.max(0, Math.round(pool * (Number(plan.fable_share_percent) || 0) / 100) - week.fable_week_used) : Infinity;
         const usedOnComputer = config.free_limit_per_computer === true ? await deviceFreeUsed(userId) : null;
         const weekLeft = window.weekCap === null ? Infinity : Math.max(0, window.weekCap - week.week_used);
-        const planLeft = Math.max(0, Math.min(window.limit - (user.ai_tokens?.used_this_week || 0), usedOnComputer === null ? Infinity : window.limit - usedOnComputer, weekLeft));
+        // (a charge after the session window ended belongs to a new window: the same rule as deductTokens)
+        const nowMs = Date.now();
+        const windowOver = nowMs >= tokenWindowEnd(user.ai_tokens, window.periodMs, nowMs);
+        const usedInWindow = windowOver ? 0 : (user.ai_tokens?.used_this_week || 0);
+        const planLeft = Math.max(0, Math.min(window.limit - usedInWindow, usedOnComputer === null ? Infinity : window.limit - usedOnComputer, weekLeft));
 
         // 1. the plan: the Claude credits, the session window and the week together
         const onPlan = Math.min(credits, claudeLeft, fableLeft, planLeft);
@@ -697,9 +719,10 @@ export async function chargeClaudeOnPlan(userId, orgId, cost, { fable = false, l
         const planPaid = onPlan + onPlanOnly;
         if (planPaid > 0) {
             await User.updateOne({ _id: userId }, {
+                ...(windowOver ? { $set: { "ai_tokens.used_this_week": planPaid, "ai_tokens.window_start": new Date(nowMs), "ai_tokens.week_reset_date": new Date(nowMs + window.periodMs) } } : {}),
                 $inc: {
                     ...(onPlan > 0 ? { "ai_tokens.claude_week_used": onPlan, ...(fable ? { "ai_tokens.fable_week_used": onPlan } : {}) } : {}),
-                    "ai_tokens.used_this_week": planPaid,
+                    ...(windowOver ? {} : { "ai_tokens.used_this_week": planPaid }),
                     "ai_tokens.week_used": planPaid,
                     "ai_tokens.total_ai_tokens_used": planPaid,
                 },

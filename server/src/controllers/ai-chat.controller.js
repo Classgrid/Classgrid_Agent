@@ -87,7 +87,7 @@ import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWS
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
-import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd, rememberDevice, chargeClaudeOnPlan } from "../services/ai-credits.service.js";
+import { hasEnoughTokens, deductTokens as deductTokensNow, getImageGenerationCost, tokenWindowEnd, rememberDevice, chargeClaudeOnPlan } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
 import { sendEmail } from "../services/aws-ses.service.js";
 import mongoose from "mongoose";
@@ -1130,6 +1130,17 @@ const foldPerMessageNotes = (msgs) => msgs.map((m) => {
 // check): kept in this process for a moment, so an answer starts without waiting on the database for what it read
 // seconds ago (answers must start at once, owner 2026-11-09). Nothing of the user's data is kept anywhere else.
 const shortLived = new Map(); // key -> { at, promise }
+// Every charge made from this file drops the person's kept usage check (keptFor "quota:..."), before and after the
+// charge is written. The check before an answer is kept for half a minute to save three database reads; until
+// 2026-11-21 only a Claude charge dropped it, so after an answer used the session up, a message sent within 30
+// seconds was let in on the old check and given the old allowance again (a review that day: many tabs at once each got
+// the whole allowance, none of it charged). The next message after any charge is now checked for real.
+const forgetQuota = (userId, orgId) => { for (const paid of [0, 1]) shortLived.delete(`quota:${userId}:${orgId || "-"}:${paid}`); };
+function deductTokens(userId, orgId, ...rest) {
+    forgetQuota(userId, orgId);
+    return deductTokensNow(userId, orgId, ...rest).finally(() => forgetQuota(userId, orgId));
+}
+
 async function keptFor(key, ms, load) {
     const have = shortLived.get(key);
     if (have && Date.now() - have.at < ms) return have.promise;
@@ -1996,7 +2007,10 @@ export const streamAskAi = async (req, res) => {
             }
         } else if (pool > 0) {
             const { weekCounters, creditsAvailable } = await import("../services/ai-credits.service.js");
-            const counters = await weekCounters(userId, req.user.ai_tokens);
+            // (read now, not from the sign-in's copy of the account, which can be 15 seconds old: a Claude message sent
+            // right after the Claude limit was reached used to be let in on the old count)
+            const tokensNow = (await User.findById(userId).select("ai_tokens").lean().catch(() => null))?.ai_tokens || req.user.ai_tokens;
+            const counters = await weekCounters(userId, tokensNow);
             const when = counters.weekEnd.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
             const poolUsedUp = counters.claude_week_used >= pool;
             const fableUsedUp = wantsFable && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100;
@@ -4294,6 +4308,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         } catch (e) {
                             // (the cap refused it and no Claude model could read instead: said plainly, CAP_REFUSED_WHY)
                             lastError = isCfNeuronCapError(e) ? CAP_REFUSED_WHY : String(e?.message || e);
+                            // (a read that failed is charged for what it used, like a helper's failed try)
+                            if (userId && e?.usage?.total_tokens > 0) deductTokens(userId, orgId, chargeableTokens(e.usage, model), tokenSource, { label: { model, what: "Chat" } }).catch(() => {});
                         }
                     }
                     throw new Error(lastError || "no answer");
@@ -4450,10 +4466,11 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         // weekly Claude credits have room, or the person's credits can pay for it. Owner, 2026-11-21: the
                         // Claude limit is a cap on every Claude use. Before that day a helper's Claude use was never counted
                         // on the Claude credits, and a plan without Claude still got helpers on Claude (three of the five
-                        // default helper models are Claude models). Not while Claude stands in for capped Cloudflare
-                        // (claudeByCap: the system's choice, counted on the normal limits).
+                        // default helper models are Claude models). The same while Cloudflare is capped: only the system's
+                        // own stand-in for a Cloudflare model (helperStand below) is outside this, never a Claude model the
+                        // main AI picked for a helper.
                         let claudeHelpers = true;
-                        if (helperPlan && !claudeByCap) {
+                        if (helperPlan) {
                             const pool = Number(helperPlan.claude_credits_per_week);
                             if (pool === 0) claudeHelpers = false;
                             else if (pool > 0 && !claudeOnCredits) {
@@ -4463,7 +4480,10 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 if (counters && counters.claude_week_used >= pool) claudeHelpers = ((await creditsAvailable(userId).catch(() => null))?.total || 0) > 0;
                             }
                         }
-                        const helperMayUse = (m) => !CLAUDE_CHAT_MODELS.has(m) || (claudeHelpers && (!helperPlan || claudeByCap || planAllowsModel(helperPlan.models_allowed, m)));
+                        const helperMayUse = (m) => !CLAUDE_CHAT_MODELS.has(m) || (claudeHelpers && (!helperPlan || planAllowsModel(helperPlan.models_allowed, m)));
+                        // A helper's Claude use that the plan pays for (counted on the Claude credits, the session and the
+                        // week: chargeClaudePool), whether or not the main answer itself is a stand-in for capped Cloudflare
+                        const helperOnPlan = (m) => !!helperPlan && !claudeOnCredits && CLAUDE_CHAT_MODELS.has(m) && Number(helperPlan.claude_credits_per_week) !== 0;
                         const pickModel = (wanted, i) => {
                             const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => !/claude-fable/.test(m))].filter((m) => !offModels.includes(m) && helperMayUse(m));
                             const w = wanted.toLowerCase();
@@ -4645,7 +4665,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         // A helper on a Claude model of the plan is charged the plan's way, counted on the Claude credits too
                                         // (chargeClaudePool). Not a Claude stand-in for capped Cloudflare (helperStand, or r.standIn in
                                         // the middle of the job): the system's choice, charged like the model it stands in for.
-                                        const helperOnPlanClaude = !r.standIn && model !== helperStand && claudePooled(model);
+                                        const helperOnPlanClaude = !r.standIn && model !== helperStand && helperOnPlan(model);
                                         if (userId) for (const part of usageParts(r, model)) {
                                             const cost = chargeableTokens(part.usage, part.model);
                                             (helperOnPlanClaude ? chargeClaudePool(cost, part.model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model: part.model, what: "Chat" } })).catch(() => {});
@@ -4662,6 +4682,15 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         const capRefused = isCfNeuronCapError(e);
                                         if (!capRefused) onlyCapRefusals = false;
                                         lastError = capRefused ? CAP_REFUSED_WHY : String(e?.message || e);
+                                        // A try that failed or was stopped is charged for what it really used: the error
+                                        // carries the provider's own usage of the rounds that ran (llm-stream.js and
+                                        // llm-stream-anthropic.js set it). Until 2026-11-21 only a try that ended well was
+                                        // charged, so helpers stopped with stop_helpers, and every failed try before the
+                                        // next model took over, were free.
+                                        if (userId && e?.usage?.total_tokens > 0) {
+                                            const cost = chargeableTokens(e.usage, model);
+                                            (model !== helperStand && helperOnPlan(model) ? chargeClaudePool(cost, model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model, what: "Chat" } })).catch(() => {});
+                                        }
                                         if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                         // "Too many requests", a timeout or a busy server: wait once and retry this model, then move to the next one
                                         if (!capRefused && /429|408|5\d\d|rate limit|timeout|timed out/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
@@ -9123,8 +9152,11 @@ export const generateImage = async (req, res) => {
                 }
             }
             if (extraImage) {
-                // The extra image's price replaces the usual per-image credits and comes from the top-up credits only
-                imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: extraImage.price, source: "personal", noSpill: true };
+                // The extra image's price replaces the usual per-image credits and comes from the person's credits:
+                // the pool that started first, the rest from the other (canPayExtra checked both together). Until
+                // 2026-11-21 it was taken from bought credits only, with no move to the gifted ones: an account with
+                // gifted credits and no bought ones passed the check and was charged nothing, picture after picture.
+                imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: extraImage.price, source: extraImage.source || "personal" };
             } else {
                 imageSlotUserId = authUserForImage._id;
                 if (imageTokenCost > 0) imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: imageTokenCost, source: tokenCheck.source };

@@ -58,6 +58,80 @@ export async function planLimit(user, field, fallback = undefined) {
 
 export const isUnlimited = (v) => Number(v) === -1;
 
+// ── Cloud projects: the plan's projects_max (2026-11-21, owner: "fix all") ──
+// The plan's number of projects was checked in one place only (POST /api/ide/projects). A folder project that became a
+// cloud project ("Also use in the cloud", Mastero) and the projects WhatsApp tasks and calls make were never counted,
+// so a person at their limit could still get more. The rule now lives here and every one of those paths asks it.
+// What is counted: the person's own projects that are not a folder on their own computer (location is not "local").
+// No limit: plans switched off, Classgrid staff (planOf gives no plan row) and a plan with projects_max -1.
+// A database error is thrown to the caller, never read as "there is room": nothing is made when the count can't be read.
+
+/** The words of every refusal (the sentence POST /api/ide/projects has always shown) */
+export const cloudProjectLimitText = (plan) => `Your ${plan.name} plan allows ${plan.projects_max} project${Number(plan.projects_max) === 1 ? "" : "s"}. Upgrade your plan to make more, or work in a folder on your own computer.`;
+
+/** The refusal a route sends: res.status(r.status).json(r.body). Same status, words and code everywhere. */
+export const cloudProjectRefusal = (plan) => ({ status: 403, body: { error: cloudProjectLimitText(plan), code: "plan_limit", plan: plan.key } });
+
+/** The same refusal as one plain sentence for the AI (WhatsApp tasks and calls), so it tells the person */
+export const cloudProjectLimitForAi = (room) => {
+    const limit = Number(room?.limit);
+    return `No new project was made: the person's ${room?.plan?.name || "current"} plan allows ${limit} cloud project${limit === 1 ? "" : "s"} and they already have ${room?.have}. Tell them their plan's project limit is reached.`;
+};
+
+/**
+ * Is there room for one more cloud project on this person's plan?
+ * Returns { ok, limit, have, plan }: limit and have are null when nothing limits the person.
+ * made: true asks the question AFTER a project was made or converted: is the person still inside the limit with it?
+ */
+export async function cloudProjectRoom(user, { made = false } = {}) {
+    const plan = await planOf(user);
+    if (!plan || isUnlimited(plan.projects_max)) return { ok: true, limit: null, have: null, plan: plan || null };
+    if (!user?._id) throw new Error("the account whose projects are counted is not known");
+    const limit = Number(plan.projects_max);
+    const { default: IdeProject } = await import("../models/IdeProject.js");
+    // (read from the main database server, so a project saved a moment ago is always in the count)
+    const have = await IdeProject.countDocuments({ owner: user._id, location: { $ne: "local" } }).read("primary");
+    // (the same comparison the route always made: at the limit there is no room for one more)
+    return { ok: made ? !(have > limit) : !(have >= limit), limit, have, plan };
+}
+
+/**
+ * Called right after a cloud project was made (or a folder project became one). Two requests sent in the same moment
+ * can both pass cloudProjectRoom, because each counted before the other one saved. So the projects are counted once
+ * more with the new one in: when the person is now over the limit, `undo` takes this one back and the answer is
+ * { ok: false }. Why this never leaves a person over the limit: of the projects that stay, the one saved last counted
+ * after all the others were saved, so it saw them all and would have been taken back. (When two arrive together for
+ * the last free place, both may be taken back; the person then tries once more.)
+ * `undo`: an async function that removes the project just made, or turns the converted one back.
+ */
+export async function confirmCloudProject(user, undo) {
+    let after;
+    try {
+        after = await cloudProjectRoom(user, { made: true });
+    } catch (e) {
+        // The count can't be read: the project is not kept (nothing is ever made without the limit being checked)
+        await Promise.resolve().then(() => undo()).catch((err) => console.error("[plans] a project made without its count could not be taken back:", err.message));
+        throw e;
+    }
+    if (after.ok) return after;
+    await undo();
+    return { ...after, have: after.have - 1 };
+}
+
+/**
+ * Makes one cloud project for this person inside their plan's limit: asks for room, makes it, then counts again
+ * (confirmCloudProject). Returns { ok: true, project, ... } or { ok: false, project: null, limit, have, plan }.
+ * `fields`: the project's own fields (name, logo); the owner is always this person and it is never a folder project.
+ */
+export async function makeCloudProject(user, fields = {}) {
+    const room = await cloudProjectRoom(user);
+    if (!room.ok) return { ...room, project: null };
+    const { default: IdeProject } = await import("../models/IdeProject.js");
+    const project = await IdeProject.create({ ...fields, owner: user._id, location: "cloud", localPath: null });
+    const after = await confirmCloudProject(user, () => IdeProject.deleteOne({ _id: project._id }));
+    return { ...after, project: after.ok ? project : null };
+}
+
 // ── Pictures and files in one message (owner, 2026-11-19: "6 for Free, 12 for Pro, 15 for Max; not hard-coded, in the
 // super admin's plans so we can adjust it") ──
 /** Used when a plan row has no value yet (the schema's default). */

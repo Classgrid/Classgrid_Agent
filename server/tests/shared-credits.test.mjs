@@ -97,10 +97,10 @@ test("creditsAvailable: nothing while AI is blocked or the account is not active
 
 test("canPayExtra: an account with only gifted credits can pay an extra", async () => {
     setAccount(gifted(457725618));
-    assert.deepEqual(await canPayExtra(USER, "whatsapp"), { allowed: true, price: 2000, total: 2000 });
-    assert.deepEqual(await canPayExtra(USER, "image"), { allowed: true, price: 5000, total: 5000 });
-    assert.deepEqual(await canPayExtra(USER, "voicereply"), { allowed: true, price: 3000, total: 3000 });
-    assert.deepEqual(await canPayExtra(USER, "voiceinput", 3), { allowed: true, price: 2000, total: 6000 });
+    assert.deepEqual(await canPayExtra(USER, "whatsapp"), { allowed: true, price: 2000, total: 2000, source: "promotion" }); // (source: the pool that pays first)
+    assert.deepEqual(await canPayExtra(USER, "image"), { allowed: true, price: 5000, total: 5000, source: "promotion" });
+    assert.deepEqual(await canPayExtra(USER, "voicereply"), { allowed: true, price: 3000, total: 3000, source: "promotion" });
+    assert.deepEqual(await canPayExtra(USER, "voiceinput", 3), { allowed: true, price: 2000, total: 6000, source: "promotion" });
 });
 
 test("canPayExtra: both pools together must cover the price; price 0 is off", async () => {

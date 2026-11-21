@@ -38,7 +38,7 @@ import { planOf, isUnlimited } from "./plan-limits.service.js";
 import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
-import { hasEnoughTokens, deductTokens, planWording } from "./ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, planWording, chargeClaudeOnPlan } from "./ai-credits.service.js";
 import { callRefusedLimitText, callMinutesUsedUpText, callCountLimitText } from "./email-templates.service.js";
 import {
     callCountCaps, fullCallLimit, callsLineText, callTimesSince, callTaskCaps, callTaskRefusal, callTaskRefusedToolText,
@@ -101,12 +101,22 @@ export function callsBackAt(enough, free, nowMs = Date.now()) {
     return times.length ? new Date(Math.min(...times)) : null;
 }
 
-// Tokens for one model answer of the call: nothing while the call is within the caller's free minutes
+// Tokens for one model answer of the call: nothing while the call is within the caller's free minutes. A call is
+// answered by a Claude model (CALL_MODEL), so on a plan that includes Claude its cost is charged the plan's way:
+// counted on the weekly Claude credits as well as the session window and the week (chargeClaudeOnPlan; owner,
+// 2026-11-21: "in calls we use Claude but the Claude limit is not taken off"). Until that day a call counted on the
+// session and the week only. With the plan's limits used up the person's credits pay (call.tokenSource), as before.
 function chargeCall(call, usage, model) {
     const at = call.endedAt || Date.now();
     if (call.freeUntil && at < call.freeUntil) return;
-    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens(usage, model), call.tokenSource, { label: { model, what: "WhatsApp call" } })
-        .catch((e) => console.error("[WA call] token charge failed:", e.message));
+    const cost = chargeableTokens(usage, model);
+    const orgId = call.user.organization_id || null;
+    const label = { model, what: "WhatsApp call" };
+    (async () => {
+        const plan = call.tokenSource === "weekly_free" && /^claude-/.test(String(model)) ? await planOf(call.user).catch(() => null) : null;
+        if (plan && Number(plan.claude_credits_per_week) !== 0) await chargeClaudeOnPlan(call.user._id, orgId, cost, { fable: /^claude-fable-/.test(String(model)), label });
+        else await deductTokens(call.user._id, orgId, cost, call.tokenSource, { label });
+    })().catch((e) => console.error("[WA call] token charge failed:", e.message));
 }
 
 // The calls this number had in the last 24 h: how many, and when each was answered (ms, oldest first)
@@ -406,7 +416,12 @@ async function runProjectTool(call, tool) {
         const name = String(tool.input?.name || "").trim().slice(0, 80);
         if (!name) return "No name was given.";
         if (await findProject(call.user, name, { withLocal: true })) return `A project called "${name}" already exists.`;
-        await IdeProject.create({ owner: call.user._id, name });
+        // (2026-11-21, owner: "fix all") A project made on a call is a cloud project, so it counts toward the plan's
+        // number of projects (projects_max) like one made in the app; before, a call could make any number. With no
+        // room on the plan nothing is made and the AI is told why in one sentence, so it tells the caller.
+        const { makeCloudProject, cloudProjectLimitForAi } = await import("./plan-limits.service.js");
+        const made = await makeCloudProject(call.user, { name });
+        if (!made.ok) return cloudProjectLimitForAi(made);
         return `Project "${name}" was created.`;
     }
     return "Unknown tool.";
