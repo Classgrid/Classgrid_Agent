@@ -5,14 +5,16 @@
 //   - accountsRunning: whose containers run, from `docker ps` (the cg-user label, or the names of the editor box, the
 //     install box and the live browser); other containers are nobody's
 //   - the hours check: under the plan's hours = allowed; used up = refused with the plan's name and hours; 0 = not
-//     included; -1, plans off and staff = no limit; Redis failing never blocks
+//     included; -1, plans off and staff = no limit; with Redis failing the database's count decides (until
+//     2026-11-21 the count was in Redis alone and Redis failing never blocked anyone)
 //   - the at-once check: a free place = allowed at once; another chat busy = waits, then refused; the same chat's own
 //     runs never block it, even many at the same moment; two chats starting in the same moment can't both get the
 //     one place; a plan of 2 lets a second chat in; -1 = no limit
 //   - the once-a-minute count: every account with something running gets the time since the last count (one minute
 //     the first time, two at most), once however many containers it has; an account whose hours are used up has its
 //     containers switched off and its editor port forgotten; an account with no limit is counted but never stopped
-// Redis, the plan table, the accounts and the sandbox connection are stand-ins: nothing real is read or run.
+// Redis, the database's counts, the plan table, the accounts and the sandbox connection are stand-ins: nothing real
+// is read or run.
 // Run: node --experimental-test-module-mocks --test tests/cloud-computer-limit.test.mjs
 import test, { mock } from "node:test";
 import assert from "node:assert/strict";
@@ -39,6 +41,17 @@ const redis = {
     expire: async (k, s) => { if (alive(k)) ends.set(k, Date.now() + Number(s) * 1000); return 1; },
 };
 mock.module("../src/config/redis.js", { defaultExport: redis });
+// The counts in the database (models/PlanCount.js): where a count is kept; Redis has a short-lived copy
+const rows = new Map();
+const found = (value) => { const c = { select: () => c, lean: () => c, then: (ok, bad) => Promise.resolve(typeof value === "function" ? value() : value).then(ok, bad), catch: (bad) => Promise.resolve(typeof value === "function" ? value() : value).catch(bad) }; return c; };
+mock.module("../src/models/PlanCount.js", {
+    defaultExport: {
+        exists: async ({ key }) => (rows.has(key) ? { _id: key } : null),
+        findOne: ({ key }) => found(() => (rows.has(key) ? { value: rows.get(key) } : null)),
+        updateOne: ({ key }, update) => found(() => { if (!rows.has(key)) rows.set(key, update.$setOnInsert.value); return {}; }),
+        findOneAndUpdate: ({ key }, update) => found(() => { rows.set(key, (rows.get(key) || 0) + update.$inc.value); return { value: rows.get(key) }; }),
+    },
+});
 
 const FREE = { key: "free", name: "Free", sandbox_hours_per_month: 3, sandbox_sessions: 1 };
 const MAX = { key: "max", name: "Max", sandbox_hours_per_month: 100, sandbox_sessions: 2 };
@@ -53,13 +66,13 @@ const { cloudLabel, accountsRunning, cloudHoursGate, cloudComputerGate, sampleCl
 const { monthKey } = await import("../src/services/plan-usage.service.js");
 
 const usedKey = (id) => `plan:sandbox:${id}:${monthKey()}`;
-const setHours = (id, hours) => store.set(usedKey(id), hours * 3600);
+const setHours = (id, hours) => { rows.set(usedKey(id), hours * 3600); store.set(usedKey(id), hours * 3600); };
 // A stand-in sandbox connection: `busy` is what `docker ps` answers for the label filter, `ps` for the full list
 const fakeSsh = ({ busy = () => "", ps = "" } = {}) => {
     const ran = [];
     return { ran, execCommand: async (cmd) => { ran.push(cmd); return { stdout: cmd.includes("--filter label=cg-user=") && cmd.includes("cg-session") ? busy() : cmd.startsWith("docker ps --format") ? ps : "", code: 0 }; } };
 };
-const reset = () => { store.clear(); ends.clear(); redisBroken = false; };
+const reset = () => { store.clear(); ends.clear(); rows.clear(); redisBroken = false; };
 
 test("cloudLabel: an account and a chat, and nothing a shell could run", () => {
     assert.equal(cloudLabel(A, "3f2a-11"), `--label cg-user=${A} --label cg-session=3f2a-11`);
@@ -105,10 +118,14 @@ test("hours: under the limit, used up, not included, no limit", async () => {
     assert.equal((await cloudHoursGate("not-an-id")).allowed, true);
 });
 
-test("hours: Redis failing never blocks", async () => {
+test("hours: with Redis failing the database's count decides", async () => {
     reset();
     redisBroken = true;
+    assert.equal((await cloudHoursGate(A)).allowed, true); // nothing used yet
+    setHours(A, 2.9);
     assert.equal((await cloudHoursGate(A)).allowed, true);
+    setHours(A, 3);
+    assert.equal((await cloudHoursGate(A)).allowed, false); // (allowed before 2026-11-21: the count read as 0)
 });
 
 test("at once: a free place is allowed at once, with the labels for the run", async () => {
@@ -192,18 +209,18 @@ test("the count: one minute the first time, once per account however many contai
     const r = await sampleCloudComputers(ssh);
     assert.equal(r.counted, 2);
     assert.deepEqual(r.stopped, []);
-    assert.equal(store.get(usedKey(A)), 60);
-    assert.equal(store.get(usedKey(B)), 60);
+    assert.equal(rows.get(usedKey(A)), 60);
+    assert.equal(rows.get(usedKey(B)), 60);
 });
 
 test("the count: the time since the last count, two minutes at most", async () => {
     reset();
     store.set("plan:sandbox:lastsample", String(Date.now() - 30000));
     await sampleCloudComputers(fakeSsh({ ps: `ide-u-${B}|\n` }));
-    assert.ok(Math.abs(store.get(usedKey(B)) - 30) < 2);
+    assert.ok(Math.abs(rows.get(usedKey(B)) - 30) < 2);
     store.set("plan:sandbox:lastsample", String(Date.now() - 10 * 60000));
     await sampleCloudComputers(fakeSsh({ ps: `ide-u-${B}|\n` }));
-    assert.ok(Math.abs(store.get(usedKey(B)) - 150) < 3);
+    assert.ok(Math.abs(rows.get(usedKey(B)) - 150) < 3);
 });
 
 test("the count: used-up hours switch that account's containers off, and nobody else's", async () => {

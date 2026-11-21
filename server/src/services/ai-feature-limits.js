@@ -171,10 +171,11 @@ const directSendKey = (userId) => `ai:wa-direct:${userId}`;
  * Returns { allowed, limit, used }.
  */
 export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false, readOnly = false } = {}) {
-    const [{ default: GlobalAiConfig }, { default: Organization }, { default: AiSchedule }] = await Promise.all([
+    const [{ default: GlobalAiConfig }, { default: Organization }, { default: AiSchedule }, { default: WhatsappDirectSend }] = await Promise.all([
         import("../models/GlobalAiConfig.js"),
         import("../models/Organization.js"),
         import("../models/AiSchedule.js"),
+        import("../models/WhatsappDirectSend.js"),
     ]);
     const globalConfig = await GlobalAiConfig.findOne({ key: "singleton" }).lean();
     const orgId = user.organization_id || null;
@@ -218,7 +219,11 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false,
         await redis.zremrangebyscore(key, 0, Date.now() - periodMs);
         direct = await redis.zcard(key);
         if (direct > 0 && periodMs > EIGHT_DAYS_S * 1000) await redis.expire(key, Math.ceil(periodMs / 1000) + 24 * 60 * 60);
-    } catch (e) { /* Redis down: count only the scheduled ones */ }
+    } catch (e) { /* Redis down: the database's count below */ }
+    // The database keeps every direct send too (models/WhatsappDirectSend.js, since 2026-11-21): with Redis away, or
+    // after it lost its data, the count is still whole. The larger of the two counts, so sends from before that day,
+    // which only Redis has, still count.
+    direct = Math.max(direct, await WhatsappDirectSend.countDocuments({ userId: user._id, at: { $gte: since } }).catch(() => 0));
 
     let used = scheduled + direct + upcoming;
     let allowed = used < limit;
@@ -231,7 +236,8 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false,
             whatsapp_phone_number: { $exists: true, $ne: "" }, whatsapp_message: { $exists: true, $ne: "" },
         });
         let dayDirect = 0;
-        try { dayDirect = await redis.zcount(directSendKey(user._id), Date.now() - 24 * 60 * 60 * 1000, "+inf"); } catch (e) { /* Redis down */ }
+        try { dayDirect = await redis.zcount(directSendKey(user._id), Date.now() - 24 * 60 * 60 * 1000, "+inf"); } catch (e) { /* Redis down: the database's count below */ }
+        dayDirect = Math.max(dayDirect, await WhatsappDirectSend.countDocuments({ userId: user._id, at: { $gte: daySince } }).catch(() => 0));
         if (dayScheduled + dayDirect >= dayLimit) { allowed = false; used = dayScheduled + dayDirect; shownLimit = dayLimit; }
     }
 
@@ -268,6 +274,8 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false,
             const first = await redis.zrange(directSendKey(user._id), 0, 0, "WITHSCORES");
             if (first?.length === 2) oldestMs = Math.min(oldestMs, Number(first[1]));
         } catch (e) { }
+        const oldestDirect = await WhatsappDirectSend.findOne({ userId: user._id, at: { $gte: since } }).sort({ at: 1 }).select("at").lean().catch(() => null);
+        if (oldestDirect?.at) oldestMs = Math.min(oldestMs, new Date(oldestDirect.at).getTime());
         resetAt = new Date(Number.isFinite(oldestMs) ? oldestMs + periodMs : Date.now() + periodMs);
         if (!allowed) resetText = formatResetTime(resetAt);
     }
@@ -276,19 +284,28 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false,
 
 const messageOwnerKey = (messageId) => `ai:wa-msg:${messageId}`;
 const EIGHT_DAYS_S = 8 * 24 * 60 * 60;
+const DIRECT_SEND_KEEP_MS = 370 * 24 * 60 * 60 * 1000; // (a limit's reset period can be up to 366 days)
 
 /**
  * Counts one WhatsApp message sent right away (not scheduled) toward the user's weekly limit. With Meta's
  * message id, a later "failed" delivery report (handleWhatsappStatusUpdates) takes it off the count again.
  */
 export async function recordDirectWhatsappSend(userId, messageId) {
+    const now = Date.now();
+    const ref = messageId ? `wamid:${messageId}` : `${now}-${Math.random().toString(36).slice(2, 8)}`;
+    // The database first: its row is what still counts the send when Redis is away or lost its data
+    try {
+        const { default: WhatsappDirectSend } = await import("../models/WhatsappDirectSend.js");
+        await WhatsappDirectSend.create({ userId, ref, at: new Date(now), expiresAt: new Date(now + DIRECT_SEND_KEEP_MS) });
+    } catch (e) {
+        if (e?.code !== 11000) console.error("[WhatsApp] a direct send could not be counted in the database:", e.message);
+    }
     try {
         const key = directSendKey(userId);
-        const now = Date.now();
-        await redis.zadd(key, now, messageId ? `wamid:${messageId}` : `${now}-${Math.random().toString(36).slice(2, 8)}`);
+        await redis.zadd(key, now, ref);
         if ((await redis.ttl(key)) < EIGHT_DAYS_S) await redis.expire(key, EIGHT_DAYS_S);
         if (messageId) await redis.set(messageOwnerKey(messageId), String(userId), "EX", EIGHT_DAYS_S);
-    } catch (e) { /* Redis down: the send is not counted */ }
+    } catch (e) { /* Redis down: the database's row counts the send */ }
 }
 
 /** 10-digit Indian numbers get the 91 country code; spaces, dashes, "+" and a leading 0 are removed. */
@@ -304,11 +321,13 @@ export async function handleWhatsappStatusUpdates(statuses) {
     const failed = (statuses || []).filter((s) => s?.status === "failed" && s.id);
     if (failed.length === 0) return;
     const { default: AiSchedule } = await import("../models/AiSchedule.js");
+    const { default: WhatsappDirectSend } = await import("../models/WhatsappDirectSend.js");
     for (const s of failed) {
         try {
             const userId = await redis.get(messageOwnerKey(s.id));
             if (userId) await redis.zrem(directSendKey(userId), `wamid:${s.id}`);
-        } catch (e) { /* Redis down: the direct send stays counted */ }
+        } catch (e) { /* Redis down: its copy stays; the database's row is taken off below */ }
+        await WhatsappDirectSend.deleteOne({ ref: `wamid:${s.id}` }).catch(() => {});
         await AiSchedule.updateOne(
             { whatsapp_message_id: s.id },
             { whatsapp_failed: true, error_message: `WhatsApp delivery failed: ${JSON.stringify(s.errors || []).slice(0, 300)}` },
