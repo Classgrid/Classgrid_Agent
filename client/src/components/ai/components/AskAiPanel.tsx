@@ -2983,6 +2983,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }, [isStudio, messages, localImagesFound, sessionId]);
   // Desktop app: Studio's Incognito looks exactly like Agent mode's (its greeting, header row and question list)
   const studioLook = isStudio && !(DESKTOP_STUDIO && isIncognito);
+  // Studio's Incognito in the desktop app (the Agent look, but with Studio's question marks)
+  const studioIncognito = isStudio && DESKTOP_STUDIO && isIncognito;
   const codeNotes = useCodeNotes();
   useEffect(() => { if (isStudio) setCodeNotesChat(sessionId); }, [isStudio, sessionId]);
   // Studio and Project Mode: the agent's permission mode (the shield) and the action it is waiting to be allowed
@@ -7266,7 +7268,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         />
         {isIncognito && <IncognitoBar onClose={exitIncognito} />}
         <div className={isIncognito
-          ? "flex-1 min-h-0 mx-1.5 mb-1.5 sm:mx-2 sm:mb-2 rounded-2xl border border-slate-200 dark:border-[#262626] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"
+          ? "relative flex-1 min-h-0 mx-1.5 mb-1.5 sm:mx-2 sm:mb-2 rounded-2xl border border-slate-200 dark:border-[#262626] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"
           : "w-full h-[100dvh] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"}>
           <div className="flex-1 min-w-0 min-h-0 relative flex flex-col h-full overflow-hidden">
             {/* Sidebar toggle and Top Right Header Actions */}
@@ -8027,8 +8029,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             )}
           </AnimatePresence>
           {/* Right-side TOC showing user questions */}
-          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && !studioLook && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
-          {studioLook && !isToolPage(sessionId) && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
+          {/* (Desktop app, Studio's Incognito: Studio's question marks on the left edge, not Agent mode's list button
+              on the right; owner, 2026-11-21) */}
+          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && !studioLook && !studioIncognito && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
+          {(studioLook || studioIncognito) && !isToolPage(sessionId) && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
         </div>
         </div>
       ) : null}
