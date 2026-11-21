@@ -101,14 +101,16 @@ export function callsBackAt(enough, free, nowMs = Date.now()) {
     return times.length ? new Date(Math.min(...times)) : null;
 }
 
-// Tokens for one model answer of the call: nothing while the call is within the caller's free minutes. A call is
-// answered by a Claude model (CALL_MODEL), so on a plan that includes Claude its cost is charged the plan's way:
+// Tokens for one model answer of the call, the same in and past the plan's call minutes. The session limit and the
+// weekly limit are for every model, the one that answers a call too (owner, 2026-11-21: "if the session limit is full,
+// how can the model write an answer on a call? Officially it must be counted"; then "fix it"). Until that day a call
+// inside the plan's call minutes cut no credits and was not checked against the limits at all: the minutes covered the
+// model as well as the voice. Now the minutes cover the voice of the call, and the model is counted like anywhere else.
+// A call is answered by a Claude model (CALL_MODEL), so on a plan that includes Claude its cost is charged the plan's way:
 // counted on the weekly Claude credits as well as the session window and the week (chargeClaudeOnPlan; owner,
 // 2026-11-21: "in calls we use Claude but the Claude limit is not taken off"). Until that day a call counted on the
 // session and the week only. With the plan's limits used up the person's credits pay (call.tokenSource), as before.
 function chargeCall(call, usage, model) {
-    const at = call.endedAt || Date.now();
-    if (call.freeUntil && at < call.freeUntil) return;
     const cost = chargeableTokens(usage, model);
     const orgId = call.user.organization_id || null;
     const label = { model, what: "WhatsApp call" };
@@ -1458,15 +1460,18 @@ export async function handleCallsWebhook(value) {
                 await sendWhatsappText(from, "This WhatsApp number is not linked to a Classgrid account. Sign in to Classgrid (the phone app, the desktop app or https://chat.classgrid.in), verify this number in Settings, then call again.");
                 continue;
             }
-            // Free call minutes first (Global AI Config, "Voice Calls"); past them, the same credit check as the chat
-            // (a call within the free minutes costs no tokens; a paid call is charged per turn)
+            // The same credit check as the chat, for every call: the model that answers a call is counted on the
+            // session and the week like any model (see chargeCall), so with those used up and no credits a call is
+            // not taken, call minutes left or not. (Until 2026-11-21 a call inside the plan's call minutes was taken
+            // and answered with the session at 100 percent.) The call minutes still say how long the calls of the
+            // month may be in all.
             const free = await freeCallSeconds(user).catch(() => ({ left: 0, limitMinutes: 0, resetAt: null }));
             const enough = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => null);
-            if (!enough?.allowed && free.left <= 0) {
+            if (!enough?.allowed) {
                 await callAction(c.id, "reject").catch(() => {});
                 const { plan, paidNames } = await planWording(user).catch(() => ({ plan: null, paidNames: [] }));
                 await sendWhatsappText(from, /insufficient/i.test(enough?.reason || "")
-                    ? callRefusedLimitText({ plan, paidNames, backAt: callsBackAt(enough, free) })
+                    ? callRefusedLimitText({ plan, paidNames, backAt: callsBackAt(enough, null) })
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
                 continue;
             }
