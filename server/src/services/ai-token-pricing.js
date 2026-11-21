@@ -91,3 +91,32 @@ export function chargeableTokens(usage, model) {
     const raw = (usage.prompt_tokens || 0) + output;
     return raw > 0 ? Math.max(1, Math.round(total)) : 0;
 }
+
+// ── ElevenLabs: the voice that reads, and the listening ───────────────────────────────────────────────────────────
+// Until 2026-11-21 a read-aloud and a minute of voice input cut no credits at all: they were only counted against
+// the plan's numbers a day, so their real cost was outside the session and weekly limits (owner, that day: "for
+// Claude and Cloudflare credits are cut from what the provider reports; for ElevenLabs, where do they come from?
+// fix it all"). They are now cut like a model's answer, from what was really used: the characters spoken and the
+// seconds listened to, at ElevenLabs' own list prices (elevenlabs.io/pricing/api, read 2026-11-21), turned into
+// credits the same way as every model above (one credit = one input token of the baseline model).
+const USD_PER_CREDIT = BASELINE.input / 1e6;
+// USD per 1,000 characters spoken, by ElevenLabs model
+const SPEECH_USD_PER_1K_CHARACTERS = { eleven_v4_turbo: 0.04, eleven_v4: 0.08, eleven_v3: 0.08, eleven_v3_conversational: 0.04, eleven_multilingual_v2: 0.08, eleven_flash_v2_5: 0.04, eleven_turbo_v2_5: 0.04 };
+const SPEECH_USD_DEAREST = 0.08; // (a model not in the list counts at the dearest price)
+// USD per hour of sound turned into text (Scribe v3 / v2: 0.20; the live ones 0.22)
+const LISTEN_USD_PER_HOUR = 0.2;
+
+/** Credits for `characters` spoken by the ElevenLabs model `model` (0 for nothing spoken) */
+export function speechCredits(characters, model) {
+    const n = Math.max(0, Math.floor(Number(characters) || 0));
+    if (!n) return 0;
+    const per1k = SPEECH_USD_PER_1K_CHARACTERS[String(model || "")] ?? SPEECH_USD_DEAREST;
+    return Math.max(1, Math.round(((n / 1000) * per1k) / USD_PER_CREDIT));
+}
+
+/** Credits for `seconds` of sound turned into text (0 for nothing heard) */
+export function listenCredits(seconds) {
+    const s = Math.max(0, Number(seconds) || 0);
+    if (!s) return 0;
+    return Math.max(1, Math.round(((s / 3600) * LISTEN_USD_PER_HOUR) / USD_PER_CREDIT));
+}

@@ -81,14 +81,14 @@ import { planOf } from "../services/plan-limits.service.js";
 import { textToSpeech, elevenLabsEnabled, TTS_MODEL } from "../services/elevenlabs.service.js";
 import { voiceIdFor } from "../services/voice-choices.js";
 import { isWebsite } from "../utils/client-app.js";
-import { spokenText, voiceReplyGate, countVoiceReply } from "./ai-speak.controller.js";
+import { spokenText, voiceReplyGate, countVoiceReply, chargeSpeech } from "./ai-speak.controller.js";
 import { generateSessionTitle, touchChat, TITLE_REFRESH_EVERY, CF_PICKER_MODELS, MODEL_DISPLAY_NAMES } from "./ai-chat.controller.js";
 import { fallbackVoiceAnswer, claudeVoiceAnswer, runAgentTask, ASK_CLASSGRID_TOOL, FALLBACK_MODEL } from "../services/whatsapp-call.service.js";
 import { CLAUDE_CHAT_MODELS } from "../services/llm-stream-anthropic.js";
 import { disabledModels, fableAccess, isFableModel } from "../services/model-access.service.js";
 import { voiceModelRefusal } from "../services/voice-model.service.js";
 import { weekCounters } from "../services/ai-credits.service.js";
-import { voiceInputAllowed, countVoiceInput, pcmToWav, voiceGapSeconds, setVoiceClock } from "../services/voice-input-limit.service.js";
+import { voiceInputAllowed, countVoiceInput, chargeListening, pcmToWav, voiceGapSeconds, setVoiceClock } from "../services/voice-input-limit.service.js";
 import { transcribeAudioDetailed } from "../services/ai/voice.service.js";
 import { spokenWords } from "../services/voice-heard.js";
 import SystemLog from "../models/SystemLog.js";
@@ -283,6 +283,7 @@ export const voiceTurn = async (req, res) => {
             if (text === null) { noteNotAnswered("speech_to_text_failed"); return refusal(res, 503, "I couldn't hear that just now. Say it again.", "speech_to_text_failed"); }
             // The seconds that were listened to count on the day's voice input minutes, words or not
             countVoiceInput(user, inputGate, audioSeconds);
+            chargeListening(user, inputGate, audioSeconds); // (the sound that went to speech-to-text, as credits)
             if (!text || NO_WORDS.test(text)) { noteNotAnswered("nothing_said"); return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said"); }
             heard = text;
         }
@@ -596,6 +597,7 @@ export const voiceTurn = async (req, res) => {
         touchChat(userEmail, sessionId);
         const spoke = turn.spoken.sentences > 0;
         if (spoke) countVoiceReply(user, gate);
+        if (spoke) chargeSpeech(user, gate, turn.spoken.characters); // (the characters that were voiced, as credits)
         // The whole turn counts on the day's voice minutes (the user's own words were counted when heard): the quiet
         // time before it, and from the moment it arrived until its reading ends on the phone (the reading starts with
         // the first voice and lasts as long as the sound sent, which can outlast the stream)
