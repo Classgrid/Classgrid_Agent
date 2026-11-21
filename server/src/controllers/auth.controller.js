@@ -55,7 +55,7 @@ import { getJwtSecret } from "../utils/jwt-secret.js";
  * ─────────────────────────────────────────────────────────
  */
 
-import { findByAnyEmail, cleanEmail as cleanAccountEmail } from "../utils/account-email.js";
+import { findByAnyEmail, cleanEmail as cleanAccountEmail, codeEmailFor } from "../utils/account-email.js";
 import User from "../models/User.js";
 import DemoRequest from "../models/DemoRequest.js";
 import Verification from "../models/Verification.js";
@@ -1721,7 +1721,8 @@ export const login = async (req, res) => {
 
                 try {
                     await sendEmail({
-                        to: user.email,
+                        // to the email the person signed in with (the screen names it), when it is one of the account's own
+                        to: codeEmailFor(user, email),
                         subject: "security alert: New Device Detected",
                         html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp, loginDetails) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
                         text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp, loginDetails) : `Your Classgrid verification code is: ${otp}`,
@@ -2713,7 +2714,8 @@ export const resendDeviceOtp = async (req, res) => {
 
         try {
             await sendEmail({
-                to: user.email,
+                // "Resend" goes to the same email the first code went to: the one typed on the sign-in screen
+                to: codeEmailFor(user, email),
                 subject: "Security Alert: New Device Detected",
                 html: getNewDeviceOtpHtml ? getNewDeviceOtpHtml(user.name, otp, loginDetails) : `<p>Your Classgrid verification code is: <strong>${otp}</strong></p>`,
                 text: getNewDeviceOtpPlainText ? getNewDeviceOtpPlainText(user.name, otp, loginDetails) : `Your Classgrid verification code is: ${otp}`,
@@ -2742,7 +2744,7 @@ export const verifyDeviceOtp = async (req, res) => {
             return res.status(400).json({ message: "Missing required fields." });
         }
 
-        // The code is kept under the account's main email (signing in with an added email sends it there too)
+        // The code is kept under the account's main email, whichever of the account's emails it was sent to
         const owner = await findByAnyEmail(User, email, "email");
         const ownerEmail = owner?.email || email.toLowerCase().trim();
         const verification = await DeviceVerification.findOne({
