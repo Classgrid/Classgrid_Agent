@@ -3,7 +3,7 @@
 "/" commands are short words you type at the start of a message to tell Classgrid AI what kind of job it is. For
 example, `/plan` means "plan first, then build", and `/compact` means "shrink this chat's memory now".
 
-They work in **Project Mode** and **Studio Mode**. Agent Mode does not have them.
+They work in **Project Mode** and **Studio Mode**. Agent Mode has two of them: `/artifact` and `/docs`.
 
 --------------------------------------------------------------------------------
 
@@ -39,6 +39,8 @@ You can also type the whole command yourself without the list, for example `/goa
 | `/classgrid-guide` | Answers from the Classgrid AI guide              | Project, Studio   |
 | `/studio-guide`    | Answers from the Studio Mode guide               | Project, Studio   |
 | `/project-guide`   | Answers from the Project Mode guide              | Project, Studio   |
+| `/artifact`      | Makes an HTML page that opens beside the chat    | Agent, Project, Studio |
+| `/docs`          | Writes a doc you keep editing, share and comment on | Agent, Project, Studio |
 | `/plan`          | Plans first, builds only after you approve       | Project, Studio   |
 | `/goal`          | Keeps working until the job is fully done        | Project, Studio   |
 | `/schedule`      | Makes a schedule or reminder                     | Project, Studio   |
@@ -87,6 +89,21 @@ You can also type the whole command yourself without the list, for example `/goa
     project-mode.md" in the chat.
 -   **Use it when:** your question is about Project Mode: the code editor, GitHub, pull requests, Vercel.
 -   **Example:** `/project-guide how do I connect GitHub?`
+
+### `/artifact`: make an HTML page
+
+-   **What happens:** the AI builds a web page in HTML (a report, dashboard, slides, form, mini app, layout or
+    mock-up) and publishes it at `chat.classgrid.in/p/<id>`. In Studio it opens beside the chat, and each change you
+    ask for shows there. It is never a picture: pictures inside the page are fine, the page itself is HTML.
+-   **Use it when:** you want something to look at, click or share, not a chat answer.
+-   **Example:** `/artifact a Play Store screenshot with our logo, a headline and this app screen in a phone`
+
+### `/docs`: write a doc
+
+-   **What happens:** the AI writes a live doc (headings, lists, tables, like Markdown or Word) at
+    `chat.classgrid.in/docs/<id>` that you keep editing, share and comment on. In Studio it opens beside the chat.
+-   **Use it when:** you want writing to keep: a plan, notes, a report, an essay, a draft.
+-   **Example:** `/docs a launch plan for the Play Store release`
 
 ### `/plan`: plan first, then build
 

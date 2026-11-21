@@ -32,7 +32,7 @@ how Classgrid works, read the page below that matches what the user is asking ab
         Remote PC screens (permission cards, Review, Files, Terminal, Details), the green / yellow / red dot, and the
         computer's Remote PC settings (tray, keep awake, start with Windows).
 -   **"/" commands**: [references/slash-commands.md](references/slash-commands.md)
-    -   The "/" commands in the Project Mode and Studio chat box (/classgrid-guide, /studio-guide, /project-guide, /plan, /goal, /schedule, /browser,
+    -   The "/" commands in the Project Mode and Studio chat box (/artifact and /docs in Agent Mode too) (/artifact, /docs, /classgrid-guide, /studio-guide, /project-guide, /plan, /goal, /schedule, /browser,
         /generative_ui, /grill-me, /plugin, /teamwork, /boost, /learn, /compact): what each does and how to use it.
 
 --------------------------------------------------------------------------------

@@ -2992,10 +2992,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const inCodeMode = typeof window !== "undefined" && window.location.pathname.split("/").some((p) => p === "studio" || p === "project");
   // The shield (Review, Default, Auto, Turbo): Studio and Project Mode, and every chat in the desktop app, where the AI works on the computer
   const showsPermissionMode = inCodeMode || (typeof window !== "undefined" && !!(window as any).classgridDesktop?.isDesktop);
-  // "/" commands (Project Mode and Studio only): typed at the very start of the message
-  const slashItems = slashCommandsFor(isStudio, slashMenuQuery);
+  // "/" commands (Project Mode and Studio; /artifact and /docs in Agent mode too): typed at the very start of the message
+  const slashItems = slashCommandsFor(isStudio, slashMenuQuery, inCodeMode);
   const updateSlashMenu = (val: string, cursor: number) => {
-    const m = inCodeMode ? /^\/(\S*)$/.exec(val.slice(0, cursor)) : null;
+    let m = /^\/(\S*)$/.exec(val.slice(0, cursor));
+    // (Agent mode has only a few commands: the menu opens only while one of them matches, not for any text after "/")
+    if (m && !inCodeMode && !slashCommandsFor(isStudio, m[1] || "", false).length) m = null;
     setSlashMenuOpen(!!m);
     if (m) { setSlashMenuQuery(m[1] || ""); setSlashMenuIndex(0); }
   };
@@ -5126,10 +5128,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             // (Studio's Project page, /c/studio/project, is the code editor: "project", as Project Mode was)
             return parts.includes("project") ? "project" : parts.includes("studio") ? "studio" : "agent";
           })(),
-          // A "/" command at the start of the message (Project Mode and Studio)
+          // A "/" command at the start of the message (Project Mode and Studio; /artifact and /docs in Agent mode too)
           command: (() => {
             const parts = window.location.pathname.split("/");
-            return parts.includes("studio") || parts.includes("project") ? leadingSlashCommand(question, parts.includes("studio") && !parts.includes("project")) : undefined;
+            const codeMode = parts.includes("studio") || parts.includes("project");
+            return leadingSlashCommand(question, parts.includes("studio") && !parts.includes("project"), codeMode);
           })(),
           // How hard the AI thinks (model menu): Fast, Normal or Deep
           effort: getThinkingLevel() === "normal" ? undefined : getThinkingLevel() === "fast" ? "low" : "high",

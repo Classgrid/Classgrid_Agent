@@ -113,7 +113,7 @@ import { APP_HISTORY_TOOLS, buildAppHistoryHandlers } from "../mcp/mcp-extra-too
 import { PLAN_INFO_TOOLS, buildPlanInfoHandlers } from "../services/plan-info-tools.js";
 import { SAVED_NOTE_TOOLS, buildSavedNoteHandlers, savedNotesOf, savedNotesBlock, SAVED_NOTES_GUIDE, notesFromChat } from "../services/ai-memory-notes.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
-import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runReadPage, runPageComments } from "../services/share-page.service.js";
+import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, ARTIFACT_DOC_NAMES, runPublishPage, runReadPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 import { isWebsite } from "../utils/client-app.js";
 import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
@@ -1724,7 +1724,15 @@ const cloudflareStreamProvider = (model, affinity) => ({
 const CHAT_TOUCHED = (email) => `ai:chatTouched:${String(email || "").toLowerCase()}`;
 export const touchChat = (email, sessionId) => { if (email && sessionId) redis.hset(CHAT_TOUCHED(email), String(sessionId), String(Date.now())).catch(() => {}); };
 
+// The commands the Agent mode chat box has too (client: SlashCommandMenu.tsx, anyMode)
+const ANY_MODE_COMMANDS = new Set(["artifact", "docs"]);
+// The tool group each of these needs, loaded for that message whatever its words (services/ai-tool-groups.js)
+const COMMAND_TOOL_GROUPS = { artifact: ["share_pages"], docs: ["live_docs"] };
+
 const SLASH_COMMAND_LINES = {
+    // (owner, 2026-11-21: what to make, by its name; also in Agent mode, ANY_MODE_COMMANDS)
+    artifact: `The user wants an ARTIFACT: a web page built in HTML. Make it with publish_page as one self-contained HTML file, written by you: never as a picture from generate_image, never only as code in the chat, never as a live doc. To change a page made before, send its page_id (read it first with read_page when its HTML is not in this chat). In Studio it opens beside the chat by itself. Put the link in your reply.`,
+    docs: `The user wants a DOC: writing they keep editing, share and comment on (headings, lists, tables, like Markdown or Word). Make it with create_doc (change an existing one with edit_doc, after read_doc). Not an HTML page, not a file, not a picture. Put the link in your reply.`,
     "classgrid-guide": `Answer from Classgrid AI's own guide: read .classgrid/classgrid_guide/SKILL.md with view_project_file, then the page in its references/ folder that matches the question, and answer from them.`,
     "studio-guide": `Answer from Classgrid AI's Studio Mode guide: read .classgrid/classgrid_guide/references/studio-mode.md with view_project_file and answer from it.`,
     "project-guide": `Answer from Classgrid AI's Project Mode guide: read .classgrid/classgrid_guide/references/project-mode.md with view_project_file and answer from it.`,
@@ -1791,8 +1799,9 @@ export const streamAskAi = async (req, res) => {
     if (!String(body.question || "").trim() && ((Array.isArray(body.attachments) && body.attachments.length > 0) || (Array.isArray(body.fileUrls) && body.fileUrls.length > 0))) {
         body.question = "Please analyze the attached file(s).";
     }
-    // A "/" command from the chat box (Project Mode and Studio only; the live browser is only in Studio)
-    const slashCommand = (body.appMode === "project" || body.appMode === "studio") && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
+    // A "/" command from the chat box (Project Mode and Studio; /artifact and /docs in Agent mode too; the live browser
+    // is only in Studio)
+    const slashCommand = (body.appMode === "project" || body.appMode === "studio" || ANY_MODE_COMMANDS.has(String(body.command || ""))) && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
     // How hard to think, picked in the model menu: Fast, Normal or Deep (/boost is Deep for one message)
     let thinking = slashCommand === "boost" ? "high" : ["low", "high"].includes(body.effort) ? body.effort : null;
     let compacted = false;
@@ -3562,6 +3571,8 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
 6. EDIT A WORD, EXCEL OR POWERPOINT FILE: To change an existing Word, Excel or PowerPoint file, use \`edit_office_file\` (set track_changes when the user wants to see the changes in Word).`);
         dynamicSystemPrompt += promptBlock("live_docs", LIVE_DOC_PROMPT);
         dynamicSystemPrompt += promptBlock("share_pages", SHARE_PAGE_PROMPT);
+        // (what "artifact" and "doc" mean: every chat, whatever tools are loaded)
+        dynamicSystemPrompt += ARTIFACT_DOC_NAMES;
 
         // Owner's rules for background tasks (WhatsApp, calls, email), 2026-10-24
         if (body.taskOrigin) dynamicSystemPrompt += `\n\nOWNER'S RULES FOR THIS TASK:
@@ -6591,7 +6602,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
             allTools: llmConfig.tools,
             text: [body.question || "", ...requestAttachments.map(a => a?.name || "")].join(" "),
             attachments: requestAttachments,
-            stickyGroupIds: [...Object.keys(stickyAged), ...(body.appMode === "studio" ? ["code_project"] : [])], // Studio: the project tools (and the Browser worker) are always there
+            stickyGroupIds: [...Object.keys(stickyAged), ...(body.appMode === "studio" ? ["code_project"] : []), ...(COMMAND_TOOL_GROUPS[slashCommand] || [])], // Studio: the project tools (and the Browser worker) are always there
             role: req.user?.role,
             email: req.user?.email,
             hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID,

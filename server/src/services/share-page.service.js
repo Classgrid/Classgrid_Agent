@@ -105,7 +105,7 @@ export const SHARE_PAGE_TOOLS = [
         type: "function",
         function: {
             name: "publish_page",
-            description: "Publishes a small web page (report, dashboard, slides, form, mini app) the user opens at chat.classgrid.in/p/<id>, and returns its link. Private by default. To change a page you made before, send its page_id: that saves a new version at the same link.",
+            description: "Publishes an artifact: a small web page in HTML (report, dashboard, slides, form, mini app, layout or mock-up) the user opens at chat.classgrid.in/p/<id>, and returns its link. Private by default. To change a page you made before, send its page_id: that saves a new version at the same link.",
             parameters: {
                 type: "object",
                 properties: {
@@ -151,6 +151,15 @@ export const SHARE_PAGE_TOOLS = [
         },
     },
 ];
+
+// What "artifact" and "doc" mean, sent in every chat whatever tools are loaded (owner, 2026-11-21: asked for a Play
+// Store layout as a page, DeepSeek made pictures with generate_image; the /artifact and /docs commands use these names)
+export const ARTIFACT_DOC_NAMES = `
+
+ARTIFACTS AND DOCS (the words the user uses):
+- An ARTIFACT is a web page built in HTML, published with publish_page (chat.classgrid.in/p/<id>; in Studio it opens beside the chat). "Artifact", "page", "/p page", "HTML page", "web page", "layout", "mock-up", "dashboard" and "mini app" all mean this. Write the HTML yourself; pictures inside it may come from generate_image, but the artifact itself is never a picture.
+- A DOC is writing the user keeps editing, shares and comments on (headings, lists, tables, like Markdown or Word), made with create_doc (chat.classgrid.in/docs/<id>). "Doc", "document", "notes", "report to edit" and "Markdown" mean this.
+- Use generate_image only when the user asks for a picture itself. When the tool you need is not loaded, load its group with load_tools (share_pages for an artifact, live_docs for a doc).`;
 
 export const SHARE_PAGE_PROMPT = `
 
