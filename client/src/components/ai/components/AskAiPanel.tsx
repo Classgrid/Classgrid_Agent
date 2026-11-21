@@ -7333,7 +7333,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </Breadcrumb>
               </header>
             )}
-            <div className={studioLook || isToolPage(sessionId) ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
+            {/* (Incognito: this row has nothing in it, so it is not drawn; it left an empty band above the chat) */}
+            <div className={studioLook || isIncognito || isToolPage(sessionId) ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
               {isIncognito || pageContext?.path === "/c/studio" ? <span /> : <SidebarTrigger />}
 
               {/* Ghost button on a new chat: start an incognito chat */}
@@ -7985,10 +7986,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             ) : (
               /* â”€â”€ Active conversation: messages scroll, input pinned at bottom â”€â”€ */
               <>
-                {/* (Studio: the messages and their scrollbar start below the chat's top bar, never behind it) */}
+                {/* (Studio: the messages and their scrollbar start below the chat's top bar, never behind it. Incognito
+                    in the desktop app has no such bar, so no room is left for one) */}
                 <div
                   ref={chatScrollRef}
-                  className={cn("flex-1 min-h-0 overflow-y-scroll overscroll-contain scroll-smooth chat-scrollbar [scrollbar-gutter:stable]", isStudio && variant === "full-page" && "mt-12")}
+                  className={cn("flex-1 min-h-0 overflow-y-scroll overscroll-contain scroll-smooth chat-scrollbar [scrollbar-gutter:stable]", studioLook && variant === "full-page" && "mt-12")}
                 >
                   {panelChat}
                 </div>
