@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import SharePage from "../models/SharePage.js";
 import User from "../models/User.js";
 import {
-    pageLink, isOwner, cleanTitle, checkHtml, checkVisibility, checkCommentText, checkDataWrite, dataEntries, COMMENTS_MAX,
+    pageLink, isOwner, canView, cleanTitle, checkHtml, checkVisibility, checkCommentText, checkDataWrite, dataEntries, COMMENTS_MAX,
     cleanQuote, pageForClient, copyPageTitle,
 } from "./share-page.helpers.js";
 import { profilesOf } from "./live-doc-share.service.js";
@@ -121,6 +121,21 @@ export const SHARE_PAGE_TOOLS = [
     {
         type: "function",
         function: {
+            name: "read_page",
+            description: "Reads a published page (chat.classgrid.in/p/<id>): its title, version and HTML. Use it before changing a page whose HTML is not in this chat (for example the page open beside the chat), then send the whole changed page to publish_page with its page_id. A long page comes in parts: call again with start set to the number given.",
+            parameters: {
+                type: "object",
+                properties: {
+                    page_id: { type: "string", description: "The page id (the part after /p/ in the link), or the link itself." },
+                    start: { type: "number", description: "Character to start reading from, for the next part of a long page (default 0)." },
+                },
+                required: ["page_id"],
+            },
+        },
+    },
+    {
+        type: "function",
+        function: {
             name: "page_comments",
             description: "Reads and answers comments on a page you published with publish_page. list = all comments, reply = answer a comment (or add a note when comment_id is empty), resolve = mark a comment done.",
             parameters: {
@@ -139,8 +154,8 @@ export const SHARE_PAGE_TOOLS = [
 
 export const SHARE_PAGE_PROMPT = `
 
-SHARE PAGES (publish_page, page_comments):
-1. WHEN: use publish_page for something the user will look at again or share and that is bigger than a chat answer: a report, dashboard, slides, a form, a tracker or a mini app. Short answers stay in the chat. To change a page you made, call publish_page with its page_id (same link, new version). Put the link in your reply.
+SHARE PAGES (publish_page, read_page, page_comments):
+1. WHEN: use publish_page for something the user will look at again or share and that is bigger than a chat answer: a report, dashboard, slides, a form, a tracker or a mini app. Short answers stay in the chat. To change a page you made, call publish_page with its page_id (same link, new version). When the page's HTML is not in this chat (the page open beside the chat, or one made in another chat), read it first with read_page, change only what was asked, and publish the whole page again with its page_id. Put the link in your reply.
 2. HOW: one self-contained HTML file: inline CSS and JS; outside scripts only from cdnjs.cloudflare.com, cdn.jsdelivr.net or unpkg.com with an exact version (e.g. chart.js@4.4.1). It must look good in light and dark mode (prefers-color-scheme), fit a phone screen, and use no login, cookies or localStorage for important data.
 3. SAVED DATA: the page can keep shared data (everyone who opens it sees the same): await window.classgrid.data.get(key), await window.classgrid.data.set(key, value) (value = any JSON, null deletes), await window.classgrid.data.list() (object of all keys). Keys: letters, numbers, _ - :. Max 200 keys and 500 KB in all. Use it for forms, polls, checklists and trackers. Use page_comments to read and answer comments people leave on the page.`;
 
@@ -169,6 +184,31 @@ export async function runPublishPage(user, args = {}) {
     }
     const page = await SharePage.create({ owner: user._id, title: cleanTitle(args.title), html: args.html, visibility: visibility || "private" });
     return `Published "${page.title}" (version 1, ${page.visibility === "link" ? "anyone signed in with the link can open it" : "private"}). page_id: ${page._id}\nLink: ${pageLink(page._id)}\nPut this link in your reply.`;
+}
+
+// How much of a page's HTML one read_page call gives (the chat keeps up to 100,000 characters of its result,
+// services/llm-stream.js and llm-stream-anthropic.js); a longer page is read in parts with `start`
+export const READ_PAGE_PART = 90000;
+
+/**
+ * read_page: the page's HTML, for the AI to change a page whose HTML is not in the chat (owner, 2026-11-21: the AI
+ * could not read the page open beside the chat, so it could change it only from a comment). Anyone who may open the
+ * page may have their AI read it; only the owner's AI can publish a new version (runPublishPage).
+ */
+export async function runReadPage(user, args = {}) {
+    if (!user?._id) return "FAILED: no signed-in user.";
+    const pageId = idFrom(args.page_id);
+    const page = await findPage(pageId, "owner title visibility linkRole members versions html updatedAt");
+    if (!page) return `FAILED: page ${pageId || "(empty)"} was not found.`;
+    if (!canView(page, user)) return "FAILED: this page is not shared with the user.";
+    const html = String(page.html || "");
+    const start = Math.max(0, Math.min(html.length, Math.floor(Number(args.start) || 0)));
+    const part = html.slice(start, start + READ_PAGE_PART);
+    const end = start + part.length;
+    const owner = isOwner(page, user._id);
+    const head = `Page "${page.title}" (version ${page.versions || 1}, page_id: ${page._id}${owner ? "" : ", shared with the user: only its owner can publish a new version"}). Link: ${pageLink(page._id)}`;
+    const range = html.length > READ_PAGE_PART || start > 0 ? `\nHTML characters ${start}-${end} of ${html.length}${end < html.length ? ` (more: call read_page again with start ${end})` : " (the end)"}:` : `\nHTML (${html.length} characters):`;
+    return `${head}${range}\n${part}`;
 }
 
 export async function runPageComments(user, args = {}) {

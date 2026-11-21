@@ -1,12 +1,23 @@
 // Chat step for publish_page: "Published <title>" and a small card with an Open button.
-import React from 'react';
+//
+// The page opens beside the chat, like a live doc (owner, 2026-11-21: Claude's artifacts open in a panel on the
+// right, and ours opened only from a comment): in Studio (the website's and the desktop app's) as a tab of the right
+// pane; from Agent mode the same chat opens in Studio with the page; Classgrid Code and the extension have no Studio,
+// so there it opens on the website. A page the AI publishes or updates while Studio is open comes up beside the chat
+// by itself (the tab then follows its new versions, SharePageView); one shown again from the chat's history does not.
+import React, { useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ExternalLink, Globe, Lock, PanelsTopLeft } from 'lucide-react';
 import { Spinner } from '@/components/marketing_ui/spinner';
+import { onStudio, openDocInStudio, studioDocPath } from '@/features/live-docs/docContext';
 import { ShimmerText } from './ShimmerText';
 
 type Step = { id: string; tool: string; status?: string; args?: any; result?: string };
 
+const IN_EDITOR = import.meta.env.VITE_EDITOR === '1';
+
 export function PublishedPageStep({ step }: { step: Step }) {
+  const navigate = useNavigate();
   const loading = step.status === 'loading';
   const result = String(step.result || '');
   const failed = step.status === 'error' || /^FAILED/i.test(result);
@@ -15,6 +26,18 @@ export function PublishedPageStep({ step }: { step: Step }) {
   const version = Number(result.match(/\(version (\d+)/)?.[1] || 0);
   const shared = /anyone signed in with the link/i.test(result);
   const updated = version > 1;
+
+  // Opened by itself only when this step was seen working (published now, in this chat), never from history
+  const sawWorking = useRef(loading);
+  const opened = useRef(false);
+  useEffect(() => {
+    if (loading) { sawWorking.current = true; return; }
+    if (!sawWorking.current || opened.current || failed || !pageId || IN_EDITOR || !onStudio()) return;
+    opened.current = true;
+    openDocInStudio(pageId, 'page');
+  }, [loading, failed, pageId]);
+
+  const buttonClass = 'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-slate-900 px-3 text-[12.5px] font-medium text-white hover:bg-slate-700 dark:bg-white dark:text-black dark:hover:bg-slate-200 transition-colors';
 
   return (
     <div className="relative z-10 flex flex-col">
@@ -44,9 +67,19 @@ export function PublishedPageStep({ step }: { step: Step }) {
               {shared ? 'Anyone with the link' : 'Only you'}{version > 1 ? ` · Version ${version}` : ''}
             </span>
           </span>
-          <a href={`/p/${pageId}`} target="_blank" rel="noreferrer" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-slate-900 px-3 text-[12.5px] font-medium text-white hover:bg-slate-700 dark:bg-white dark:text-black dark:hover:bg-slate-200 transition-colors">
-            <ExternalLink className="h-3.5 w-3.5" />Open
-          </a>
+          {IN_EDITOR ? (
+            <a href={`https://chat.classgrid.in/p/${pageId}`} target="_blank" rel="noreferrer" className={buttonClass}>
+              <ExternalLink className="h-3.5 w-3.5" />Open
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={() => (onStudio() ? openDocInStudio(pageId, 'page') : navigate(studioDocPath(pageId, undefined, 'page')))}
+              className={buttonClass}
+            >
+              <PanelsTopLeft className="h-3.5 w-3.5" />Open
+            </button>
+          )}
         </div>
       )}
     </div>

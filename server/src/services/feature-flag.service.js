@@ -380,7 +380,7 @@ export const FEATURE_FLAG_CATALOG = Object.freeze([
         message: "Published pages are turned off for now. Please try again later.",
         // routes/share-page.routes.js (all of /api/pages)
         routes: [route(ANY, /^\/api\/pages(\/|$)/)],
-        tools: ["publish_page", "page_comments"],
+        tools: ["publish_page", "read_page", "page_comments"],
     },
     {
         key: "shared_chats",

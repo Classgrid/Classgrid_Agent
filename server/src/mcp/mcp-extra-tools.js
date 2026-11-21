@@ -9,7 +9,7 @@
  *   chats:read     list_my_chats, read_my_chat, search_my_chats, read_recent_chats   (off until the user ticks it)
  *   docs:read      list_my_docs, read_doc
  *   docs:write     create_doc, edit_doc, doc_comments
- *   pages:write    publish_page, page_comments
+ *   pages:write    publish_page, read_page, page_comments
  *
  * Project code is read from GitHub only (owner's order, 2026-11-12): the project's repo on its default branch,
  * through the GitHub API with the Classgrid app's key for that repo (else the owner's GitHub key). Never from
@@ -27,7 +27,7 @@ import { githubUser } from "../services/github-token.service.js";
 import { githubAppReady, repoAppToken } from "../services/github-app.service.js";
 import { GUIDE_PROJECT_DIR } from "../services/classgrid-guide.service.js";
 import { LIVE_DOC_TOOLS, buildLiveDocHandlers } from "../services/live-doc-tools.js";
-import { SHARE_PAGE_TOOLS, runPublishPage, runPageComments } from "../services/share-page.service.js";
+import { SHARE_PAGE_TOOLS, runPublishPage, runReadPage, runPageComments } from "../services/share-page.service.js";
 import { getSessions, getSessionMessages } from "../services/ai-chat.service.js";
 import { senderLabels } from "../services/ai-chat-grid.service.js";
 import { primarySupabaseClient } from "../config/supabaseClient.js";
@@ -845,6 +845,7 @@ async function runDocOrPageTool(name, ctx, args) {
     const user = await tokenUser(ctx);
     if (!user) return { error: "Your Classgrid account was not found." };
     if (name === "publish_page") return runPublishPage(user, args);
+    if (name === "read_page") return runReadPage(user, args);
     if (name === "page_comments") return runPageComments(user, args);
     return buildLiveDocHandlers({ user })[name](args);
 }

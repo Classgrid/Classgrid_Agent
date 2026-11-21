@@ -166,7 +166,7 @@ export const TOOL_GROUPS = [
     {
         id: "share_pages",
         description: "Publish a web page (report, dashboard, slides, form, mini app) the user opens and shares at chat.classgrid.in/p/<id>, and read and answer its comments.",
-        tools: ["publish_page", "page_comments"],
+        tools: ["publish_page", "read_page", "page_comments"],
         pattern: /\b(pages?|web\s*page|dashboards?|share\w*|publish\w*|reports?|artifacts?|mini\s*apps?|tracker|comments?|visuali[sz]\w*|interactive)\b|पेज/i,
     },
     {

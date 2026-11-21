@@ -113,7 +113,7 @@ import { APP_HISTORY_TOOLS, buildAppHistoryHandlers } from "../mcp/mcp-extra-too
 import { PLAN_INFO_TOOLS, buildPlanInfoHandlers } from "../services/plan-info-tools.js";
 import { SAVED_NOTE_TOOLS, buildSavedNoteHandlers, savedNotesOf, savedNotesBlock, SAVED_NOTES_GUIDE, notesFromChat } from "../services/ai-memory-notes.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
-import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
+import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runReadPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 import { isWebsite } from "../utils/client-app.js";
 import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
@@ -4965,6 +4965,10 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     publish_page: async (args) => {
                         try { return await runPublishPage(req.user, args || {}); }
                         catch (e) { return `FAILED to publish the page: ${e.message}`; }
+                    },
+                    read_page: async (args) => {
+                        try { return await runReadPage(req.user, args || {}); }
+                        catch (e) { return `FAILED: ${e.message}`; }
                     },
                     page_comments: async (args) => {
                         try { return await runPageComments(req.user, args || {}); }
