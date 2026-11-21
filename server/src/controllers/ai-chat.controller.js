@@ -7429,7 +7429,12 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     // A Cloudflare model picked in the dropdown is tried first, with V4 Pro as its fallback;
                     // otherwise ("auto" or a failed Claude request) the Flash/Pro router decides.
                     const pickedCloudflareModel = CF_PICKER_MODELS.has(requestedModel) ? requestedModel : null;
-                    const routedModel = pickedCloudflareModel || pickChatModel(body);
+                    // A Claude model the person picked that could not answer (Anthropic refused the request, or it gave
+                    // nothing) is answered by DeepSeek, not by whatever "auto" would route this message to. Owner,
+                    // 2026-11-21: Anthropic's monthly limit was used up and his Opus messages were answered by GLM 5.3:
+                    // "use DeepSeek for it".
+                    const claudeGaveNothing = !streamed && CLAUDE_CHAT_MODELS.has(requestedModel);
+                    const routedModel = pickedCloudflareModel || (claudeGaveNothing ? CF_PRO_MODEL : pickChatModel(body));
                     const modelsToTry = streamed ? [] : routedModel === CF_PRO_MODEL ? [CF_PRO_MODEL] : [routedModel, CF_PRO_MODEL];
                     if (!streamed) rebuildPromptForCloudflare();
                     if (!streamed) console.log(`[AI-STREAM] ${pickedCloudflareModel ? "user selected" : "routed to"} ${routedModel}`);
