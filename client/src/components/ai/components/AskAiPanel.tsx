@@ -7426,7 +7426,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     </div>
                   </div>
                 </div>
-                <div className="shrink-0 !bg-[#fafafa] dark:!bg-[#000000] pt-2 sm:pt-0 pb-3 sm:pb-6 px-3 sm:px-4 md:px-8 max-w-4xl w-full mx-auto">
+                {/* Studio: no colour band behind the chat box (the light page showed one, the dark page does not) */}
+                <div className={cn("shrink-0 pt-2 sm:pt-0 pb-3 sm:pb-6 px-3 sm:px-4 md:px-8 max-w-4xl w-full mx-auto", studioLook ? "bg-transparent" : "!bg-[#fafafa] dark:!bg-[#000000]")}>
                   {panelInput}
                 </div>
               </>
@@ -7996,7 +7997,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 >
                   {panelChat}
                 </div>
-                <div className="shrink-0 !bg-[#fafafa] dark:!bg-[#000000] pt-2 sm:pt-0 pb-3 sm:pb-6 px-3 sm:px-4 md:px-8 max-w-4xl w-full mx-auto">
+                {/* Studio: no colour band behind the chat box (the light page showed one, the dark page does not) */}
+                <div className={cn("shrink-0 pt-2 sm:pt-0 pb-3 sm:pb-6 px-3 sm:px-4 md:px-8 max-w-4xl w-full mx-auto", studioLook ? "bg-transparent" : "!bg-[#fafafa] dark:!bg-[#000000]")}>
                   {panelInput}
                 </div>
               </>
