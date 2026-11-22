@@ -78,6 +78,24 @@ export function spillPastPool(meter, need = 1) {
 }
 
 /**
+ * A Claude answer on the plan's Claude credits is inside the plan's session limit and weekly limit too (owner,
+ * 2026-11-21: "session limit and weekly limit are for every model; the Claude limit is only a cap inside them").
+ * `poolLeft`: what is left of the plan's weekly Claude credits, or of Fable's share (undefined = no end to them).
+ * `planCheck`: the usage check of the person (hasEnoughTokens). One of:
+ *   { refuse: planCheck }             the session or the week is used up and the person has no credits
+ *   { onCredits: source, spendable }  the session or the week is used up: the person's credits pay for this answer
+ *   { room }                          what this answer may use of the plan: the smaller of what the Claude credits
+ *                                     and the session and week still have (undefined = no limit at all)
+ */
+export function claudeInsidePlan(poolLeft, planCheck) {
+    if (!planCheck?.allowed) return { refuse: planCheck || { allowed: false, reason: "Insufficient tokens." } };
+    if (planCheck.source !== "weekly_free") return { onCredits: planCheck.source, spendable: planCheck.spendable ?? planCheck.remaining };
+    const planLeft = planCheck.planLeft ?? planCheck.remaining;
+    const room = Math.min(poolLeft === undefined ? Infinity : poolLeft, planLeft === undefined ? Infinity : planLeft);
+    return { room: Number.isFinite(room) ? Math.max(1, room) : undefined };
+}
+
+/**
  * A Claude cost, split into what the plan's Claude credits still cover (`room`; undefined = no end to them) and what
  * is past them (paid from the person's credits).
  */

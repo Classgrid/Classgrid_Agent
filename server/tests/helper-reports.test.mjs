@@ -95,18 +95,36 @@ test("while the chat is answering nothing is sent: the report stays readable, an
     assert.equal(c4.notes.length, 1);
 });
 
-test("a background task is woken once all its helpers are done, and never from the end of its own run", async () => {
+test("a background task is woken for each helper that finishes, and never from the end of its own run", async () => {
     const board = { helpers: [helper(1, "a"), helper(2, "", { state: "running" })] };
     const c = chat({ task: true });
     await sendReports(c.opts(board));
-    assert.deepEqual(c.woken, [], "one helper still works");
+    // (until 2026-11-21 nothing happened here: the task was woken only when the last helper had finished, so on that
+    // day three of the owner's five helpers finished and his chat was not woken once)
+    assert.deepEqual(c.woken, ["task"], "woken for the first helper while the other still works");
+    board.helpers[0].reportTaken = true; // the task read it with check_helpers
     board.helpers[1].state = "done";
     await sendReports(c.opts(board));
-    assert.deepEqual(c.woken, ["task"]);
+    assert.deepEqual(c.woken, ["task", "task"], "and again for the second");
     assert.equal(c.notes.length, 0, "the task reads the reports itself with check_helpers");
-    assert.ok(board.helpers.every((h) => !h.reportTaken));
     await sendReports(c.opts(board, { answerEnded: true }));
-    assert.deepEqual(c.woken, ["task"], "the end of the task's own run does not wake it again");
+    assert.deepEqual(c.woken, ["task", "task"], "the end of the task's own run does not wake it again");
+});
+
+test("a background task that is answering is woken when that answer ends, not lost", async () => {
+    const board = { helpers: [helper(1, "a")] };
+    const c = chat({ task: true });
+    let busy = true;
+    let looks = 0;
+    await sendReports(c.opts(board, { answering: async () => { looks++; if (looks >= 3) busy = false; return busy; }, sleep: async () => {} }));
+    assert.ok(looks >= 3, "it waited for the answer to end");
+    assert.deepEqual(c.woken, ["task"]);
+    // a report the task read during that answer needs no wake
+    const c2 = chat({ task: true });
+    const board2 = { helpers: [helper(1, "a")] };
+    let n = 0;
+    await sendReports(c2.opts(board2, { answering: async () => { n++; if (n === 2) board2.helpers[0].reportTaken = true; return n < 3; }, sleep: async () => {} }));
+    assert.deepEqual(c2.woken, []);
 });
 
 test("a workflow's helpers and already read reports are left alone", async () => {

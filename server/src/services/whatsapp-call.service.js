@@ -38,7 +38,7 @@ import { planOf, isUnlimited } from "./plan-limits.service.js";
 import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
-import { hasEnoughTokens, deductTokens, planWording } from "./ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, planWording, chargeClaudeOnPlan } from "./ai-credits.service.js";
 import { callRefusedLimitText, callMinutesUsedUpText, callCountLimitText } from "./email-templates.service.js";
 import {
     callCountCaps, fullCallLimit, callsLineText, callTimesSince, callTaskCaps, callTaskRefusal, callTaskRefusedToolText,
@@ -101,12 +101,24 @@ export function callsBackAt(enough, free, nowMs = Date.now()) {
     return times.length ? new Date(Math.min(...times)) : null;
 }
 
-// Tokens for one model answer of the call: nothing while the call is within the caller's free minutes
+// Tokens for one model answer of the call, the same in and past the plan's call minutes. The session limit and the
+// weekly limit are for every model, the one that answers a call too (owner, 2026-11-21: "if the session limit is full,
+// how can the model write an answer on a call? Officially it must be counted"; then "fix it"). Until that day a call
+// inside the plan's call minutes cut no credits and was not checked against the limits at all: the minutes covered the
+// model as well as the voice. Now the minutes cover the voice of the call, and the model is counted like anywhere else.
+// A call is answered by a Claude model (CALL_MODEL), so on a plan that includes Claude its cost is charged the plan's way:
+// counted on the weekly Claude credits as well as the session window and the week (chargeClaudeOnPlan; owner,
+// 2026-11-21: "in calls we use Claude but the Claude limit is not taken off"). Until that day a call counted on the
+// session and the week only. With the plan's limits used up the person's credits pay (call.tokenSource), as before.
 function chargeCall(call, usage, model) {
-    const at = call.endedAt || Date.now();
-    if (call.freeUntil && at < call.freeUntil) return;
-    deductTokens(call.user._id, call.user.organization_id || null, chargeableTokens(usage, model), call.tokenSource, { label: { model, what: "WhatsApp call" } })
-        .catch((e) => console.error("[WA call] token charge failed:", e.message));
+    const cost = chargeableTokens(usage, model);
+    const orgId = call.user.organization_id || null;
+    const label = { model, what: "WhatsApp call" };
+    (async () => {
+        const plan = call.tokenSource === "weekly_free" && /^claude-/.test(String(model)) ? await planOf(call.user).catch(() => null) : null;
+        if (plan && Number(plan.claude_credits_per_week) !== 0) await chargeClaudeOnPlan(call.user._id, orgId, cost, { fable: /^claude-fable-/.test(String(model)), label });
+        else await deductTokens(call.user._id, orgId, cost, call.tokenSource, { label });
+    })().catch((e) => console.error("[WA call] token charge failed:", e.message));
 }
 
 // The calls this number had in the last 24 h: how many, and when each was answered (ms, oldest first)
@@ -406,7 +418,12 @@ async function runProjectTool(call, tool) {
         const name = String(tool.input?.name || "").trim().slice(0, 80);
         if (!name) return "No name was given.";
         if (await findProject(call.user, name, { withLocal: true })) return `A project called "${name}" already exists.`;
-        await IdeProject.create({ owner: call.user._id, name });
+        // (2026-11-21, owner: "fix all") A project made on a call is a cloud project, so it counts toward the plan's
+        // number of projects (projects_max) like one made in the app; before, a call could make any number. With no
+        // room on the plan nothing is made and the AI is told why in one sentence, so it tells the caller.
+        const { makeCloudProject, cloudProjectLimitForAi } = await import("./plan-limits.service.js");
+        const made = await makeCloudProject(call.user, { name });
+        if (!made.ok) return cloudProjectLimitForAi(made);
         return `Project "${name}" was created.`;
     }
     return "Unknown tool.";
@@ -758,7 +775,8 @@ function timeUp(call) {
         if (call.ended) return;
         const talking = call.speech.active || call.busy || aiIsTalking(call);
         if (talking && Date.now() < limit) call.hardStop = setTimeout(check, 500);
-        else endCall(call.id, call.freeUntil && maxMs <= Math.max(10000, call.freeUntil - call.startedAt) + 1000 && !call.paidOk ? "free minutes used" : "time limit");
+        // (ended because the period's call minutes ran out, not because of the longest call: the caller is told so)
+        else endCall(call.id, call.freeUntil && maxMs <= Math.max(10000, call.freeUntil - call.startedAt) + 1000 ? "free minutes used" : "time limit");
     };
     check();
 }
@@ -1443,16 +1461,31 @@ export async function handleCallsWebhook(value) {
                 await sendWhatsappText(from, "This WhatsApp number is not linked to a Classgrid account. Sign in to Classgrid (the phone app, the desktop app or https://chat.classgrid.in), verify this number in Settings, then call again.");
                 continue;
             }
-            // Free call minutes first (Global AI Config, "Voice Calls"); past them, the same credit check as the chat
-            // (a call within the free minutes costs no tokens; a paid call is charged per turn)
-            const free = await freeCallSeconds(user).catch(() => ({ left: 0, limitMinutes: 0, resetAt: null }));
+            // The same credit check as the chat, for every call: the model that answers a call is counted on the
+            // session and the week like any model (see chargeCall), so with those used up and no credits a call is
+            // not taken, call minutes left or not. (Until 2026-11-21 a call inside the plan's call minutes was taken
+            // and answered with the session at 100 percent.) The call minutes still say how long the calls of the
+            // month may be in all.
+            const free = await freeCallSeconds(user).catch(() => null);
             const enough = await hasEnoughTokens(user._id, user.organization_id || null, 1).catch(() => null);
-            if (!enough?.allowed && free.left <= 0) {
+            if (!enough?.allowed || !free) {
                 await callAction(c.id, "reject").catch(() => {});
                 const { plan, paidNames } = await planWording(user).catch(() => ({ plan: null, paidNames: [] }));
-                await sendWhatsappText(from, /insufficient/i.test(enough?.reason || "")
-                    ? callRefusedLimitText({ plan, paidNames, backAt: callsBackAt(enough, free) })
+                await sendWhatsappText(from, enough && /insufficient/i.test(enough.reason || "")
+                    ? callRefusedLimitText({ plan, paidNames, backAt: callsBackAt(enough, null) })
                     : "Classgrid AI can't take calls for your account right now. Please try again later.");
+                continue;
+            }
+            // The plan's call minutes are a real limit (owner, 2026-11-21: "you are not cutting the minutes talked from
+            // the total minutes, so all the WhatsApp limits are fake"). The minutes were counted, but they stopped
+            // nobody: a caller with credit left in the session could call on after the period's minutes were used up
+            // (they only decided when credits began to be cut). Now no call is taken once the period's minutes are
+            // used up, and a call ends when they run out (maxMs below). (The minutes that could not be read: no call,
+            // above.)
+            if (free.left <= 0) {
+                await callAction(c.id, "reject").catch(() => {});
+                const { plan, paidNames } = await planWording(user).catch(() => ({ plan: null, paidNames: [] }));
+                await sendWhatsappText(from, callMinutesUsedUpText({ plan, paidNames, backAt: free.resetAt }));
                 continue;
             }
             // Calls per day, week and month (owner, 2026-11-17: each can be set, a call is taken only when every set
@@ -1478,12 +1511,12 @@ export async function handleCallsWebhook(value) {
             // The plan's limits for tasks from this call: how many it may start, how many may run at once, and the
             // minutes of work each may use (call-limits.service.js)
             const taskCaps = callTaskCaps(callPlan);
-            // With no tokens to pay with, the call ends when the free minutes do
-            const maxMs = enough?.allowed ? planMaxMs : Math.min(planMaxMs, Math.max(10000, free.left * 1000));
+            // A call ends at the plan's longest call or when the period's call minutes run out, whichever is first
+            const maxMs = Math.min(planMaxMs, Math.max(10000, free.left * 1000));
             const freeUntil = free.left > 0 ? Date.now() + free.left * 1000 : 0;
             markBusy(number, maxMs / 1000 + 120);
             const callsLine = callsLineText(countCaps, callTimes);
-            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: enough?.allowed ? null : callsBackAt(enough, free), taskCaps, taskLimitsLine: callTaskLimitsLine(taskCaps, callPlan) });
+            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: free.resetAt, taskCaps, taskLimitsLine: callTaskLimitsLine(taskCaps, callPlan) });
             if (answered) redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);

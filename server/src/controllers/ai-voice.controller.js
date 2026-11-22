@@ -75,20 +75,20 @@ import redis from "../config/redis.js";
 import { createSession, saveMessage, getSessionById, chatsStartedSince, memoryText } from "../services/ai-chat.service.js";
 import { getHistory, appendToHistory } from "../services/ai-chat-history.service.js";
 import { canAccessSession, gridLabelMap } from "../services/ai-chat-grid.service.js";
-import { hasEnoughTokens, deductTokens } from "../services/ai-credits.service.js";
+import { hasEnoughTokens, deductTokens, chargeClaudeOnPlan, creditsAvailable } from "../services/ai-credits.service.js";
 import { chargeableTokens } from "../services/ai-token-pricing.js";
 import { planOf } from "../services/plan-limits.service.js";
 import { textToSpeech, elevenLabsEnabled, TTS_MODEL } from "../services/elevenlabs.service.js";
 import { voiceIdFor } from "../services/voice-choices.js";
 import { isWebsite } from "../utils/client-app.js";
-import { spokenText, voiceReplyGate, countVoiceReply } from "./ai-speak.controller.js";
+import { spokenText, voiceReplyGate, countVoiceReply, chargeSpeech } from "./ai-speak.controller.js";
 import { generateSessionTitle, touchChat, TITLE_REFRESH_EVERY, CF_PICKER_MODELS, MODEL_DISPLAY_NAMES } from "./ai-chat.controller.js";
 import { fallbackVoiceAnswer, claudeVoiceAnswer, runAgentTask, ASK_CLASSGRID_TOOL, FALLBACK_MODEL } from "../services/whatsapp-call.service.js";
 import { CLAUDE_CHAT_MODELS } from "../services/llm-stream-anthropic.js";
 import { disabledModels, fableAccess, isFableModel } from "../services/model-access.service.js";
 import { voiceModelRefusal } from "../services/voice-model.service.js";
 import { weekCounters } from "../services/ai-credits.service.js";
-import { voiceInputAllowed, countVoiceInput, pcmToWav, voiceGapSeconds, setVoiceClock } from "../services/voice-input-limit.service.js";
+import { voiceInputAllowed, countVoiceInput, chargeListening, pcmToWav, voiceGapSeconds, setVoiceClock } from "../services/voice-input-limit.service.js";
 import { transcribeAudioDetailed } from "../services/ai/voice.service.js";
 import { spokenWords } from "../services/voice-heard.js";
 import SystemLog from "../models/SystemLog.js";
@@ -283,6 +283,7 @@ export const voiceTurn = async (req, res) => {
             if (text === null) { noteNotAnswered("speech_to_text_failed"); return refusal(res, 503, "I couldn't hear that just now. Say it again.", "speech_to_text_failed"); }
             // The seconds that were listened to count on the day's voice input minutes, words or not
             countVoiceInput(user, inputGate, audioSeconds);
+            chargeListening(user, inputGate, audioSeconds); // (the sound that went to speech-to-text, as credits)
             if (!text || NO_WORDS.test(text)) { noteNotAnswered("nothing_said"); return refusal(res, 400, "I didn't catch that. Say it again.", "nothing_said"); }
             heard = text;
         }
@@ -292,13 +293,20 @@ export const voiceTurn = async (req, res) => {
     }
     // The picked model (the voice dropdown): one the chat picker has and the super admin has not turned off, else
     // Auto's GLM 5.3 (alone, no backup). A Claude model on a plan with Claude counts on the plan's Claude credits
-    // (and Fable's share), not the credits, as in a typed chat.
+    // (and Fable's share) and on the session window and the week, as in a typed chat (owner, 2026-11-21: the session
+    // limit and the weekly limit are for every model; the Claude limit is only a cap inside them).
     const picked = isVoiceModel(askedModel) && !(offModels || []).includes(askedModel) ? askedModel : "";
     // Cloudflare's free Neurons of the day are used up (the cap switch is on): Claude Haiku answers in place of a
     // Cloudflare model (services/cap-fallback.service.js). The system's choice, so it is counted on the person's
     // normal limits, never on the plan's weekly Claude credits.
     let claudeByCap = false;
-    const claudePooled = (model) => !claudeByCap && !!plan && CLAUDE_CHAT_MODELS.has(model) && Number(plan.claude_credits_per_week) !== 0;
+    // The plan's weekly Claude credits (or Fable's share) are used up and the person has credits: they pay for this
+    // turn, as in a typed chat (owner, 2026-11-17: "Claude and Fable take from credits when their limit is over";
+    // until 2026-11-21 a voice turn was refused here even with credits)
+    let claudeCredits = null;
+    // (with the session window or the week used up, `check` allows the turn only on the person's credits: then they
+    // pay for it and nothing is counted on the plan)
+    const claudePooled = (model) => !claudeByCap && !claudeCredits && !!plan && CLAUDE_CHAT_MODELS.has(model) && Number(plan.claude_credits_per_week) !== 0 && check?.source === "weekly_free";
     if (picked) {
         const claudeLimited = !!plan && CLAUDE_CHAT_MODELS.has(picked) && Number(plan.claude_credits_per_week) > 0;
         const counters = claudeLimited ? await weekCounters(userId, user.ai_tokens).catch(() => null) : null;
@@ -311,10 +319,14 @@ export const voiceTurn = async (req, res) => {
             counters,
             refillText: counters?.weekEnd ? counters.weekEnd.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }) : "",
         });
-        if (refusedModel) return refusal(res, refusedModel.status, refusedModel.message, refusedModel.code, { plan: refusedModel.plan });
+        if (refusedModel?.code === "claude_cap_reached") {
+            const credits = await creditsAvailable(userId).catch(() => null);
+            if (credits?.source && credits.total > 0) claudeCredits = credits;
+        }
+        if (refusedModel && !claudeCredits) return refusal(res, refusedModel.status, refusedModel.message, refusedModel.code, { plan: refusedModel.plan });
     }
-    // (a Claude model on the plan's Claude credits was checked just above: the other credits do not stop it)
-    if (!check.allowed && !(picked && claudePooled(picked))) {
+    // (the session window and the week stop every model, a Claude model too)
+    if (!check.allowed) {
         const row = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
         // When the limit comes back: the check says which limit ran out (the session window, or the week), as in the chat
         const backAt = check.resetAt || row?.ai_tokens?.week_reset_date || null;
@@ -322,7 +334,7 @@ export const voiceTurn = async (req, res) => {
         const out = check.reason === "Insufficient tokens.";
         return refusal(res, 429, out ? await limitUsedText(user, backAt) : String(check.reason || "Classgrid AI is not available for your account right now."), out ? "ai_quota_exceeded" : "ai_blocked", { resetDate: resetDate.toISOString() });
     }
-    const tokenSource = check.source;
+    const tokenSource = claudeCredits ? claudeCredits.source : check.source;
     if (!isNew) {
         if (!session) return refusal(res, 404, "This chat was not found.", "chat_not_found");
         if (!userEmail || !(await canAccessSession(session, userEmail))) {
@@ -469,8 +481,9 @@ export const voiceTurn = async (req, res) => {
         used.credits += credits;
         used.model = model;
         if (credits > 0 && claudePooled(model)) {
-            // A Claude answer on a plan with Claude: the plan's weekly Claude credits (and Fable's share), as in a chat
-            User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": credits, ...(isFableModel(model) ? { "ai_tokens.fable_week_used": credits } : {}) } })
+            // A Claude answer on a plan with Claude: the plan's weekly Claude credits (and Fable's share), the session
+            // window and the week, together, as in a chat
+            chargeClaudeOnPlan(userId, orgId, credits, { fable: isFableModel(model), label: { model, what: "Chat" } })
                 .catch((e) => console.error("[voice turn] Claude week count failed:", e.message));
         } else if (credits > 0) {
             deductTokens(userId, orgId, credits, tokenSource, { label: { model, what: "Chat" } }).then(async (r) => {
@@ -584,6 +597,7 @@ export const voiceTurn = async (req, res) => {
         touchChat(userEmail, sessionId);
         const spoke = turn.spoken.sentences > 0;
         if (spoke) countVoiceReply(user, gate);
+        if (spoke) chargeSpeech(user, gate, turn.spoken.characters); // (the characters that were voiced, as credits)
         // The whole turn counts on the day's voice minutes (the user's own words were counted when heard): the quiet
         // time before it, and from the moment it arrived until its reading ends on the phone (the reading starts with
         // the first voice and lasts as long as the sound sent, which can outlast the stream)

@@ -37,11 +37,33 @@ import { sendEmail } from "../../services/aws-ses.service.js";
 import { parseResetPeriodInput } from "../../services/ai-feature-limits.js";
 import { getAiCreditGrantedHtml, getAiCreditGrantedPlainText, getSuperAdminSecurityOtpHtml, getSuperAdminSecurityOtpPlainText, USAGE_URL } from "../../services/email-templates.service.js";
 import { planOf } from "../../services/plan-limits.service.js";
+import { takeFromGifted, lowerGiftedTotal } from "../../services/ai-credits.service.js";
+import { addToPool, giftInForce } from "../../services/credit-expiry.js";
 
 /**
  * PHASE 9: Super Admin AI Credits Admin Controller
  * Handles mutations: Blocking, Unblocking, Resetting limits, Granting credits.
  */
+
+// Puts a gift of credits on a person's gifted balance. Used by every gift made here: to one person (grantCredits; the
+// server has no other route for gifting many people at once, each person's gift comes through it) and to an
+// organization's owner (grantOrgCredits).
+// 2026-11-21 (owner: "fix all"): the gifted credits have ONE end date for the whole balance. Before, every gift did
+// `$inc` on the stored balance and wrote the new end date over the old one, so gifted credits that had already expired
+// (they count as 0 everywhere, but the stored number stayed) came back to life with the new gift. Now
+// (services/credit-expiry.js):
+//   - the stored end date has passed when the gift is made: the old balance is gone and the balance becomes exactly
+//     the new gift
+//   - not expired: as before, the gift is added to the balance
+// In both cases the start and end dates are the ones the super admin chose for this gift, and "gifted in all" goes up
+// by the gift, as before. The end date is checked inside the database update itself, so an answer charging the
+// balance at the same moment is not lost.
+// Returns { user, expired, refused }: user = the person after the gift (null: not found), refused = not an amount.
+const giveGift = (userId, amount, startDate, endDate) => addToPool(User, userId, "gifted", amount, {
+    now: new Date(),
+    startDate: new Date(startDate),
+    endDate: new Date(endDate),
+});
 
 
 export const blockAiUser = async (req, res) => {
@@ -174,22 +196,14 @@ export const grantCredits = async (req, res) => {
             return res.status(400).json({ success: false, error: "Invalid amount" });
         }
 
-        const updateObj = {
-            $inc: {
-                "ai_tokens.promotion_credits_balance": amount,
-                "ai_tokens.total_promotion_credits_granted": amount
-            },
-            $set: {}
-        };
-
         if (!startDate || !endDate) {
             return res.status(400).json({ success: false, error: "Both start date and expiry date are strictly required." });
         }
 
-        updateObj.$set["ai_tokens.promotion_credits_start_date"] = new Date(startDate);
-        updateObj.$set["ai_tokens.promotion_credits_end_date"] = new Date(endDate);
-
-        const user = await User.findByIdAndUpdate(userId, updateObj, { returnDocument: 'after' });
+        // The gift goes on the balance by the rule in services/credit-expiry.js (see giveGift above)
+        const gift = await giveGift(userId, amount, startDate, endDate);
+        if (gift.refused) return res.status(400).json({ success: false, error: "Invalid amount" });
+        const user = gift.user;
 
         if (!user) return res.status(404).json({ success: false, error: "User not found" });
 
@@ -293,22 +307,15 @@ export const grantOrgCredits = async (req, res) => {
 
         if (!user) return res.status(404).json({ success: false, error: "No owner or admin found for this organization to receive credits." });
 
-        const updateObj = {
-            $inc: {
-                "ai_tokens.promotion_credits_balance": amount,
-                "ai_tokens.total_promotion_credits_granted": amount
-            },
-            $set: {}
-        };
-
         if (!startDate || !endDate) {
             return res.status(400).json({ success: false, error: "Both start date and expiry date are strictly required." });
         }
 
-        updateObj.$set["ai_tokens.promotion_credits_start_date"] = new Date(startDate);
-        updateObj.$set["ai_tokens.promotion_credits_end_date"] = new Date(endDate);
-
-        user = await User.findByIdAndUpdate(user._id, updateObj, { returnDocument: 'after' });
+        // The gift goes on the balance by the rule in services/credit-expiry.js (see giveGift above)
+        const gift = await giveGift(user._id, amount, startDate, endDate);
+        if (gift.refused) return res.status(400).json({ success: false, error: "Invalid amount" });
+        user = gift.user;
+        if (!user) return res.status(404).json({ success: false, error: "No owner or admin found for this organization to receive credits." });
 
         // Record the transaction
         await AiCreditTransaction.create({
@@ -637,16 +644,18 @@ export const removeGrantedCredits = async (req, res) => {
             return res.status(400).json({ success: false, error: "Transaction not found or already revoked" });
         }
 
+        // (a paused gift was already taken off the balance when it was paused: removing it takes nothing more.
+        // Before 2026-11-21 it was subtracted a second time)
+        const wasPaused = txn.status === "paused";
         txn.status = "revoked";
         await txn.save();
 
         const User = (await import("../../models/User.js")).default;
-        const user = await User.findByIdAndUpdate(userId, {
-            $inc: {
-                "ai_tokens.promotion_credits_balance": -(txn.credits_added || 0),
-                "ai_tokens.total_promotion_credits_granted": -(txn.credits_added || 0)
-            }
-        }, { returnDocument: 'after' });
+        if (!wasPaused) {
+            await takeFromGifted(userId, txn.credits_added);
+            await lowerGiftedTotal(userId, txn.credits_added);
+        }
+        const user = await User.findById(userId);
 
         await AiCreditTransaction.create({
             userId: user._id,
@@ -710,14 +719,14 @@ export const pauseGrantedCredits = async (req, res) => {
         const user = await User.findById(userId);
 
         if (isPaused && txn.status !== "paused") {
+            // What is left of the gift is held back (never more than the balance holds), and that number is kept
+            // with the gift, so Resume gives back exactly what Pause took
+            const held = await takeFromGifted(userId, txn.credits_added);
+            await lowerGiftedTotal(userId, txn.credits_added);
             txn.status = "paused";
+            txn.metadata = { ...(txn.metadata || {}), held };
+            txn.markModified("metadata");
             await txn.save();
-            await User.findByIdAndUpdate(userId, {
-                $inc: {
-                    "ai_tokens.promotion_credits_balance": -(txn.credits_added || 0),
-                    "ai_tokens.total_promotion_credits_granted": -(txn.credits_added || 0)
-                }
-            });
             await AiCreditTransaction.create({
                 userId: user._id,
                 orgId: user.organization_id || null,
@@ -733,11 +742,14 @@ export const pauseGrantedCredits = async (req, res) => {
                 }
             });
         } else if (!isPaused && txn.status === "paused") {
+            // (a gift paused before 2026-11-21 has no `held`: the whole gift was subtracted then, so the whole comes back)
+            const kept = Number(txn.metadata?.held);
+            const back = Number.isFinite(kept) && kept >= 0 ? kept : (txn.credits_added || 0);
             txn.status = "success";
             await txn.save();
             await User.findByIdAndUpdate(userId, {
                 $inc: {
-                    "ai_tokens.promotion_credits_balance": (txn.credits_added || 0),
+                    "ai_tokens.promotion_credits_balance": back,
                     "ai_tokens.total_promotion_credits_granted": (txn.credits_added || 0)
                 }
             });
@@ -806,16 +818,26 @@ export const extendGrantedCredits = async (req, res) => {
 
         const oldEndDate = oldUser.ai_tokens?.promotion_credits_end_date;
 
+        // 2026-11-21 (owner: "fix all"): Extend only moves the end date of gifts that are in force. Before, it wrote
+        // status "active" on the person's newest gift whatever that gift was, so a gift that had been removed
+        // (revoked) or paused was marked as in force again, and the person page (getUserAiDetail in
+        // ai-usage-users.controller.js, which works the balance out again from the gifts in force) then put that whole
+        // gift back on the balance. Now the gifts are only read here: no gift's status is changed, and nothing is added
+        // to the balance. A person whose gifts are all removed or paused has nothing to extend, and the end date
+        // stays as it is. (An older account with gifted credits and no gift rows at all is extended as before.)
+        const AiCreditTransaction = (await import("../../models/AiCreditTransaction.js")).default;
+        const gifts = await AiCreditTransaction.find({ userId: oldUser._id, type: "grant" })
+            .sort({ createdAt: -1 })
+            .select("_id status")
+            .lean();
+        const txn = gifts.find((g) => giftInForce(g.status)) || null; // (the newest gift in force: the extend row points at it)
+        if (gifts.length > 0 && !txn) {
+            return res.status(400).json({ success: false, error: "No active granted credits to extend" });
+        }
+
         const user = await User.findByIdAndUpdate(userId, {
             $set: { "ai_tokens.promotion_credits_end_date": new Date(endDate) }
         }, { returnDocument: 'after' });
-
-        const AiCreditTransaction = (await import("../../models/AiCreditTransaction.js")).default;
-        const txn = await AiCreditTransaction.findOneAndUpdate(
-            { userId: user._id, type: "grant" },
-            { $set: { status: "active" } },
-            { sort: { createdAt: -1 }, returnDocument: "after" }
-        );
 
         await AiCreditTransaction.create({
             userId: user._id,

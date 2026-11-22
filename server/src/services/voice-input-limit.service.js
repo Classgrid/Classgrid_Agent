@@ -5,6 +5,8 @@
 import { planOf } from "./plan-limits.service.js";
 import { usedToday, addToday, nextDayText } from "./plan-usage.service.js";
 import { canPayExtra, chargeExtra, extraOfferText } from "./extra-usage.service.js";
+import { deductTokens } from "./ai-credits.service.js";
+import { listenCredits } from "./ai-token-pricing.js";
 import redis from "../config/redis.js";
 
 /** { allowed: true, extra?, price? } or { allowed: false, error } */
@@ -25,6 +27,20 @@ export async function voiceInputAllowed(user) {
 export function countVoiceInput(user, gate, seconds) {
     addToday(String(user._id), "voiceinput", seconds).catch(() => {});
     if (gate?.extra) chargeExtra(user, "voiceinput", Math.max(1, Math.ceil((Number(seconds) || 0) / 60)), gate.price).catch(() => {});
+}
+
+/**
+ * The seconds of sound that were really turned into text are cut as credits, like a model's answer: counted on the
+ * session and the week, and past them on the person's credits (ai-token-pricing.js listenCredits). Only for sound
+ * that went to speech-to-text, not for the quiet time voice mode also counts on the day's minutes. Not for extra
+ * minutes past the day's number: those have their own fixed price (countVoiceInput). Never waited for.
+ */
+export function chargeListening(user, gate, seconds) {
+    if (!user?._id || gate?.extra) return;
+    const credits = listenCredits(seconds);
+    if (!(credits > 0)) return;
+    deductTokens(user._id, user.organization_id || null, credits, "weekly_free", { label: { model: "Classgrid Speech", what: "Voice input" } })
+        .catch((e) => console.error("[voice input] the listening's credits could not be cut:", e.message));
 }
 
 // Voice mode counts the whole time it is in use, like a call (owner, 2026-11-15: "talked 45 minutes, it shows 1%";

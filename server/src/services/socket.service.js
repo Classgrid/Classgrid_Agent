@@ -535,10 +535,14 @@ export const initSocket = (server, { path } = {}) => {
             console.log(`🍔 User ${socket.userId} joined CANTEEN KDS room: ${roomName}`);
         });
 
-        socket.on("disconnect", async () => {
+        // (why it ended is written down, and whether it was a desktop app's runner connection: on 2026-11-21 the app's
+        // connection was dropped several times while helpers worked and the log could not say by whom)
+        socket.on("disconnect", async (reason) => {
             accessLogger.info(`🔌 Socket disconnected: ${socket.userId}`, {
                 provider: 'socket',
                 event: 'disconnect',
+                reason: String(reason || ""),
+                runner: socket.handshake?.auth?.runner === true,
                 userId: socket.userId,
                 orgId: orgId,
                 ip: socket.handshake.address

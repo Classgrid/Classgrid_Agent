@@ -131,7 +131,7 @@ export const MCP_SCOPES = Object.freeze([
         scope: "pages:write",
         label: "Publish pages and answer their comments",
         sensitive: true,
-        tools: ["publish_page", "page_comments"],
+        tools: ["publish_page", "read_page", "page_comments"],
     },
     {
         scope: OFFLINE_ACCESS_SCOPE,

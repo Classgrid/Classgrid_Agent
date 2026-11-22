@@ -53,7 +53,7 @@ export function SettingsUsageSection() {
         <h2 className="text-xl font-semibold text-foreground">Usage</h2>
         <Skeleton className="h-4 w-72 rounded mt-3" />
         <div className="rounded-xl border border-border bg-card mt-5">
-          {row("Session limit", "w-96")}{row("Mid models limit", "w-80")}{row("Claude limit", "w-72")}{row("Fable limit", "w-80")}
+          {row("Session limit", "w-96")}{row("Weekly limit", "w-80")}{row("Claude limit", "w-72")}{row("Fable limit", "w-80")}
         </div>
         <div className="text-[13px] font-semibold text-foreground mt-7 mb-2">WhatsApp and voice</div>
         <div className="rounded-xl border border-border bg-card">
@@ -74,8 +74,11 @@ export function SettingsUsageSection() {
       {weekEnd && <p className="text-[15px] text-foreground mt-2">Your weekly limit resets {whenText(weekEnd)}.</p>}
 
       <div className="rounded-xl border border-border bg-card mt-5">
-        {u.credits_window && <Bar name="Session limit" m={u.credits_window} line={`Mid models (DeepSeek, GLM and others) · ${u.credits_window.periodText || "5 hours"} from your first message · ${u.credits_window.resetAt ? `Resets ${inText(u.credits_window.resetAt)}` : ""}`} />}
-        {u.credits_week && <Bar name="Mid models limit" m={u.credits_week} line={`DeepSeek, GLM and other models · Weekly · ${weekLine}`} />}
+        {u.credits_window && <Bar name="Session limit" m={u.credits_window} line={`All models · ${u.credits_window.periodText || "5 hours"} from your first message · ${u.credits_window.resetAt ? `Resets ${inText(u.credits_window.resetAt)}` : ""}`} />}
+        {/* The session limit and the weekly limit count every model, Claude and Fable too (owner, 2026-11-21: "session
+            limit and weekly limit are for all"; the server counts a Claude answer on both since that day). The Claude
+            and Fable bars under them are caps inside these two. */}
+        {u.credits_week && <Bar name="Weekly limit" m={u.credits_week} line={`All models · Weekly · ${weekLine}`} />}
         {u.claude_week && <Bar name="Claude limit" m={u.claude_week} line={`Sonnet, Opus and Haiku · Weekly · ${weekLine}`} />}
         {u.fable_week && <Bar name="Fable limit" m={u.fable_week} line={`Up to ${data.plan.limits?.fable_share_percent ?? 50}% of your Claude limit · Weekly · ${weekLine}`} />}
       </div>

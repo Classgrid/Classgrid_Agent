@@ -42,7 +42,8 @@ export async function canPayExtra(user, kind, count = 1) {
     const total = price * Math.max(1, Math.ceil(count));
     const credits = await creditsAvailable(user._id).catch(() => null);
     if (!credits || credits.total < total) return { allowed: false, price, total, reason: "no_credits", remaining: credits?.total || 0 };
-    return { allowed: true, price, total };
+    // (source: the credit pool that pays first, for the caller that charges later itself)
+    return { allowed: true, price, total, source: credits.source || "personal" };
 }
 
 /** Takes the price of `count` extra `kind` from the top-up credits (never spilling into another pool) */

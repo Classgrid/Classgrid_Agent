@@ -54,7 +54,17 @@ export async function sendReports({ board, answerEnded = false, hasTask, wakeTas
     const waiting = () => board.helpers.filter((x) => x.state !== "running" && !x.reportTaken && !x.reportTold && !x.quiet); // a workflow's helpers report through the workflow
     if (!waiting().length) return [];
     if (await hasTask()) {
-        if (!answerEnded && !board.helpers.some((x) => x.state === "running")) await wakeTask();
+        // A background task owns this chat: it reads its helpers' reports itself (check_helpers), so no report is put
+        // into a message here. It is woken for EACH helper that finishes, like a chat without a task (owner,
+        // 2026-11-17: "send one by one, don't send all together"). Until 2026-11-21 it was woken only when the last
+        // helper had finished: on that day the owner's chat had a task from the night before, three of five helpers
+        // finished and nothing came back for as long as the other two worked ("3 agents finished but not one wake-up").
+        // A task that is answering right now cannot be woken: this waits for that answer to end (looking every few
+        // seconds) and wakes it then, if a finished report is still unread. Never from the end of the task's own run
+        // (it would wake itself again and again).
+        if (answerEnded) return [];
+        for (let waited = 0; waited < WAIT_AT_MOST_MS && waiting().length && (await answering()); waited += LOOK_EVERY_MS) await sleep(LOOK_EVERY_MS);
+        if (waiting().length) await wakeTask();
         return [];
     }
     if (!answerEnded) {

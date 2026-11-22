@@ -24,6 +24,15 @@ export const confirmedEmails = (user) => [
 ].filter(Boolean);
 
 /**
+ * Where a sign-in code for `user` is sent when the person typed `typed` on the sign-in screen: that email when it is
+ * a confirmed email of the account (the screen says "sent to <the email you typed>"), else the account's main email.
+ */
+export const codeEmailFor = (user, typed) => {
+    const e = cleanEmail(typed);
+    return e && confirmedEmails(user).includes(e) ? e : user?.email;
+};
+
+/**
  * The account that owns `email`, found the same way every time: by its main email first, and only when no account
  * has it as a main email, by a confirmed added one. `select` is passed to Mongoose (like "+password").
  */

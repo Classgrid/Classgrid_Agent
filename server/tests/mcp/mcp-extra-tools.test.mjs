@@ -59,7 +59,7 @@ describe("tools/list", () => {
         assert.deepEqual((await listed(["skills:read"])).map((t) => t.name).sort(), ["list_skills", "read_skill"]);
         assert.deepEqual((await listed(["docs:read"])).map((t) => t.name).sort(), ["list_my_docs", "read_doc"]);
         assert.deepEqual((await listed(["docs:write"])).map((t) => t.name).sort(), ["create_doc", "doc_comments", "edit_doc"]);
-        assert.deepEqual((await listed(["pages:write"])).map((t) => t.name).sort(), ["page_comments", "publish_page"]);
+        assert.deepEqual((await listed(["pages:write"])).map((t) => t.name).sort(), ["page_comments", "publish_page", "read_page"]);
     });
     test("the AI chat's own tool list does not gain the MCP-only tools", async () => {
         const { getMcpTools } = await import("../../src/mcp/tools.js");

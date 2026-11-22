@@ -1,16 +1,21 @@
-// The "/" commands of the chat box (Project Mode and Studio): typed at the start of a message, sent as body.command
+// The "/" commands of the chat box (Project Mode and Studio; the ones marked anyMode in Agent mode too): typed at the
+// start of a message, sent as body.command
 import { motion, AnimatePresence } from "framer-motion";
-import { AppWindow, BookOpen, CalendarClock, CodeXml, Globe, GraduationCap, LayoutGrid, ListChecks, MessageCircleQuestion, Minimize2, Puzzle, Target, Users, Zap, type LucideIcon, ClipboardCheck, ShieldCheck, Sparkles, Telescope, FileText, Play, Download, MonitorSmartphone } from "lucide-react";
+import { AppWindow, BookOpen, CalendarClock, CodeXml, Globe, GraduationCap, LayoutGrid, ListChecks, MessageCircleQuestion, Minimize2, Puzzle, Target, Users, Zap, type LucideIcon, ClipboardCheck, ShieldCheck, Sparkles, Telescope, FileText, Play, Download, MonitorSmartphone, PanelsTopLeft, NotebookPen } from "lucide-react";
 import { cn } from "../utils";
 
-// desktopOnly: only in the desktop app and Classgrid Code (a chat on this computer)
-export type SlashCommand = { id: string; description: string; icon: LucideIcon; studioOnly?: boolean; desktopOnly?: boolean };
+// desktopOnly: only in the desktop app and Classgrid Code (a chat on this computer); anyMode: also in Agent mode
+export type SlashCommand = { id: string; description: string; icon: LucideIcon; studioOnly?: boolean; desktopOnly?: boolean; anyMode?: boolean };
 const onComputer = () => typeof window !== "undefined" && !!(window as unknown as { classgridDesktop?: unknown }).classgridDesktop;
 
 export const SLASH_COMMANDS: SlashCommand[] = [
   { id: "classgrid-guide", description: "Answer from the Classgrid AI guide", icon: BookOpen },
   { id: "studio-guide", description: "Answer from the Studio Mode guide", icon: AppWindow },
   { id: "project-guide", description: "Answer from the Project guide", icon: CodeXml },
+  // What to make, by its name (owner, 2026-11-21: a model asked for "a /p page" made a picture instead): an artifact
+  // is a web page in HTML that opens beside the chat (publish_page), a doc is writing to keep editing (create_doc)
+  { id: "artifact", description: "Make an HTML page that opens beside the chat", icon: PanelsTopLeft, anyMode: true },
+  { id: "docs", description: "Write a doc you keep editing, share and comment on", icon: NotebookPen, anyMode: true },
   { id: "plan", description: "Plan first, build after you approve", icon: ListChecks },
   { id: "goal", description: "Keep working until it is done", icon: Target },
   { id: "schedule", description: "Make a schedule or reminder", icon: CalendarClock },
@@ -33,13 +38,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: "remote", description: "Follow and answer this chat from your phone", icon: MonitorSmartphone, desktopOnly: true },
 ];
 
-export const slashCommandsFor = (inStudio: boolean, query: string) =>
-  SLASH_COMMANDS.filter((c) => (inStudio || !c.studioOnly) && (!c.desktopOnly || onComputer()) && c.id.includes(query.toLowerCase()));
+// codeMode: Project Mode or Studio (every command); otherwise Agent mode (only the anyMode ones)
+export const slashCommandsFor = (inStudio: boolean, query: string, codeMode = true) =>
+  SLASH_COMMANDS.filter((c) => (codeMode || c.anyMode) && (inStudio || !c.studioOnly) && (!c.desktopOnly || onComputer()) && c.id.includes(query.toLowerCase()));
 
 // The command a message starts with ("/plan fix the header" -> "plan"), or undefined
-export function leadingSlashCommand(text: string, inStudio: boolean): string | undefined {
+export function leadingSlashCommand(text: string, inStudio: boolean, codeMode = true): string | undefined {
   const m = /^\/([a-z_-]+)(?=\s|$)/.exec(text.trimStart());
-  return m && m[1] !== "plugin" && SLASH_COMMANDS.some((c) => c.id === m[1] && (inStudio || !c.studioOnly)) ? m[1] : undefined;
+  return m && m[1] !== "plugin" && SLASH_COMMANDS.some((c) => c.id === m[1] && (codeMode || c.anyMode) && (inStudio || !c.studioOnly)) ? m[1] : undefined;
 }
 
 // The popover, drawn like the "@" menu (above the chat box, or below it in the empty chat)

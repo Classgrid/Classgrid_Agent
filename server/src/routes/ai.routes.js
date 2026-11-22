@@ -98,6 +98,7 @@ const clearBrowserDataRoute = async (req, res) => {
 import { getMarket } from "../controllers/ai-widgets.controller.js";
 import aiTopUpRoutes from "./ai-credits-topup.routes.js";
 import aiCreditsRoutes from "./ai-credits.routes.js";
+import { retiredAiRoute } from "../utils/retired-route.js";
 
 
 const router = express.Router();
@@ -108,7 +109,7 @@ const router = express.Router();
 router.post("/index-material", isAuthenticated, requireRole("teacher", "super-admin"), indexMaterial);
 
 // Chat with indexed syllabus
-router.post("/syllabus-chat", isAuthenticated, requireChatOnboarding, chatWithSyllabus);
+router.post("/syllabus-chat", isAuthenticated, retiredAiRoute, requireChatOnboarding, chatWithSyllabus);
 
 // ── STUDENT PERSONA ────────────────────────────────────────
 

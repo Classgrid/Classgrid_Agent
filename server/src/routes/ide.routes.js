@@ -38,6 +38,7 @@ import { pushProject, openClassgridPrBranch, revealInEditor, checkpointChanges, 
 import { repoAppToken } from "../services/github-app.service.js";
 import { callLocal, runnerOnline } from "../services/local-runner.service.js";
 import { isWebsite } from "../utils/client-app.js";
+import { cloudProjectRoom, confirmCloudProject, cloudProjectRefusal } from "../services/plan-limits.service.js";
 import mongoose from "mongoose";
 import connectDB from "../../config/db.js";
 import redis from "../config/redis.js";
@@ -371,21 +372,30 @@ const nameTaken = (ownerId, name, exceptId) => IdeProject.findOne({
   name: new RegExp(`^${escapeRegex(name)}$`, "i"),
 }).select("_id").lean();
 
+// The answer when the plan's number of cloud projects is reached: one status, one sentence and one code for making a
+// project and for turning a folder project into a cloud one (2026-11-21, owner: "fix all")
+const refuseCloudProject = (res, plan) => {
+  const refusal = cloudProjectRefusal(plan);
+  return res.status(refusal.status).json(refusal.body);
+};
+
 router.post("/projects", isAuthenticated, async (req, res) => {
   const name = String(req.body?.name || "").trim().slice(0, 80);
   if (!name) return res.status(400).json({ error: "Give the project a name" });
   await connectDB();
   if (await nameTaken(req.user._id, name)) return res.status(409).json({ error: `You already have a project called "${name}". Pick another name.` });
-  // Plans on: the plan's number of projects (folder projects on the user's own computer are not counted)
-  const { planOf, isUnlimited } = await import("../services/plan-limits.service.js");
-  const plan = await planOf(req.user).catch(() => null);
-  if (plan && !isUnlimited(plan.projects_max)) {
-    const have = await IdeProject.countDocuments({ owner: req.user._id, location: { $ne: "local" } });
-    if (have >= Number(plan.projects_max)) return res.status(403).json({ error: `Your ${plan.name} plan allows ${plan.projects_max} project${Number(plan.projects_max) === 1 ? "" : "s"}. Upgrade your plan to make more, or work in a folder on your own computer.`, code: "plan_limit", plan: plan.key });
-  }
+  // Plans on: the plan's number of projects (folder projects on the user's own computer are not counted).
+  // (2026-11-21, owner: "fix all") The rule and its words are in services/plan-limits.service.js now, shared with
+  // every other way a cloud project is made (a folder project turned into one, WhatsApp tasks and calls).
+  const room = await cloudProjectRoom(req.user);
+  if (!room.ok) return refuseCloudProject(res, room.plan);
   const logo = req.body?.logo !== undefined ? projectLogo(req.body.logo, req.user._id) : null;
   if (logo === undefined) return res.status(400).json({ error: "Could not use this logo. Upload it again." });
   const project = await IdeProject.create({ owner: req.user._id, name, logo });
+  // Two "new project" requests sent in the same moment both passed the count above (each counted before the other
+  // saved). So it is counted again with this one in, and this one is removed when the person is now over the limit.
+  const kept = await confirmCloudProject(req.user, () => IdeProject.deleteOne({ _id: project._id }));
+  if (!kept.ok) return refuseCloudProject(res, kept.plan);
   res.json({ project: projectJson(project, req) });
 });
 
@@ -1072,18 +1082,38 @@ async function newRepoFor(project, token, { name: wanted, isPrivate = true } = {
 }
 
 // A folder project now on GitHub becomes the same project in both places (the cloud, and its folder as this computer's
-// copy), keeping its name, logo and chats
-async function linkFolderProject(project, repo, deviceId) {
+// copy), keeping its name, logo and chats.
+// (2026-11-21, owner: "fix all") A folder project is free, a cloud project counts toward the plan's number of projects
+// (projects_max), and this step was never counted: a person at their limit could turn any number of folder projects
+// into cloud ones. Every caller now asks cloudProjectRoom BEFORE it does anything (no repo is made and nothing is
+// pushed for a person with no room). Here, after the save, the projects are counted once more: two requests sent in
+// the same moment can both pass the first count, so when the person is now over the limit this project is put back
+// exactly as it was (a folder project) and { ok: false } is returned; the caller then answers with the plan refusal.
+// user: the signed-in person (req.user). masteroPending: Mastero has started on this project (set here, so it is
+// taken back too when the project is put back).
+async function linkFolderProject(project, repo, deviceId, user, { masteroPending = false } = {}) {
   const folder = project.localPath;
+  const was = {
+    pcChatSessionIds: project.pcChatSessionIds ? [...project.pcChatSessionIds] : undefined,
+    repo: project.repo, masteroRepo: project.masteroRepo, masteroPending: project.masteroPending,
+    location: project.location, localPath: project.localPath,
+    localCopies: (project.localCopies || []).map((c) => (c.toObject ? c.toObject() : c)),
+  };
   // Its chats so far happened on this computer: they stay there and never show on the website
   project.pcChatSessionIds = [...new Set([...pcChatIds(project), ...(project.chatSessionIds || [])])];
   project.repo = repo;
   project.masteroRepo = null; // linked now: a repo Mastero made and couldn't fill is either this one or not used
   project.location = "cloud";
   project.localPath = null;
+  if (masteroPending) project.masteroPending = true;
   putCopy(project, deviceId, { path: folder, at: new Date(), here: true });
   await project.save();
   redis.del(GIT_INFO_KEY(project._id)).catch(() => {});
+  return confirmCloudProject(user, async () => {
+    Object.assign(project, was);
+    await project.save();
+    redis.del(GIT_INFO_KEY(project._id)).catch(() => {});
+  });
 }
 
 // A folder project whose folder is on GitHub (the user asked the agent to make a repo and push it): it is linked to that
@@ -1094,6 +1124,10 @@ router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
   if (!project) return;
   if (project.location !== "local") return res.status(409).json({ error: "This project already works in the cloud." });
   try {
+    // (2026-11-21, owner: "fix all") It becomes a cloud project, so the plan's number of projects is asked first,
+    // with the same answer as making a new project. A count that can't be read ends in the 500 below: nothing is linked.
+    const room = await cloudProjectRoom(req.user);
+    if (!room.ok) return refuseCloudProject(res, room.plan);
     const ready = await readyForCopy(req, res);
     if (!ready) return;
     const r = await onComputer(project, project.localPath, "folder_repo", {});
@@ -1102,7 +1136,8 @@ router.post("/projects/:id/cloud", isAuthenticated, async (req, res) => {
     if (!REPO_NAME.test(repo || "")) return res.status(409).json({ error: "This folder isn't on GitHub yet. Ask the agent to make a GitHub repo for this project and push it.", code: "not_on_github" });
     const other = await IdeProject.findOne({ owner: req.user._id, _id: { $ne: project._id }, repo: new RegExp(`^${escapeRegex(repo)}$`, "i") }).select("name");
     if (other) return res.status(409).json({ error: `This folder's repo ${repo} is already linked to your project "${other.name}". Open that project instead.`, code: "repo_taken" });
-    await linkFolderProject(project, repo, ready.deviceId);
+    const linked = await linkFolderProject(project, repo, ready.deviceId, req.user);
+    if (!linked.ok) return refuseCloudProject(res, linked.plan); // (another project was made in the same moment)
     res.json({ ok: true, project: projectJson(project, req), message: `Linked to ${repo}. This project now works in the cloud too.` });
   } catch (e) {
     console.error("[IDE] Linking the folder's repo failed:", e.message);
@@ -1184,6 +1219,11 @@ router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
       return res.json({ ok: true, existing: !message, project: projectJson(project, req), repo: project.repo, repoUrl: `https://github.com/${project.repo}`, ...(message ? { message } : {}) });
     }
     if (project.location !== "local" || !project.localPath) return res.status(409).json({ error: "Mastero works with a folder project on this computer." });
+    // (2026-11-21, owner: "fix all") From here the folder project becomes a cloud project, so the plan's number of
+    // projects is asked first, before any repo is made or code is pushed, with the same answer as making a new
+    // project. A count that can't be read ends in the 500 below: nothing is made.
+    const room = await cloudProjectRoom(req.user);
+    if (!room.ok) return refuseCloudProject(res, room.plan);
     const ready = await readyForCopy(req, res);
     if (!ready) return;
     const token = ready.user.github_access_token;
@@ -1203,8 +1243,8 @@ router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
         if (pushed.error) return res.status(409).json({ error: `Your code couldn't be pushed to ${existing}: ${pushed.error} Press Mastero again to try once more.`, code: pushed.code || "push_failed", repo: existing });
         message = lastLine(pushed.text);
       }
-      project.masteroPending = true;
-      await linkFolderProject(project, existing, ready.deviceId);
+      const linked = await linkFolderProject(project, existing, ready.deviceId, req.user, { masteroPending: true });
+      if (!linked.ok) return refuseCloudProject(res, linked.plan); // (another project was made in the same moment)
       return res.json({ ok: true, existing: !message, project: projectJson(project, req), repo: existing, repoUrl: `https://github.com/${existing}`, ...(message ? { message } : {}) });
     }
     // The repo Mastero made on an earlier press whose push failed is used again (unless the user deleted it on GitHub),
@@ -1222,8 +1262,10 @@ router.post("/projects/:id/mastero", isAuthenticated, async (req, res) => {
     }
     const pushed = await pushTo(repo);
     if (pushed.error) return res.status(409).json({ error: `The repo ${repo} was made, but your code couldn't be pushed: ${pushed.error} Press Mastero again to try the push once more (no second repo is made).`, code: pushed.code || "push_failed", repo });
-    project.masteroPending = true;
-    await linkFolderProject(project, repo, ready.deviceId);
+    // (when another project was made in the same moment the project is a folder project again; it still remembers
+    // this repo, so the next press of Mastero uses it and no second repo is made)
+    const linked = await linkFolderProject(project, repo, ready.deviceId, req.user, { masteroPending: true });
+    if (!linked.ok) return refuseCloudProject(res, linked.plan);
     res.json({ ok: true, project: projectJson(project, req), repo, repoUrl: `https://github.com/${repo}`, message: lastLine(pushed.text) });
   } catch (e) {
     console.error("[IDE] Mastero failed:", e.message);

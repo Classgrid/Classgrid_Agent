@@ -54,7 +54,7 @@ import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSt
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
-import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, splitPoolCharge } from "../services/answer-meter.js";
+import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, claudeInsidePlan } from "../services/answer-meter.js";
 import { withMadePictures as withMadePicturesOf } from "../utils/made-pictures.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
@@ -87,7 +87,7 @@ import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWS
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
 import { buildEndConversationHandlers, reopenSession } from "../services/ai-end-conversation.service.js";
-import { hasEnoughTokens, deductTokens, getImageGenerationCost, tokenWindowEnd, rememberDevice } from "../services/ai-credits.service.js";
+import { hasEnoughTokens, deductTokens as deductTokensNow, getImageGenerationCost, tokenWindowEnd, rememberDevice, chargeClaudeOnPlan } from "../services/ai-credits.service.js";
 import redis from "../config/redis.js";
 import { sendEmail } from "../services/aws-ses.service.js";
 import mongoose from "mongoose";
@@ -113,9 +113,10 @@ import { APP_HISTORY_TOOLS, buildAppHistoryHandlers } from "../mcp/mcp-extra-too
 import { PLAN_INFO_TOOLS, buildPlanInfoHandlers } from "../services/plan-info-tools.js";
 import { SAVED_NOTE_TOOLS, buildSavedNoteHandlers, savedNotesOf, savedNotesBlock, SAVED_NOTES_GUIDE, notesFromChat } from "../services/ai-memory-notes.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
-import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, runPublishPage, runPageComments } from "../services/share-page.service.js";
+import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, ARTIFACT_DOC_NAMES, runPublishPage, runReadPage, runPageComments } from "../services/share-page.service.js";
 import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 import { isWebsite } from "../utils/client-app.js";
+import { confirmedEmails, cleanEmail as cleanAccountEmail } from "../utils/account-email.js";
 import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
 import { takeInlineImages, findInlineImage, withInlineImages, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
 
@@ -808,6 +809,7 @@ export async function generateSessionTitle(sessionId, question, userId = null) {
             ? ` The user already has chats with these titles: ${taken.slice(0, 40).join("; ")}. Do not reuse any of them: if this chat is on the same topic, add the word that makes it different (what exactly it is about).`
             : "";
         const titleRule = "You are a title generator. Generate a VERY SHORT 2-3 word title for what this conversation is about. Output ONLY the raw words. DO NOT output '**Title:**'. DO NOT use quotes. Ignore greetings unless the conversation is only a greeting.";
+        // (a chat's automatic title is free: it cuts no credits. Owner, 2026-11-21: "no, it is free")
         let { answer } = await generateShortTitleText(titleRule + avoid, question);
         // With nothing new to say (e.g. a second "hello"), the model can return no title: ask again without the
         // list; the number added below then keeps it different
@@ -1130,6 +1132,17 @@ const foldPerMessageNotes = (msgs) => msgs.map((m) => {
 // check): kept in this process for a moment, so an answer starts without waiting on the database for what it read
 // seconds ago (answers must start at once, owner 2026-11-09). Nothing of the user's data is kept anywhere else.
 const shortLived = new Map(); // key -> { at, promise }
+// Every charge made from this file drops the person's kept usage check (keptFor "quota:..."), before and after the
+// charge is written. The check before an answer is kept for half a minute to save three database reads; until
+// 2026-11-21 only a Claude charge dropped it, so after an answer used the session up, a message sent within 30
+// seconds was let in on the old check and given the old allowance again (a review that day: many tabs at once each got
+// the whole allowance, none of it charged). The next message after any charge is now checked for real.
+const forgetQuota = (userId, orgId) => { for (const paid of [0, 1]) shortLived.delete(`quota:${userId}:${orgId || "-"}:${paid}`); };
+function deductTokens(userId, orgId, ...rest) {
+    forgetQuota(userId, orgId);
+    return deductTokensNow(userId, orgId, ...rest).finally(() => forgetQuota(userId, orgId));
+}
+
 async function keptFor(key, ms, load) {
     const have = shortLived.get(key);
     if (have && Date.now() - have.at < ms) return have.promise;
@@ -1712,7 +1725,15 @@ const cloudflareStreamProvider = (model, affinity) => ({
 const CHAT_TOUCHED = (email) => `ai:chatTouched:${String(email || "").toLowerCase()}`;
 export const touchChat = (email, sessionId) => { if (email && sessionId) redis.hset(CHAT_TOUCHED(email), String(sessionId), String(Date.now())).catch(() => {}); };
 
+// The commands the Agent mode chat box has too (client: SlashCommandMenu.tsx, anyMode)
+const ANY_MODE_COMMANDS = new Set(["artifact", "docs"]);
+// The tool group each of these needs, loaded for that message whatever its words (services/ai-tool-groups.js)
+const COMMAND_TOOL_GROUPS = { artifact: ["share_pages"], docs: ["live_docs"] };
+
 const SLASH_COMMAND_LINES = {
+    // (owner, 2026-11-21: what to make, by its name; also in Agent mode, ANY_MODE_COMMANDS)
+    artifact: `The user wants an ARTIFACT: a web page built in HTML. Make it with publish_page as one self-contained HTML file, written by you: never as a picture from generate_image, never only as code in the chat, never as a live doc. To change a page made before, send its page_id (read it first with read_page when its HTML is not in this chat). In Studio it opens beside the chat by itself. Put the link in your reply.`,
+    docs: `The user wants a DOC: writing they keep editing, share and comment on (headings, lists, tables, like Markdown or Word). Make it with create_doc (change an existing one with edit_doc, after read_doc). Not an HTML page, not a file, not a picture. Put the link in your reply.`,
     "classgrid-guide": `Answer from Classgrid AI's own guide: read .classgrid/classgrid_guide/SKILL.md with view_project_file, then the page in its references/ folder that matches the question, and answer from them.`,
     "studio-guide": `Answer from Classgrid AI's Studio Mode guide: read .classgrid/classgrid_guide/references/studio-mode.md with view_project_file and answer from it.`,
     "project-guide": `Answer from Classgrid AI's Project Mode guide: read .classgrid/classgrid_guide/references/project-mode.md with view_project_file and answer from it.`,
@@ -1779,8 +1800,9 @@ export const streamAskAi = async (req, res) => {
     if (!String(body.question || "").trim() && ((Array.isArray(body.attachments) && body.attachments.length > 0) || (Array.isArray(body.fileUrls) && body.fileUrls.length > 0))) {
         body.question = "Please analyze the attached file(s).";
     }
-    // A "/" command from the chat box (Project Mode and Studio only; the live browser is only in Studio)
-    const slashCommand = (body.appMode === "project" || body.appMode === "studio") && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
+    // A "/" command from the chat box (Project Mode and Studio; /artifact and /docs in Agent mode too; the live browser
+    // is only in Studio)
+    const slashCommand = (body.appMode === "project" || body.appMode === "studio" || ANY_MODE_COMMANDS.has(String(body.command || ""))) && Object.hasOwn(SLASH_COMMAND_LINES, String(body.command || "")) && (body.command !== "browser" || body.appMode === "studio") ? body.command : null;
     // How hard to think, picked in the model menu: Fast, Normal or Deep (/boost is Deep for one message)
     let thinking = slashCommand === "boost" ? "high" : ["low", "high"].includes(body.effort) ? body.effort : null;
     let compacted = false;
@@ -1939,24 +1961,25 @@ export const streamAskAi = async (req, res) => {
         return;
     }
     const fableByPlan = !!planRow && Number(planRow.fable_share_percent) > 0;
-    // Claude is separate from the other models (owner, 2026-11-14): with a plan that includes Claude, a Claude answer
-    // is checked against and counted on the plan's weekly Claude credits only, never the window / weekly credits
+    // The session limit and the weekly limit are for every model (owner, 2026-11-21: "Claude, and GPT or Gemini if we
+    // add them, are part of the session and the weekly limit; the Claude limit is only a cap inside them; with the
+    // session or the week at 100 percent no model works"). So with a plan that includes Claude, a Claude answer is
+    // checked against and counted on the plan's weekly Claude credits AND the session window AND the week
+    // (chargeClaudeOnPlan). From 2026-11-14 until that day it counted on the Claude credits only.
     // (not while this answer is paid from the person's credits: see claudeOnCredits)
     const claudePooled = (model) => !claudeOnCredits && !claudeByCap && !!planRow && typeof model === "string" && CLAUDE_CHAT_MODELS.has(model) && Number(planRow.claude_credits_per_week) !== 0;
     let claudeSeparate = false; // this request picked a Claude model the plan includes
-    // A pooled Claude cost (claudePooled): to the plan's weekly Claude credits up to what this answer had left of them,
-    // the rest to the person's credits (gifted or bought). With no credits, the rest is counted on the Claude credits
-    // as before (it is not charged anywhere else).
+    // A pooled Claude cost (claudePooled) is charged the plan's way (ai-credits.service.js chargeClaudeOnPlan): to the
+    // plan (its weekly Claude credits, its session window and its week, together) as far as each has room at that
+    // moment, the rest to the person's credits (gifted or bought), and with no credits to the session window and the
+    // week alone. The answer itself, a stopped answer, and a helper on a Claude model are all charged this way.
     const chargeClaudePool = async (cost, model) => {
-        if (claudeCreditsAfterP) await claudeCreditsAfterP;
-        const { toPool, past } = splitPoolCharge(claudePoolRoom, cost);
-        if (claudePoolRoom !== undefined) claudePoolRoom -= toPool;
-        const onPool = past > 0 && claudeCreditsAfter ? toPool : toPool + past;
-        if (onPool > 0) await User.updateOne({ _id: userId }, { $inc: { "ai_tokens.claude_week_used": onPool, ...(/claude-fable/.test(model) ? { "ai_tokens.fable_week_used": onPool } : {}) } });
-        if (past > 0 && claudeCreditsAfter) {
-            await deductTokens(userId, orgId, past, claudeCreditsAfter.source, { label: { model, what: "Chat" } });
-            console.log(`[AI-TOKEN] Past the plan's weekly Claude credits: ${past} charged to the person's ${claudeCreditsAfter.source} credits (${model})`);
-        }
+        const r = await chargeClaudeOnPlan(userId, orgId, cost, { fable: /claude-fable/.test(model), label: { model, what: "Chat" } });
+        // (the session and the week just moved: the next message's usage check is made for real, not taken from the
+        // one kept for half a minute)
+        forgetKept(`quota:${userId}:${orgId || "-"}:0`);
+        if (r?.spilledTo) console.log(`[AI-TOKEN] Past the plan's room for Claude: ${r.spilledTokens} charged to the person's ${r.spilledTo} credits (${model})`);
+        return r;
     };
     // The plan's weekly Claude credits (or Fable's share of them) are used up and the person has credits: this answer
     // is paid from the credits (gifted or bought) at the model's own rate, like any other use past a plan limit
@@ -1971,12 +1994,17 @@ export const streamAskAi = async (req, res) => {
     let capDisabled = []; // the models turned off in the Model manager, as read when the stand-in was picked
     let selectedBeforeCap = null; // what the person had picked ("auto" or a Cloudflare model), for what is remembered
     let claudePoolLeft; // what is left of the plan's weekly Claude credits (undefined = unlimited)
-    // This answer's Claude use is charged to the plan's Claude credits only up to what was left of them when it
-    // started (claudePoolRoom, counted down as it is charged); the rest is past them and paid from the person's credits
+    // This answer may use of the plan what its Claude credits, its session window and its week had left when it
+    // started (claudePoolRoom, the live meter's room); what it uses past that is paid from the person's credits
     // (claudeCreditsAfter: { source, total }, read at the start; the live meter carries the answer on with them).
     let claudePoolRoom;
     let claudeCreditsAfter = null;
     let claudeCreditsAfterP = null;
+    const noteCreditsAfter = (c) => {
+        if (claudeOnCredits) return; // (this answer is already paid from the credits: nothing comes after them)
+        claudeCreditsAfter = c?.source && c.total > 0 ? { source: c.source, total: c.total } : null;
+        if (claudeCreditsAfter) liveMeter.afterPool = claudeCreditsAfter.total;
+    };
     // The plan's weekly Claude pool, and Fable's share of it (a Claude model picked by name; -1 = unlimited)
     if (planRow && typeof body.selectedModel === "string" && CLAUDE_CHAT_MODELS.has(body.selectedModel)) {
         const pool = Number(planRow.claude_credits_per_week);
@@ -1990,7 +2018,10 @@ export const streamAskAi = async (req, res) => {
             }
         } else if (pool > 0) {
             const { weekCounters, creditsAvailable } = await import("../services/ai-credits.service.js");
-            const counters = await weekCounters(userId, req.user.ai_tokens);
+            // (read now, not from the sign-in's copy of the account, which can be 15 seconds old: a Claude message sent
+            // right after the Claude limit was reached used to be let in on the old count)
+            const tokensNow = (await User.findById(userId).select("ai_tokens").lean().catch(() => null))?.ai_tokens || req.user.ai_tokens;
+            const counters = await weekCounters(userId, tokensNow);
             const when = counters.weekEnd.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
             const poolUsedUp = counters.claude_week_used >= pool;
             const fableUsedUp = wantsFable && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100;
@@ -2013,10 +2044,7 @@ export const streamAskAi = async (req, res) => {
                 res.end(JSON.stringify({ error: `You've used this week's Claude Fable share of your ${planRow.name} plan. It refills on ${when} (India time). Upgrade your plan, or pick Sonnet or Opus.`, code: "fable_cap_reached", plan: planRow.key }));
                 return;
             }
-            if (!claudeOnCredits) claudeCreditsAfterP = creditsP.then((c) => {
-                claudeCreditsAfter = c?.source && c.total > 0 ? { source: c.source, total: c.total } : null;
-                if (claudeCreditsAfter) liveMeter.afterPool = claudeCreditsAfter.total;
-            });
+            if (!claudeOnCredits) claudeCreditsAfterP = creditsP.then(noteCreditsAfter);
             if (!claudeOnCredits) claudePoolRoom = claudePoolLeft = Math.max(1, wantsFable ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used) : pool - counters.claude_week_used);
         }
     }
@@ -2082,9 +2110,42 @@ export const streamAskAi = async (req, res) => {
         // balance is always checked for real)
         // (the database is 150 ms away per read, measured 2026-11-10; this check alone is three reads)
         const quotaKey = `quota:${userId}:${orgId || "-"}:${fablePaidOnly ? 1 : 0}`;
-        const check = claudeSeparate && !fablePaidOnly
-            ? { allowed: true, source: claudeOnCredits ? claudeCreditSource : "weekly_free", remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true } // (the Claude credits, or the person's credits past them, were checked above)
-            : await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly }));
+        let check;
+        if (claudeSeparate && !fablePaidOnly && claudeOnCredits) {
+            // (the plan's Claude credits are used up and the person's credits pay: checked above)
+            check = { allowed: true, source: claudeCreditSource, remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true };
+        } else if (claudeSeparate && !fablePaidOnly) {
+            // The plan's Claude credits have room (checked above). The session window and the week must have room
+            // too: a Claude answer is inside both (see claudePooled). Always asked for real: what is left decides how
+            // far this answer may go.
+            const inside = claudeInsidePlan(claudePoolLeft, await hasEnoughTokens(userId, orgId, 1));
+            if (inside.refuse) {
+                check = inside.refuse; // refused like any other model: the limit card with the time it comes back
+            } else if (inside.onCredits) {
+                // The session or the week is used up and the person has credits: they pay for this answer, at the
+                // model's own rate, as for any other model past a plan limit
+                if (claudeCreditsAfterP) await claudeCreditsAfterP.catch(() => {});
+                claudeOnCredits = true;
+                claudeCreditSource = inside.onCredits;
+                claudePoolLeft = inside.spendable;
+                claudePoolRoom = undefined;
+                claudeCreditsAfter = null;
+                liveMeter.afterPool = 0;
+                check = { allowed: true, source: claudeCreditSource, remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true };
+                console.log(`[AI-TOKEN] The session or weekly limit is used up: this Claude answer is paid from the person's ${claudeCreditSource} credits`);
+            } else {
+                claudePoolRoom = claudePoolLeft = inside.room;
+                // (the person's credits carry the answer on when the plan's room ends in the middle of it; read here
+                // when the plan's Claude credits have no end, else already read above)
+                if (!claudeCreditsAfterP) {
+                    const { creditsAvailable } = await import("../services/ai-credits.service.js");
+                    claudeCreditsAfterP = creditsAvailable(userId).catch(() => null).then(noteCreditsAfter);
+                }
+                check = { allowed: true, source: "weekly_free", remaining: claudePoolLeft, spendable: claudePoolLeft, claudePool: true };
+            }
+        } else {
+            check = await keptFor(quotaKey, 30000, () => hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly }));
+        }
         if (!check.claudePool && (!check.allowed || ((check.spendable ?? check.remaining) !== undefined && (check.spendable ?? check.remaining) < 50000))) forgetKept(quotaKey);
         firstCheck = check;
         if (deviceNoted) await deviceNoted;
@@ -3017,6 +3078,12 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                 if (isStaffRole(req.user.role)) {
                     volatilePrompt += ` (SUPER ADMIN / PLATFORM OWNER)`;
                 }
+                // The emails the person added to this account (Settings > Account > Emails), so the AI knows every
+                // email that is theirs and not only the main one (owner, 2026-11-22: "AI must know added emails too")
+                const addedEmails = confirmedEmails(latestUserResult || req.user).filter((e) => e !== cleanAccountEmail(userEmail));
+                if (addedEmails.length) {
+                    volatilePrompt += `\nTheir other emails on this same account (added and confirmed by them): ${addedEmails.join(", ")}`;
+                }
             }
             if (req.user && req.user._id) {
                 volatilePrompt += `\nTheir User ID: ${req.user._id}`;
@@ -3511,6 +3578,8 @@ CRITICAL INSTRUCTION FOR GOOGLE WORKSPACE & CLASSROOM DISAMBIGUATION: If the use
 6. EDIT A WORD, EXCEL OR POWERPOINT FILE: To change an existing Word, Excel or PowerPoint file, use \`edit_office_file\` (set track_changes when the user wants to see the changes in Word).`);
         dynamicSystemPrompt += promptBlock("live_docs", LIVE_DOC_PROMPT);
         dynamicSystemPrompt += promptBlock("share_pages", SHARE_PAGE_PROMPT);
+        // (what "artifact" and "doc" mean: every chat, whatever tools are loaded)
+        dynamicSystemPrompt += ARTIFACT_DOC_NAMES;
 
         // Owner's rules for background tasks (WhatsApp, calls, email), 2026-10-24
         if (body.taskOrigin) dynamicSystemPrompt += `\n\nOWNER'S RULES FOR THIS TASK:
@@ -4258,6 +4327,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         } catch (e) {
                             // (the cap refused it and no Claude model could read instead: said plainly, CAP_REFUSED_WHY)
                             lastError = isCfNeuronCapError(e) ? CAP_REFUSED_WHY : String(e?.message || e);
+                            // (a read that failed is charged for what it used, like a helper's failed try)
+                            if (userId && e?.usage?.total_tokens > 0) deductTokens(userId, orgId, chargeableTokens(e.usage, model), tokenSource, { label: { model, what: "Chat" } }).catch(() => {});
                         }
                     }
                     throw new Error(lastError || "no answer");
@@ -4410,13 +4481,35 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         const offModels = [...(await disabledModels().catch(() => []))];
                         const familyOff = await offFeatures().catch(() => flagsOff);
                         for (const m of [...CF_PICKER_MODELS.keys(), ...CLAUDE_CHAT_MODELS]) if (familyOff.has(modelFlagKey(m)) && !offModels.includes(m)) offModels.push(m);
+                        // (plans on) A helper runs on a Claude model only when the person's plan has that model and the plan's
+                        // weekly Claude credits have room, or the person's credits can pay for it. Owner, 2026-11-21: the
+                        // Claude limit is a cap on every Claude use. Before that day a helper's Claude use was never counted
+                        // on the Claude credits, and a plan without Claude still got helpers on Claude (three of the five
+                        // default helper models are Claude models). The same while Cloudflare is capped: only the system's
+                        // own stand-in for a Cloudflare model (helperStand below) is outside this, never a Claude model the
+                        // main AI picked for a helper.
+                        let claudeHelpers = true;
+                        if (helperPlan) {
+                            const pool = Number(helperPlan.claude_credits_per_week);
+                            if (pool === 0) claudeHelpers = false;
+                            else if (pool > 0 && !claudeOnCredits) {
+                                const { weekCounters, creditsAvailable } = await import("../services/ai-credits.service.js");
+                                const fresh = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
+                                const counters = fresh ? await weekCounters(userId, fresh.ai_tokens).catch(() => null) : null;
+                                if (counters && counters.claude_week_used >= pool) claudeHelpers = ((await creditsAvailable(userId).catch(() => null))?.total || 0) > 0;
+                            }
+                        }
+                        const helperMayUse = (m) => !CLAUDE_CHAT_MODELS.has(m) || (claudeHelpers && (!helperPlan || planAllowsModel(helperPlan.models_allowed, m)));
+                        // A helper's Claude use that the plan pays for (counted on the Claude credits, the session and the
+                        // week: chargeClaudePool), whether or not the main answer itself is a stand-in for capped Cloudflare
+                        const helperOnPlan = (m) => !!helperPlan && !claudeOnCredits && CLAUDE_CHAT_MODELS.has(m) && Number(helperPlan.claude_credits_per_week) !== 0;
                         const pickModel = (wanted, i) => {
-                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => !/claude-fable/.test(m))].filter((m) => !offModels.includes(m));
+                            const allowed = [...CF_PICKER_MODELS.keys(), ...[...CLAUDE_CHAT_MODELS].filter((m) => !/claude-fable/.test(m))].filter((m) => !offModels.includes(m) && helperMayUse(m));
                             const w = wanted.toLowerCase();
                             const byName = Object.entries(MODEL_DISPLAY_NAMES).find(([, name]) => name.toLowerCase() === w)?.[0];
                             const id = allowed.find((m) => m.toLowerCase() === w) || (byName && allowed.includes(byName) ? byName : "");
                             const defaults = [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL];
-                            return id || [defaults[i], ...defaults].find((m) => m && !offModels.includes(m)) || HELPER_GLM_MODEL;
+                            return id || [defaults[i], ...defaults].find((m) => m && !offModels.includes(m) && helperMayUse(m)) || HELPER_GLM_MODEL;
                         };
                         const readOnly = ["list_project_files", "view_project_file", "search_project", "find_project_files"];
                         const editTools = ["write_project_file", "edit_project_file", "start_background_command", "check_background_command", "stop_background_command"];
@@ -4539,7 +4632,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const helperStand = CLAUDE_CHAT_MODELS.has(pickedFirst) ? null
                                 : await import("../services/cap-fallback.service.js").then((m) => m.claudeWhenCapped("helper", { claudeOff: familyOff.has(modelFlagKey("claude-sonnet-5-5")), disabled: offModels })).catch(() => null);
                             const firstModel = helperStand || pickedFirst;
-                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])].filter((m, k) => k === 0 || !offModels.includes(m));
+                            // (Claude Sonnet takes over only where a helper may run on Claude: helperMayUse)
+                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) || !helperMayUse("claude-sonnet-5-5") ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])].filter((m, k) => k === 0 || !offModels.includes(m));
                             let lastError = "";
                             // When every model failed, the helper restarts by itself (up to 2 more times), carrying on from
                             // the files it already made
@@ -4587,7 +4681,14 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             // (capStandIn: the cap refuses a round of this helper: Claude Sonnet goes on with its work from where it
                                             // stands, instead of the helper starting again on the next model)
                                             : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), capStandIn: capStandInFor("helper", `Helper ${h.no}`, (m) => { h.nowModel = m; return {}; }), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
-                                        if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource, { label: { model: part.model, what: "Chat" } }).catch(() => {});
+                                        // A helper on a Claude model of the plan is charged the plan's way, counted on the Claude credits too
+                                        // (chargeClaudePool). Not a Claude stand-in for capped Cloudflare (helperStand, or r.standIn in
+                                        // the middle of the job): the system's choice, charged like the model it stands in for.
+                                        const helperOnPlanClaude = !r.standIn && model !== helperStand && helperOnPlan(model);
+                                        if (userId) for (const part of usageParts(r, model)) {
+                                            const cost = chargeableTokens(part.usage, part.model);
+                                            (helperOnPlanClaude ? chargeClaudePool(cost, part.model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model: part.model, what: "Chat" } })).catch(() => {});
+                                        }
                                         h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0) + (r.standIn?.before?.usage?.total_tokens || 0); // shown in the chat's Agent map
                                         if (!String(r.answer || "").trim()) { onlyCapRefusals = false; lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
                                         h.usedModel = r.standIn?.model || model;
@@ -4600,6 +4701,15 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         const capRefused = isCfNeuronCapError(e);
                                         if (!capRefused) onlyCapRefusals = false;
                                         lastError = capRefused ? CAP_REFUSED_WHY : String(e?.message || e);
+                                        // A try that failed or was stopped is charged for what it really used: the error
+                                        // carries the provider's own usage of the rounds that ran (llm-stream.js and
+                                        // llm-stream-anthropic.js set it). Until 2026-11-21 only a try that ended well was
+                                        // charged, so helpers stopped with stop_helpers, and every failed try before the
+                                        // next model took over, were free.
+                                        if (userId && e?.usage?.total_tokens > 0) {
+                                            const cost = chargeableTokens(e.usage, model);
+                                            (model !== helperStand && helperOnPlan(model) ? chargeClaudePool(cost, model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model, what: "Chat" } })).catch(() => {});
+                                        }
                                         if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                         // "Too many requests", a timeout or a busy server: wait once and retry this model, then move to the next one
                                         if (!capRefused && /429|408|5\d\d|rate limit|timeout|timed out/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
@@ -4873,6 +4983,10 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     publish_page: async (args) => {
                         try { return await runPublishPage(req.user, args || {}); }
                         catch (e) { return `FAILED to publish the page: ${e.message}`; }
+                    },
+                    read_page: async (args) => {
+                        try { return await runReadPage(req.user, args || {}); }
+                        catch (e) { return `FAILED: ${e.message}`; }
                     },
                     page_comments: async (args) => {
                         try { return await runPageComments(req.user, args || {}); }
@@ -6495,7 +6609,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
             allTools: llmConfig.tools,
             text: [body.question || "", ...requestAttachments.map(a => a?.name || "")].join(" "),
             attachments: requestAttachments,
-            stickyGroupIds: [...Object.keys(stickyAged), ...(body.appMode === "studio" ? ["code_project"] : [])], // Studio: the project tools (and the Browser worker) are always there
+            stickyGroupIds: [...Object.keys(stickyAged), ...(body.appMode === "studio" ? ["code_project"] : []), ...(COMMAND_TOOL_GROUPS[slashCommand] || [])], // Studio: the project tools (and the Browser worker) are always there
             role: req.user?.role,
             email: req.user?.email,
             hasOrg: !!orgId && String(orgId) !== PUBLIC_CHAT_ORG_ID,
@@ -7338,7 +7452,12 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     // A Cloudflare model picked in the dropdown is tried first, with V4 Pro as its fallback;
                     // otherwise ("auto" or a failed Claude request) the Flash/Pro router decides.
                     const pickedCloudflareModel = CF_PICKER_MODELS.has(requestedModel) ? requestedModel : null;
-                    const routedModel = pickedCloudflareModel || pickChatModel(body);
+                    // A Claude model the person picked that could not answer (Anthropic refused the request, or it gave
+                    // nothing) is answered by DeepSeek, not by whatever "auto" would route this message to. Owner,
+                    // 2026-11-21: Anthropic's monthly limit was used up and his Opus messages were answered by GLM 5.3:
+                    // "use DeepSeek for it".
+                    const claudeGaveNothing = !streamed && CLAUDE_CHAT_MODELS.has(requestedModel);
+                    const routedModel = pickedCloudflareModel || (claudeGaveNothing ? CF_PRO_MODEL : pickChatModel(body));
                     const modelsToTry = streamed ? [] : routedModel === CF_PRO_MODEL ? [CF_PRO_MODEL] : [routedModel, CF_PRO_MODEL];
                     if (!streamed) rebuildPromptForCloudflare();
                     if (!streamed) console.log(`[AI-STREAM] ${pickedCloudflareModel ? "user selected" : "routed to"} ${routedModel}`);
@@ -7598,14 +7717,15 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     const User = (await import("../models/User.js")).default;
                     const Organization = (await import("../models/Organization.js")).default;
 
-                    // A Claude answer on a plan that includes Claude counts only against the plan's weekly Claude
-                    // credits (and Fable's share of them): separate from the other models' credits. Every other
-                    // answer is paid from the credits (the tokenSource was determined earlier via hasEnoughTokens).
+                    // A Claude answer on a plan that includes Claude counts on the plan's weekly Claude credits (and
+                    // Fable's share of them) and on the session window and the week, together (chargeClaudePool).
+                    // Every other answer is paid from the credits (the tokenSource was determined earlier via
+                    // hasEnoughTokens).
                     let deductionResult = null;
                     if (claudePooled(usedModel) && poolTokens > 0) {
-                        await chargeClaudePool(poolTokens, usedModel)
-                            .catch((err) => console.error("[AI-TOKEN] Claude week count failed:", err.message));
-                        deductionResult = { success: true, uncharged: 0, type: "claude_pool" };
+                        const planCharge = await chargeClaudePool(poolTokens, usedModel)
+                            .catch((err) => { console.error("[AI-TOKEN] Claude week count failed:", err.message); return null; });
+                        deductionResult = { success: true, uncharged: planCharge?.uncharged || 0, type: "claude_pool" };
                     } else {
                         deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource, { label: { model: usedModel, what: "Chat" } });
                     }
@@ -7774,14 +7894,20 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             // answer, with the reset time and the top-up button
             if (limitEnded) {
                 // (which limit ran out decides the time the card shows. A Claude answer on a plan with Claude stops
-                // when the week's Claude credits are used up: they come back at the end of the Claude week. Any other
-                // answer: the session window or the week, asked again now that this answer is charged.)
+                // when the week's Claude credits are used up, or the session window, or the week: asked again now
+                // that this answer is charged. The Claude credits come back at the end of the week; when they are
+                // not what ran out, the session window or the week is. Any other answer: the session window or the
+                // week.)
                 let resetAt;
                 if (claudePooled(usedModel) || (claudeOnCredits && CLAUDE_CHAT_MODELS.has(usedModel))) {
                     const fresh = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
                     const { weekCounters } = await import("../services/ai-credits.service.js");
                     const counters = await weekCounters(userId, fresh?.ai_tokens).catch(() => null);
-                    if (counters?.weekEnd) resetAt = new Date(counters.weekEnd).toISOString();
+                    const pool = Number(planRow?.claude_credits_per_week);
+                    const claudeOut = !!counters && pool > 0 && (counters.claude_week_used >= pool || (/claude-fable/.test(usedModel) && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100));
+                    const now = claudeOut ? null : await hasEnoughTokens(userId, orgId, 1).catch(() => null);
+                    if (now && !now.allowed && now.resetAt) resetAt = now.resetAt;
+                    else if (counters?.weekEnd) resetAt = new Date(counters.weekEnd).toISOString();
                 } else {
                     const now = await hasEnoughTokens(userId, orgId, 1).catch(() => null);
                     if (now && !now.allowed) resetAt = now.resetAt;
@@ -9054,8 +9180,11 @@ export const generateImage = async (req, res) => {
                 }
             }
             if (extraImage) {
-                // The extra image's price replaces the usual per-image credits and comes from the top-up credits only
-                imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: extraImage.price, source: "personal", noSpill: true };
+                // The extra image's price replaces the usual per-image credits and comes from the person's credits:
+                // the pool that started first, the rest from the other (canPayExtra checked both together). Until
+                // 2026-11-21 it was taken from bought credits only, with no move to the gifted ones: an account with
+                // gifted credits and no bought ones passed the check and was charged nothing, picture after picture.
+                imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: extraImage.price, source: extraImage.source || "personal" };
             } else {
                 imageSlotUserId = authUserForImage._id;
                 if (imageTokenCost > 0) imageTokenCharge = { userId: authUserForImage._id, orgId: imageOrgId, amount: imageTokenCost, source: tokenCheck.source };

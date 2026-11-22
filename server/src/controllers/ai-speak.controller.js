@@ -9,6 +9,8 @@ import { textToSpeech, elevenLabsEnabled, TTS_MODEL } from "../services/elevenla
 import { planOf } from "../services/plan-limits.service.js";
 import { usedToday, addToday, nextDayText } from "../services/plan-usage.service.js";
 import { canPayExtra, chargeExtra, extraOfferText } from "../services/extra-usage.service.js";
+import { deductTokens } from "../services/ai-credits.service.js";
+import { speechCredits } from "../services/ai-token-pricing.js";
 import { VOICE_CHOICES, voiceIdFor, publicVoiceChoices } from "../services/voice-choices.js";
 import { speakPieces, streamAudioFor } from "../services/speak-pieces.service.js";
 
@@ -94,6 +96,20 @@ export function countVoiceReply(user, gate) {
     if (gate?.extra) chargeExtra(user, KIND, 1, gate.extra.price).catch(() => {});
 }
 
+/**
+ * The characters that were really spoken are cut as credits, like a model's answer: counted on the session and the
+ * week, and past them on the person's credits (ai-token-pricing.js speechCredits). Not for an extra reply past the
+ * day's number: that one has its own fixed price (countVoiceReply). Called once the voice was made, with what was
+ * voiced, by the speaker button and by voice mode. Never waited for and never stops a reading.
+ */
+export function chargeSpeech(user, gate, characters, model = TTS_MODEL) {
+    if (!user?._id || gate?.extra) return;
+    const credits = speechCredits(characters, model);
+    if (!(credits > 0)) return;
+    deductTokens(user._id, user.organization_id || null, credits, "weekly_free", { label: { model: "Classgrid Voice", what: "Read aloud" } })
+        .catch((e) => console.error("[speak] the reading's credits could not be cut:", e.message));
+}
+
 // How many pieces are being voiced at the same time (they are always sent in their order)
 const PIECES_AHEAD = 3;
 
@@ -158,6 +174,7 @@ async function speakStream(req, res, { spoken, cut, gate }) {
     };
 
     let sent = 0;
+    let voiced = 0; // the characters of the pieces that were really voiced and sent (what the credits are cut for)
     let firstMs = null;
     let lastError = "";
     for (let i = 0; i < pieces.length && !closed; i++) {
@@ -181,7 +198,9 @@ async function speakStream(req, res, { spoken, cut, gate }) {
         }
         send({ type: "audio", index: i, text: pieces[i], ...audio, data: pcm.toString("base64") });
         sent++;
+        voiced += pieces[i].length;
     }
+    chargeSpeech(req.user, gate, voiced); // (only what was really voiced: a reading stopped early costs less)
 
     if (!closed && !res.writableEnded) {
         if (sent > 0) send({ type: "done", cut, pieces: pieces.length });
@@ -231,6 +250,7 @@ export const speakAnswer = async (req, res) => {
         if (!audio?.length) return res.status(502).json({ error: "The voice could not read this answer right now. Try again in a moment.", code: "voice_failed" });
 
         countVoiceReply(req.user, gate);
+        chargeSpeech(req.user, gate, spoken.length);
         AiUsageLog.create({ organization_id: req.user.organization_id || null, userId: req.user._id, provider: "elevenlabs", model: TTS_MODEL, feature: "chat_ai", success: true, latencyMs: Date.now() - started, metadata: { characters: spoken.length, cut, messageId: String(req.body?.messageId || "") } }).catch(() => {});
         console.log(`[speak] ${spoken.length} characters${cut ? " (cut)" : ""} in ${Date.now() - started} ms for ${req.user.email || userId}`);
 

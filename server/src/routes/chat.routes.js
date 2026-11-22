@@ -92,6 +92,7 @@ import AttendanceSession from '../models/AttendanceSession.js';
 import VivaRecord from '../models/VivaRecord.js';
 import PastPaper from '../models/PastPaper.js';
 import { classroomClient } from '../config/supabaseClient.js';
+import { retiredAiRoute } from '../utils/retired-route.js';
 
 const router = express.Router();
 
@@ -698,7 +699,7 @@ router.get('/classroom-context/:classroomId', isAuthenticated, async (req, res) 
   }
 });
 
-router.post('/stream', isAuthenticated, upload.none(), async (req, res) => {
+router.post('/stream', isAuthenticated, retiredAiRoute, upload.none(), async (req, res) => {
   // Set headers for Server-Sent Events
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
@@ -802,7 +803,7 @@ Keep the tone very warm, helpful, and structured.
   }
 });
 
-router.post('/', isAuthenticated, upload.single('file'), async (req, res) => {
+router.post('/', isAuthenticated, retiredAiRoute, upload.single('file'), async (req, res) => {
   try {
     let message = req.body.message || '';
     const file = req.file;

@@ -2983,6 +2983,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }, [isStudio, messages, localImagesFound, sessionId]);
   // Desktop app: Studio's Incognito looks exactly like Agent mode's (its greeting, header row and question list)
   const studioLook = isStudio && !(DESKTOP_STUDIO && isIncognito);
+  // Studio's Incognito in the desktop app (the Agent look, but with Studio's question marks)
+  const studioIncognito = isStudio && DESKTOP_STUDIO && isIncognito;
   const codeNotes = useCodeNotes();
   useEffect(() => { if (isStudio) setCodeNotesChat(sessionId); }, [isStudio, sessionId]);
   // Studio and Project Mode: the agent's permission mode (the shield) and the action it is waiting to be allowed
@@ -2992,10 +2994,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const inCodeMode = typeof window !== "undefined" && window.location.pathname.split("/").some((p) => p === "studio" || p === "project");
   // The shield (Review, Default, Auto, Turbo): Studio and Project Mode, and every chat in the desktop app, where the AI works on the computer
   const showsPermissionMode = inCodeMode || (typeof window !== "undefined" && !!(window as any).classgridDesktop?.isDesktop);
-  // "/" commands (Project Mode and Studio only): typed at the very start of the message
-  const slashItems = slashCommandsFor(isStudio, slashMenuQuery);
+  // "/" commands (Project Mode and Studio; /artifact and /docs in Agent mode too): typed at the very start of the message
+  const slashItems = slashCommandsFor(isStudio, slashMenuQuery, inCodeMode);
   const updateSlashMenu = (val: string, cursor: number) => {
-    const m = inCodeMode ? /^\/(\S*)$/.exec(val.slice(0, cursor)) : null;
+    let m = /^\/(\S*)$/.exec(val.slice(0, cursor));
+    // (Agent mode has only a few commands: the menu opens only while one of them matches, not for any text after "/")
+    if (m && !inCodeMode && !slashCommandsFor(isStudio, m[1] || "", false).length) m = null;
     setSlashMenuOpen(!!m);
     if (m) { setSlashMenuQuery(m[1] || ""); setSlashMenuIndex(0); }
   };
@@ -5126,10 +5130,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             // (Studio's Project page, /c/studio/project, is the code editor: "project", as Project Mode was)
             return parts.includes("project") ? "project" : parts.includes("studio") ? "studio" : "agent";
           })(),
-          // A "/" command at the start of the message (Project Mode and Studio)
+          // A "/" command at the start of the message (Project Mode and Studio; /artifact and /docs in Agent mode too)
           command: (() => {
             const parts = window.location.pathname.split("/");
-            return parts.includes("studio") || parts.includes("project") ? leadingSlashCommand(question, parts.includes("studio") && !parts.includes("project")) : undefined;
+            const codeMode = parts.includes("studio") || parts.includes("project");
+            return leadingSlashCommand(question, parts.includes("studio") && !parts.includes("project"), codeMode);
           })(),
           // How hard the AI thinks (model menu): Fast, Normal or Deep
           effort: getThinkingLevel() === "normal" ? undefined : getThinkingLevel() === "fast" ? "low" : "high",
@@ -7263,7 +7268,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         />
         {isIncognito && <IncognitoBar onClose={exitIncognito} />}
         <div className={isIncognito
-          ? "flex-1 min-h-0 mx-1.5 mb-1.5 sm:mx-2 sm:mb-2 rounded-2xl border border-slate-200 dark:border-[#262626] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"
+          ? "relative flex-1 min-h-0 mx-1.5 mb-1.5 sm:mx-2 sm:mb-2 rounded-2xl border border-slate-200 dark:border-[#262626] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"
           : "w-full h-[100dvh] !bg-[#fafafa] dark:!bg-[#000000] flex flex-row overflow-hidden"}>
           <div className="flex-1 min-w-0 min-h-0 relative flex flex-col h-full overflow-hidden">
             {/* Sidebar toggle and Top Right Header Actions */}
@@ -7330,7 +7335,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 </Breadcrumb>
               </header>
             )}
-            <div className={studioLook || isToolPage(sessionId) ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
+            {/* (Incognito: this row has nothing in it, so it is not drawn; it left an empty band above the chat) */}
+            <div className={studioLook || isIncognito || isToolPage(sessionId) ? "hidden" : "shrink-0 flex items-center justify-between px-3 sm:px-6 pt-3 h-14"}>
               {isIncognito || pageContext?.path === "/c/studio" ? <span /> : <SidebarTrigger />}
 
               {/* Ghost button on a new chat: start an incognito chat */}
@@ -7982,10 +7988,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             ) : (
               /* â”€â”€ Active conversation: messages scroll, input pinned at bottom â”€â”€ */
               <>
-                {/* (Studio: the messages and their scrollbar start below the chat's top bar, never behind it) */}
+                {/* (Studio: the messages and their scrollbar start below the chat's top bar, never behind it. Incognito
+                    in the desktop app has no such bar, so no room is left for one) */}
                 <div
                   ref={chatScrollRef}
-                  className={cn("flex-1 min-h-0 overflow-y-scroll overscroll-contain scroll-smooth chat-scrollbar [scrollbar-gutter:stable]", isStudio && variant === "full-page" && "mt-12")}
+                  className={cn("flex-1 min-h-0 overflow-y-scroll overscroll-contain scroll-smooth chat-scrollbar [scrollbar-gutter:stable]", studioLook && variant === "full-page" && "mt-12")}
                 >
                   {panelChat}
                 </div>
@@ -8022,8 +8029,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             )}
           </AnimatePresence>
           {/* Right-side TOC showing user questions */}
-          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && !studioLook && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
-          {studioLook && !isToolPage(sessionId) && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
+          {/* (Desktop app, Studio's Incognito: Studio's question marks on the left edge, not Agent mode's list button
+              on the right; owner, 2026-11-21) */}
+          {tocItems.length > 0 && !showFilesPanel && !showGridPanel && !studioLook && !studioIncognito && <ScrollSpyTOC tocItems={tocItems} activeSection={activeSection} />}
+          {(studioLook || studioIncognito) && !isToolPage(sessionId) && <QuestionDots tocItems={tocItems} activeSection={activeSection} />}
         </div>
         </div>
       ) : null}

@@ -531,27 +531,35 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                         throw dupErr;
                     }
 
-                    // Set start date only if this is the first purchase, always extend end date to 30 days from now
+                    // Bought credits last 30 days from the newest purchase (owner's rule, unchanged).
+                    // 2026-11-21 (owner: "fix all"): before, every top-up did `$inc` on the stored balance and wrote a
+                    // new end date, so bought credits that had already expired (they count as 0 everywhere, but the
+                    // stored number stayed) came back to life with the new purchase. Now (services/credit-expiry.js):
+                    //   - the stored end date has passed: the old balance is gone, the balance becomes exactly the
+                    //     credits bought now, and the start date is this purchase
+                    //   - not expired: as before, the credits are added, the end date is 30 days from now and the
+                    //     start date is written only for the first purchase
+                    // The end date is checked inside the database update itself, so an answer charging the balance at
+                    // the same moment is not lost. This runs once per payment: the AiCreditTransaction row above (one
+                    // per razorpay_payment_id) stops a second delivery before it gets here.
                     const now = new Date();
                     const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-                    
-                    const targetUser = await User.findById(userId).select("ai_tokens").lean();
-                    const updateOps = {
-                        $inc: {
-                            "ai_tokens.ai_credits_balance": creditsAdded,
-                            "ai_tokens.total_ai_credits_purchased": creditsAdded
-                        },
-                        $set: {
-                            "ai_tokens.ai_credits_end_date": thirtyDaysFromNow
-                        }
-                    };
-                    
-                    // Only set start_date if it hasn't been set yet (first purchase)
-                    if (!targetUser?.ai_tokens?.ai_credits_start_date) {
-                        updateOps.$set["ai_tokens.ai_credits_start_date"] = now;
+                    const { addToPool } = await import("../services/credit-expiry.js");
+                    const topUp = await addToPool(User, userId, "bought", creditsAdded, {
+                        now,
+                        startDate: now,
+                        endDate: thirtyDaysFromNow,
+                        startOnlyIfMissing: true,
+                    });
+                    if (topUp.refused) {
+                        // (a payment that buys no credits, e.g. no credits-per-rupee rate set: nothing is added, and
+                        // the end date is left alone so it cannot wake expired credits either)
+                        console.error(`[Razorpay Webhook] AI Top-Up ${paymentId} bought no credits (${creditsAdded}); the balance was not changed`);
+                    } else if (!topUp.user) {
+                        console.error(`[Razorpay Webhook] AI Top-Up ${paymentId}: user ${userId} not found, no credits added`);
+                    } else if (topUp.expired) {
+                        console.log(`[Razorpay Webhook] AI Top-Up ${paymentId}: the earlier bought credits had expired, the balance starts again at ${creditsAdded}`);
                     }
-                    
-                    await User.findByIdAndUpdate(userId, updateOps);
 
                     const PaymentOrder = (await import("../models/PaymentOrder.js")).default;
                     const pOrder = await PaymentOrder.findOneAndUpdate({ providerOrderId: orderId }, { status: "PAID" }, { returnDocument: 'after' });

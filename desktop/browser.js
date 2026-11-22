@@ -90,6 +90,30 @@ let pendingUrl = null;
 let zoom = 1;
 let pointerAt = 0;
 
+// ── The keyboard stays where the user put it ────────────────────────────────────────────────────────────────
+// A page that loads (or loads again) never takes the keyboard from the app: when it gets the keyboard around a load
+// without the user having clicked in it, the keyboard goes straight back to the app. A click in the page gives the
+// page the keyboard as always. (Owner, 2026-11-21: a tester's page reloaded itself every 5 seconds, and at each
+// reload the keyboard left the chat box, so he had to click the box again every few words and lost letters.)
+let pageHasKeyboard = false; // the user clicked in the page, and has not clicked in the app since
+let pagePressAt = 0; // the user's last mouse press or touch in the page
+let agentInputAt = 0; // the agent's last click in the page (its clicks are not the user's)
+let appTypingAtLoad = false; // the app had the keyboard when the page began to load
+let pageLoadAt = 0; // the page's last load step (start, new address, ready, finished)
+const PRESS_EVENTS = new Set(["mouseDown", "touchStart", "gestureTapDown", "pointerDown"]);
+const appInFront = () => !!win && !win.isDestroyed() && win.isFocused() && !win.webContents.isDestroyed();
+function userPressedInPage(type) {
+  if (!PRESS_EVENTS.has(String(type)) || Date.now() - agentInputAt < 300) return;
+  pagePressAt = Date.now();
+  pageHasKeyboard = true;
+}
+function keyboardBackToApp() {
+  if (pageHasKeyboard || !appInFront()) return;
+  const appPage = win.webContents;
+  if (appPage.isFocused() || appPage.isDevToolsFocused()) return;
+  appPage.focus();
+}
+
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const norm = (u) => (/^(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(u) ? `http://${u}` : /^[a-z][a-z0-9+.-]*:/i.test(u) ? u :/\s/.test(u) || !/\./.test(u) ? `https://www.google.com/search?q=${encodeURIComponent(u)}` : `https://${u}`);
 const isLocal = (u) => /^(https?:\/\/)?(localhost|127\.0\.0\.1|0\.0\.0\.0)(:\d+)?(\/|$)/i.test(u);
@@ -220,6 +244,17 @@ function ensureView() {
   wc.on("did-navigate", onNav);
   // A new page has no cursor drawn in it: while the agent is working, it shows again once the page has loaded
   wc.on("did-finish-load", () => { if (Date.now() - pointerAt < 20000) cursor(null, null, "Reading the page"); });
+  // The keyboard (see "The keyboard stays where the user put it"): a press in the page is the user choosing the page
+  wc.on("input-event", (_e, input) => userPressedInPage(input?.type));
+  wc.on("before-mouse-event", (_e, mouse) => userPressedInPage(mouse?.type));
+  // The page got the keyboard while it was loading, with no click in it: the keyboard goes back to the app. (A click
+  // in the page gives it the keyboard a moment before the click itself is seen here, so the check waits for it. Away
+  // from a load nothing is taken back, so a click is never undone.)
+  wc.on("focus", () => { setTimeout(() => { if (Date.now() - pageLoadAt < 1500 && Date.now() - pagePressAt > 1000) keyboardBackToApp(); }, 60); });
+  // A page that loads while the user is typing in the app never takes the keyboard with it
+  const keepTyping = () => { pageLoadAt = Date.now(); if (appTypingAtLoad) keyboardBackToApp(); };
+  for (const loaded of ["did-navigate", "dom-ready", "did-finish-load", "did-stop-loading"]) wc.on(loaded, keepTyping);
+  wc.on("did-stop-loading", () => setTimeout(keepTyping, 150));
   // Console messages (warnings and errors) and failed requests of the page
   wc.on("console-message", (e, ...old) => {
     const level = String(e?.level ?? old[0] ?? "");
@@ -239,7 +274,11 @@ function ensureView() {
   });
   wc.on("did-navigate-in-page", onNav);
   wc.on("page-title-updated", () => { titleHistory(wc.getURL(), wc.getTitle()); tell(navInfo()); });
-  wc.on("did-start-loading", () => tell(navInfo()));
+  wc.on("did-start-loading", () => {
+    pageLoadAt = Date.now();
+    appTypingAtLoad = !pageHasKeyboard && appInFront() && win.webContents.isFocused();
+    tell(navInfo());
+  });
   wc.on("did-stop-loading", () => tell(navInfo()));
   wc.on("dom-ready", applyZoom);
   // Back / forward / reload keys while the user is in the page
@@ -506,6 +545,7 @@ async function act(a, byAgent) {
       const y = Math.round(Number(a.y) * g.toView);
       if (!Number.isFinite(x) || !Number.isFinite(y)) throw new Error("x and y must be numbers");
       if (byAgent) { point("click", { x: Number(a.x), y: Number(a.y) }); ring(x / zoom, y / zoom); cursor(x / zoom, y / zoom, "Clicking"); }
+      agentInputAt = Date.now();
       wc.sendInputEvent({ type: "mouseMove", x, y });
       for (let n = 1; n <= (a.double ? 2 : 1); n++) {
         wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: n });
@@ -526,6 +566,7 @@ async function act(a, byAgent) {
         if (r.click) {
           const x = Math.round(r.click.x * zoom), y = Math.round(r.click.y * zoom);
           if (byAgent) { ring(r.click.x, r.click.y); cursor(r.click.x, r.click.y, "Choosing"); }
+          agentInputAt = Date.now();
           wc.sendInputEvent({ type: "mouseMove", x, y });
           wc.sendInputEvent({ type: "mouseDown", x, y, button: "left", clickCount: 1 });
           wc.sendInputEvent({ type: "mouseUp", x, y, button: "left", clickCount: 1 });
@@ -789,6 +830,9 @@ module.exports = {
   attach(window) {
     win = window;
     win.on("closed", () => { win = null; view = null; shownRect = null; });
+    // The user is in the app again (a click in the chat box, the toolbar, anywhere in the app): the page gives the
+    // keyboard up until it is clicked again
+    win.webContents.on("focus", () => { pageHasKeyboard = false; });
     require("./runner").setBrowser(agentAct);
   },
   act: agentAct,

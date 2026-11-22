@@ -86,7 +86,7 @@ const router = express.Router();
 
 // Plans on: the plan's voice input minutes per day (services/voice-input-limit.service.js, shared with the
 // phone's voice mode)
-import { voiceInputAllowed, countVoiceInput } from "../services/voice-input-limit.service.js";
+import { voiceInputAllowed, countVoiceInput, chargeListening } from "../services/voice-input-limit.service.js";
 const sb = primarySupabaseClient;
 const upload = multer({
     storage: multer.memoryStorage(),
@@ -201,6 +201,7 @@ router.post('/send', isAuthenticated, upload.single('audio'), async (req, res) =
         const heard = await transcribeAudioDetailed(file.buffer, file.mimetype || 'audio/webm');
         const transcription = heard.text;
         countVoiceInput(req.user, voiceGate, heard.seconds);
+        chargeListening(req.user, voiceGate, heard.seconds); // (the sound that was turned into text, as credits)
 
         // 2. Upload voice note to Cloudflare R2 under org/chat/audio folders
         const storagePath = buildVoiceStoragePath(file, storageContext);
@@ -255,6 +256,7 @@ router.post('/transcribe', isAuthenticated, upload.single('audio'), async (req, 
         const { transcribeAudioDetailed } = await import("../services/ai/voice.service.js");
         const heard = await transcribeAudioDetailed(file.buffer, file.mimetype || 'audio/webm');
         countVoiceInput(req.user, voiceGate, heard.seconds);
+        chargeListening(req.user, voiceGate, heard.seconds); // (the sound that was turned into text, as credits)
 
         res.status(200).json({
             success: true,
