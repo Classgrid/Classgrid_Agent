@@ -10,6 +10,9 @@ const googlePlayPurchaseSchema = new mongoose.Schema(
         type: { type: String, enum: ["subscription", "product"], required: true },
         productId: { type: String, required: true },
         orderId: { type: String, default: "" },
+        // A subscription bought as a plan change (Pro to Max, monthly to yearly) or a re-signup: the token it replaced.
+        // That older token is then never given again nor renewed (services/google-play.service.js).
+        linkedPurchaseToken: { type: String, default: "", index: true },
         // "granting" while a request is giving it, "granted" once it is on the account
         status: { type: String, enum: ["granting", "granted"], default: "granting" },
         // What was given: { plan: { key, term, expires_at } } or { credits_added }

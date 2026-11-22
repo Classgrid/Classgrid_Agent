@@ -111,6 +111,24 @@ const ms = (v) => {
     return Number.isFinite(t) ? t : NaN;
 };
 
+/**
+ * The line item that is paid for right now: one of our plans, not expired. The named product's item when it is one
+ * of them, else the one running longest. A plan change bought with the DEFERRED replacement mode (a downgrade) keeps
+ * the old product's item, with deferredItemReplacement naming the new product, until it renews; so the plan given is
+ * always what Google says is active now, never the product asked for.
+ */
+export function activeSubscriptionItem(purchase, productId = null, now = Date.now()) {
+    const items = (Array.isArray(purchase?.lineItems) ? purchase.lineItems : [])
+        .filter((li) => planForSubscription(li?.productId, li?.offerDetails?.basePlanId) && ms(li?.expiryTime) > ms(now));
+    if (!items.length) return null;
+    return (productId && items.find((li) => li.productId === productId))
+        || items.reduce((a, b) => (ms(b.expiryTime) > ms(a.expiryTime) ? b : a));
+}
+
+/** The purchase is about this product: one of its line items is it, or will be replaced by it (a deferred change) */
+export const purchaseNamesProduct = (purchase, productId) => (Array.isArray(purchase?.lineItems) ? purchase.lineItems : [])
+    .some((li) => li?.productId === productId || li?.deferredItemReplacement?.productId === productId);
+
 /** A Google Money value ({ currencyCode, units, nanos }) in rupees, or 0 when it is not in rupees */
 export function moneyInr(money) {
     if (!money || money.currencyCode !== "INR") return 0;
@@ -126,18 +144,27 @@ export function readSubscription(purchase, { productId, userId, now = Date.now()
     if (!accountMatches(purchase?.externalAccountIdentifiers?.obfuscatedExternalAccountId, userId)) {
         return { ok: false, status: 403, error: "This purchase was made from another Classgrid account." };
     }
+    if (!planKeyForProduct(productId)) return { ok: false, status: 400, error: "This subscription plan is not sold by Classgrid." };
     const state = purchase?.subscriptionState || "";
     if (!subscriptionGrantable(state)) return { ok: false, status: 400, error: "This subscription is not active." };
-    const li = subscriptionLineItem(purchase, productId);
-    if (!li) return { ok: false, status: 400, error: "This purchase is not for that product." };
+    if (!purchaseNamesProduct(purchase, productId)) return { ok: false, status: 400, error: "This purchase is not for that product." };
+    // What is paid for now (after a deferred downgrade: still the higher plan, until Google renews it as the lower one)
+    const li = activeSubscriptionItem(purchase, productId, now);
+    if (!li) {
+        const named = subscriptionLineItem(purchase, productId);
+        if (named && !planForSubscription(named.productId, named.offerDetails?.basePlanId)) return { ok: false, status: 400, error: "This subscription plan is not sold by Classgrid." };
+        return { ok: false, status: 400, error: "This subscription is not active." };
+    }
     const plan = planForSubscription(li.productId, li.offerDetails?.basePlanId);
-    if (!plan) return { ok: false, status: 400, error: "This subscription plan is not sold by Classgrid." };
     const expiry = ms(li.expiryTime);
-    if (!Number.isFinite(expiry) || expiry <= ms(now)) return { ok: false, status: 400, error: "This subscription is not active." };
     return {
         ok: true,
         key: plan.key,
         term: plan.term,
+        productId: li.productId,
+        basePlanId: li.offerDetails?.basePlanId || "",
+        // (a plan change or a re-signup: the token it replaces, which is no longer this user's subscription)
+        linkedPurchaseToken: purchase.linkedPurchaseToken || "",
         expiresAt: new Date(expiry),
         state,
         autoRenew: li.autoRenewingPlan?.autoRenewEnabled !== false,
@@ -168,8 +195,9 @@ export function planFromSubscription(current, sub, { productId, purchaseToken, b
         set_by: "",
         note: "",
         play_purchase_token: purchaseToken,
-        play_product_id: productId,
-        play_base_plan_id: basePlanId || "",
+        // (the product paid for now, which after a deferred downgrade is the old one until it renews)
+        play_product_id: sub.productId || productId,
+        play_base_plan_id: sub.basePlanId || basePlanId || "",
         play_state: sub.state,
     };
 }
@@ -199,27 +227,53 @@ export function playRefreshDue(plan, now = Date.now()) {
 export function playRenewalUpdate(plan, purchase, now = Date.now()) {
     if (!plan || !purchase) return null;
     const state = purchase.subscriptionState || "";
-    const li = subscriptionLineItem(purchase, plan.play_product_id || null) || subscriptionLineItem(purchase);
-    const expiry = ms(li?.expiryTime);
     const end = ms(plan.expires_at);
     const t = ms(now);
     const set = { play_state: state };
-    if ((state === SUB_ACTIVE || state === SUB_GRACE || state === SUB_CANCELED) && Number.isFinite(expiry) && expiry > t) {
-        set.cancel_at_period_end = state === SUB_CANCELED || li?.autoRenewingPlan?.autoRenewEnabled === false;
+    // What is paid for now: after a deferred downgrade renews, this is the new (lower) plan's line item
+    const li = state === SUB_ACTIVE || state === SUB_GRACE || state === SUB_CANCELED ? activeSubscriptionItem(purchase, plan.play_product_id || null, t) : null;
+    if (li) {
+        const expiry = ms(li.expiryTime);
+        const mapped = planForSubscription(li.productId, li.offerDetails?.basePlanId);
+        set.cancel_at_period_end = state === SUB_CANCELED || li.autoRenewingPlan?.autoRenewEnabled === false;
+        if (mapped.key !== plan.id || li.productId !== plan.play_product_id || li.offerDetails.basePlanId !== plan.play_base_plan_id) {
+            set.id = mapped.key; set.play_product_id = li.productId; set.play_base_plan_id = li.offerDetails.basePlanId;
+        }
         if (!Number.isFinite(end) || expiry > end) {
-            const mapped = planForSubscription(li.productId, li.offerDetails?.basePlanId);
             set.expires_at = new Date(expiry);
             set.status = "active";
-            if (mapped) { set.id = mapped.key; set.play_product_id = li.productId; set.play_base_plan_id = li.offerDetails.basePlanId; }
             const orderId = li.latestSuccessfulOrderId || purchase.latestOrderId || "";
             if (orderId) set.last_payment_id = orderId;
-            return { set, extended: true, term: mapped?.term || null, key: mapped?.key || plan.id, orderId, priceInr: moneyInr(li?.autoRenewingPlan?.recurringPrice) };
+            return { set, extended: true, term: mapped.term, key: mapped.key, orderId, priceInr: moneyInr(li.autoRenewingPlan?.recurringPrice) };
         }
         return { set, extended: false };
     }
     // Over (expired, refunded, on hold, paused): the plan ends at Google's end if that is earlier than ours
+    const last = subscriptionLineItem(purchase, plan.play_product_id || null) || subscriptionLineItem(purchase);
+    const expiry = ms(last?.expiryTime);
     if (state === SUB_EXPIRED && Number.isFinite(expiry) && Number.isFinite(end) && expiry < end) set.expires_at = new Date(expiry);
     return { set, extended: false };
+}
+
+/**
+ * Where the user's current plan came from and its term, as the plan overview reports them for the apps:
+ * source "google_play" | "website" | "granted" | null and term "month" | "year" | null (null on Free or an ended
+ * plan), plus the Google Play product and base plan.
+ */
+export function planSourceAndTerm(plan, effectiveKey) {
+    const none = { source: null, term: null, product_id: null, base_plan_id: null };
+    if (!plan || !effectiveKey || effectiveKey === "free") return none;
+    switch (plan.billing) {
+        case "play": {
+            const mapped = planForSubscription(plan.play_product_id, plan.play_base_plan_id);
+            return { source: "google_play", term: mapped?.term || null, product_id: plan.play_product_id || null, base_plan_id: plan.play_base_plan_id || null };
+        }
+        case "granted": return { ...none, source: "granted" };
+        case "prepaid_yearly": return { ...none, source: "website", term: "year" };
+        case "manual_monthly": return { ...none, source: "website", term: "month" };
+        case "upi_autopay": return { ...none, source: "website" };
+        default: return none;
+    }
 }
 
 // ── One-time products (purchases.products.get) ──

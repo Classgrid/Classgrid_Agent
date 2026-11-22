@@ -203,3 +203,56 @@ test("idempotency: what to do with a token that was seen before", () => {
     // (an ObjectId-like user id compares by its string)
     assert.equal(R.purchaseDecision({ ...base, userId: { toString: () => USER } }, { userId: USER, productId: "credits_500", now: NOW }), "granted");
 });
+
+test("plan changes: an upgrade's new token gives the new plan and names the token it replaced", () => {
+    const up = subPurchase({ linkedPurchaseToken: "old-token" }, { productId: "classgrid_max", offerDetails: { basePlanId: "max-yearly" }, expiryTime: iso(NOW + 365 * DAY) });
+    const r = R.readSubscription(up, { productId: "classgrid_max", userId: USER, now: NOW });
+    assert.equal(r.ok, true);
+    assert.deepEqual([r.key, r.term, r.productId, r.basePlanId, r.linkedPurchaseToken], ["max", "year", "classgrid_max", "max-yearly", "old-token"]);
+    const plan = R.planFromSubscription({ id: "pro", billing: "play", status: "active", play_purchase_token: "old-token", expires_at: new Date(NOW + 5 * DAY) }, r, { productId: "classgrid_max", purchaseToken: "new-token", now: NOW });
+    assert.equal(plan.play_purchase_token, "new-token");
+    assert.equal(plan.id, "max");
+    assert.equal(plan.expires_at.getTime(), NOW + 365 * DAY);
+});
+
+test("a deferred downgrade keeps the higher plan until Google renews it as the lower one", () => {
+    // the new token right after the change: still the Max line item, to be replaced by Pro at renewal
+    const deferred = subPurchase({ linkedPurchaseToken: "old-token" }, {
+        productId: "classgrid_max", offerDetails: { basePlanId: "max-monthly" }, expiryTime: iso(NOW + 10 * DAY),
+        deferredItemReplacement: { productId: "classgrid_pro" },
+    });
+    const r = R.readSubscription(deferred, { productId: "classgrid_pro", userId: USER, now: NOW });
+    assert.equal(r.ok, true);
+    assert.deepEqual([r.key, r.term, r.productId], ["max", "month", "classgrid_max"]);
+    assert.equal(r.expiresAt.getTime(), NOW + 10 * DAY);
+    const plan = R.planFromSubscription({ id: "max", billing: "play", status: "active", expires_at: new Date(NOW + 10 * DAY) }, r, { productId: "classgrid_pro", purchaseToken: "new-token", now: NOW });
+    assert.equal(plan.id, "max");
+    assert.equal(plan.play_product_id, "classgrid_max");
+    // a product the purchase does not name at all is still refused
+    assert.equal(R.readSubscription(deferred, { productId: "classgrid_ultra", userId: USER, now: NOW }).ok, false);
+    // the renewal: Google now shows the Pro line item, and the plan becomes Pro
+    const later = NOW + 10 * DAY + 60 * 1000;
+    const renewed = R.playRenewalUpdate(
+        { ...plan, play_purchase_token: "new-token" },
+        subPurchase({}, { productId: "classgrid_pro", offerDetails: { basePlanId: "pro-monthly" }, expiryTime: iso(later + 30 * DAY), latestSuccessfulOrderId: "GPA.5..0" }),
+        later,
+    );
+    assert.equal(renewed.extended, true);
+    assert.deepEqual([renewed.set.id, renewed.set.play_product_id, renewed.set.play_base_plan_id, renewed.key, renewed.term], ["pro", "classgrid_pro", "pro-monthly", "pro", "month"]);
+    // while the Max item is still running, a check changes nothing
+    const before = R.playRenewalUpdate({ ...plan, play_purchase_token: "new-token" }, deferred, NOW + DAY);
+    assert.equal(before.extended, false);
+    assert.equal(before.set.id, undefined);
+});
+
+test("the overview's plan source and term", () => {
+    assert.deepEqual(R.planSourceAndTerm({ billing: "play", play_product_id: "classgrid_max", play_base_plan_id: "max-yearly" }, "max"),
+        { source: "google_play", term: "year", product_id: "classgrid_max", base_plan_id: "max-yearly" });
+    assert.deepEqual(R.planSourceAndTerm({ billing: "manual_monthly" }, "pro"), { source: "website", term: "month", product_id: null, base_plan_id: null });
+    assert.deepEqual(R.planSourceAndTerm({ billing: "prepaid_yearly" }, "pro"), { source: "website", term: "year", product_id: null, base_plan_id: null });
+    assert.deepEqual(R.planSourceAndTerm({ billing: "granted" }, "max"), { source: "granted", term: null, product_id: null, base_plan_id: null });
+    // Free, or a plan that has ended, says nothing
+    assert.deepEqual(R.planSourceAndTerm({ billing: "manual_monthly" }, "free"), { source: null, term: null, product_id: null, base_plan_id: null });
+    assert.deepEqual(R.planSourceAndTerm({ billing: "none" }, "free"), { source: null, term: null, product_id: null, base_plan_id: null });
+    assert.deepEqual(R.planSourceAndTerm(null, "pro"), { source: null, term: null, product_id: null, base_plan_id: null });
+});

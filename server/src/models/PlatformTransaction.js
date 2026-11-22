@@ -86,7 +86,9 @@ const platformTransactionSchema = new mongoose.Schema(
       required: false,
     },
     organizationName: { type: String, default: "" }, // denormalized for fast reads
-    paymentFlow: { type: String, enum: ["subscription", "ai_topup", "other"], default: "subscription" },
+    // ("ai_plan": a plan bought on the website or through Google Play; razorpay-webhook.routes.js already wrote it, and the
+    // row failed while the value was missing here)
+    paymentFlow: { type: String, enum: ["subscription", "ai_topup", "ai_plan", "other"], default: "subscription" },
     userName: { type: String, default: "" },
     userEmail: { type: String, default: "" },
     userMobile: { type: String, default: "" },
@@ -109,7 +111,7 @@ const platformTransactionSchema = new mongoose.Schema(
     // Payment source
     type: {
       type: String,
-      enum: ["razorpay", "manual", "refund", "credit", "adjustment"],
+      enum: ["razorpay", "manual", "refund", "credit", "adjustment", "google_play"], // google_play: bought in the Android app
       default: "razorpay",
     },
 

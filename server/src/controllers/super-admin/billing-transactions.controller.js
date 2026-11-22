@@ -421,9 +421,11 @@ export const getTransactionTimeline = async (req, res) => {
  *
  * Where the money is recorded, and why the code reads it this way:
  * - Plan purchases and credit top-ups are read from AiCreditTransaction (types "plan" and "topup"), the record the
- *   Razorpay webhook writes for every Classgrid AI purchase. Plans can only come from there: the webhook also tries to
- *   write a PlatformTransaction for a plan with paymentFlow "ai_plan", but that value is not in the model's enum, so
- *   the write fails and is swallowed. No plan sale exists in PlatformTransaction.
+ *   Razorpay webhook writes for every Classgrid AI purchase. Plans can only come from there: until 2026-11-22 the
+ *   webhook's PlatformTransaction for a plan (paymentFlow "ai_plan") failed because the value was not in the model's
+ *   enum. Since then plan copies are written (website and Google Play, type "google_play" for the phone app; Google
+ *   Play purchases also write their AiCreditTransaction row, payment id "gplay:<order id>") and, like top-up copies,
+ *   are dropped below because the same payment id is in AiCreditTransaction.
  * - PlatformTransaction adds what AiCreditTransaction does not have: failed payments, older payments from before
  *   plans, and refunds. It also keeps a copy of every top-up (same Razorpay payment id); those copies are dropped so a
  *   top-up is not counted twice.

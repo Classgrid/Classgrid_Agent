@@ -10,7 +10,7 @@ import IdeProject from "../models/IdeProject.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import AiCreditSpend from "../models/AiCreditSpend.js";
 import { planOf, planKeyOf, plansEnabled, filesPerMessage, DEFAULT_FILES_PER_MESSAGE } from "../services/plan-limits.service.js";
-import { playRefreshDue } from "../services/google-play-rules.js";
+import { playRefreshDue, planSourceAndTerm } from "../services/google-play-rules.js";
 import { freeWindow, weekCounters, tokenWindowEnd } from "../services/ai-credits.service.js";
 import { resolveFeatureLimit, resolveResetPeriod, checkWhatsappLimit, formatPeriodLength } from "../services/ai-feature-limits.js";
 import { usedToday, dayKey } from "../services/plan-usage.service.js";
@@ -133,6 +133,12 @@ export async function planOverviewFor(userId) {
                 key: enabled ? planKeyOf(user) : "free", name: plan?.name || "Free", tagline: plan?.tagline || "",
                 status: mine.status || "active", billing: mine.billing || "none", started_at: mine.started_at || null, expires_at: mine.expires_at || null,
                 subscribed, limits: plan ? limits : null, student_price: mine.note === "student price",
+                // Where the plan came from and its term, for the apps (source "google_play" | "website" | "granted" |
+                // null, term "month" | "year" | null; null on Free), and the Google Play product and base plan
+                ...(() => {
+                    const s = planSourceAndTerm(mine, enabled ? planKeyOf(user) : "free");
+                    return { source: s.source, term: s.term, play_product_id: s.product_id, play_base_plan_id: s.base_plan_id };
+                })(),
             },
             // Pictures and files one message may carry (the chat boxes read it; services/plan-limits.service.js)
             files_per_message: await filesPerMessage(user).catch(() => DEFAULT_FILES_PER_MESSAGE),
