@@ -239,13 +239,13 @@
     --icon-invert-light: none;
   }
 
-  /* Studio Mode: the side panels in background-200 (#FAFAFA light, #000000 dark), the chat in background-100 (owner, 2026-11-23) */
+  /* Studio Mode: the side panels #FAFAFA in light mode (owner, 2026-11-23); dark mode keeps its grey #181818 */
   html.studio-mode {
     --sidebar-background: #fafafa;
     --sidebar-accent: #eaeaea;
   }
   html.dark.studio-mode {
-    --sidebar-background: #000000;
+    --sidebar-background: #181818;
     --sidebar-accent: #262626;
   }
   /* Studio Mode's chat: grey layers instead of pure black */
@@ -297,7 +297,7 @@
   }
   html.dark.desktop-app,
   html.dark.studio-colors {
-    --sidebar-background: #000000;
+    --sidebar-background: #181818;
     --sidebar-accent: #262626;
     --background: #121212;
     --color-background: #121212;
