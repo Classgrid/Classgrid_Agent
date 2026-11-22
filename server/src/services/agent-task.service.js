@@ -373,7 +373,10 @@ export async function sleepFromTool({ user, sessionId, projectId, origin, questi
     const message = String(args?.message || "").trim().slice(0, 3000);
     await AgentTask.findOneAndUpdate({ session_id: sessionId }, {
         $set: {
-            status: "sleeping", wake_at: wakeAt, wake_on_reply: onReply, note: String(args?.note || "").slice(0, 3000),
+            // heartbeat_at: null: a new sleep is never held back by an older run's "busy" mark. On 2026-11-22 a woken run
+            // stuck when the owner's network dropped (its command's answer never came back) and kept the mark fresh, so
+            // a sleep set from the chat at 12:15 for 12:18 woke only at 12:20, when the mark was 5 minutes old.
+            status: "sleeping", heartbeat_at: null, wake_at: wakeAt, wake_on_reply: onReply, note: String(args?.note || "").slice(0, 3000),
             sleep_message: message, slept_at: now, phone, ...(projectId ? { project_id: String(projectId) } : {}),
             ...(newWork ? { work_started_at: now, no_progress: 0 } : {}),
             ...(origin === "whatsapp" ? { origin: "whatsapp" } : {}),
