@@ -264,7 +264,9 @@
     --background: #ffffff;
     --color-background: #ffffff;
   }
-  html.studio-mode:not(.dark) .studio-chat [class*="!bg-[#fafafa]"] {
+  /* Only a class that starts with !bg-[#fafafa]: the chat box's phone-only max-sm:!bg-[#fafafa] must not paint a white
+     band behind it on a computer */
+  html.studio-mode:not(.dark) .studio-chat :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]) {
     background-color: #ffffff !important;
   }
   /* Studio Mode's colors on every page (grey sidebar, Studio's chat greys): the desktop app through html.desktop-app,
