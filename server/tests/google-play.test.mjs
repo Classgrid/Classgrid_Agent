@@ -97,7 +97,7 @@ test("a new subscription gives its plan with Google's expiry", () => {
     assert.equal(r.term, "month");
     assert.equal(r.expiresAt.getTime(), NOW + 30 * DAY);
     assert.equal(r.needsAck, true);
-    assert.equal(r.priceInr, 999);
+    assert.deepEqual(r.recurringPrice, { currency: "INR", amount: 999 });
     assert.equal(r.orderId, "GPA.1111-2222-3333-44444");
     // grace period is still paid
     assert.equal(R.readSubscription(subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_IN_GRACE_PERIOD" }), { productId: "classgrid_pro", userId: USER, now: NOW }).ok, true);
@@ -108,7 +108,7 @@ test("a subscription is refused for another account, an inactive state, the wron
     assert.deepEqual([other.ok, other.status], [false, 403]);
     const none = R.readSubscription(subPurchase({ externalAccountIdentifiers: {} }), { productId: "classgrid_pro", userId: USER, now: NOW });
     assert.deepEqual([none.ok, none.status], [false, 403]);
-    for (const state of ["SUBSCRIPTION_STATE_EXPIRED", "SUBSCRIPTION_STATE_PENDING", "SUBSCRIPTION_STATE_ON_HOLD", "SUBSCRIPTION_STATE_PAUSED", "SUBSCRIPTION_STATE_CANCELED"]) {
+    for (const state of ["SUBSCRIPTION_STATE_EXPIRED", "SUBSCRIPTION_STATE_PENDING", "SUBSCRIPTION_STATE_ON_HOLD", "SUBSCRIPTION_STATE_PAUSED"]) {
         const r = R.readSubscription(subPurchase({ subscriptionState: state }), { productId: "classgrid_pro", userId: USER, now: NOW });
         assert.deepEqual([r.ok, r.status], [false, 400], state);
     }
@@ -117,7 +117,7 @@ test("a subscription is refused for another account, an inactive state, the wron
     assert.equal(R.readSubscription(subPurchase({}, { expiryTime: iso(NOW - 1000) }), { productId: "classgrid_pro", userId: USER, now: NOW }).ok, false);
 });
 
-test("the plan put on the user: billing play, source google_play, the token kept; paid days of the same plan kept", () => {
+test("the plan put on the user: billing play, source google_play, the token kept, Google's end date", () => {
     const sub = R.readSubscription(subPurchase(), { productId: "classgrid_pro", userId: USER, now: NOW });
     const fresh = R.planFromSubscription({ id: "free" }, sub, { productId: "classgrid_pro", purchaseToken: "tok", basePlanId: "pro-monthly", now: NOW });
     assert.equal(fresh.id, "pro");
@@ -128,16 +128,12 @@ test("the plan put on the user: billing play, source google_play, the token kept
     assert.equal(fresh.play_base_plan_id, "pro-monthly");
     assert.equal(fresh.expires_at.getTime(), NOW + 30 * DAY);
     assert.equal(fresh.cancel_at_period_end, false);
-    // a Pro bought on the website running longer keeps its end date
+    // the end date is always Google's (a longer plan from elsewhere is refused before: otherPlanDecision)
     const web = { id: "pro", status: "active", billing: "prepaid_yearly", started_at: new Date(NOW - 10 * DAY), expires_at: new Date(NOW + 200 * DAY) };
-    const kept = R.planFromSubscription(web, sub, { productId: "classgrid_pro", purchaseToken: "tok", basePlanId: "pro-monthly", now: NOW });
-    assert.equal(kept.expires_at.getTime(), NOW + 200 * DAY);
-    assert.equal(kept.started_at.getTime(), NOW - 10 * DAY);
-    // a gifted plan or another plan does not
-    const gift = R.planFromSubscription({ ...web, billing: "granted" }, sub, { productId: "classgrid_pro", purchaseToken: "tok", now: NOW });
-    assert.equal(gift.expires_at.getTime(), NOW + 30 * DAY);
-    const max = R.planFromSubscription({ ...web, id: "max" }, sub, { productId: "classgrid_pro", purchaseToken: "tok", now: NOW });
-    assert.equal(max.expires_at.getTime(), NOW + 30 * DAY);
+    assert.equal(R.planFromSubscription(web, sub, { productId: "classgrid_pro", purchaseToken: "tok", now: NOW }).expires_at.getTime(), NOW + 30 * DAY);
+    // the same Play plan running on (a re-signup) keeps its start date
+    const play = { id: "pro", status: "active", billing: "play", play_purchase_token: "old", started_at: new Date(NOW - 40 * DAY), expires_at: new Date(NOW + 2 * DAY) };
+    assert.equal(R.planFromSubscription(play, sub, { productId: "classgrid_pro", purchaseToken: "tok", now: NOW }).started_at.getTime(), NOW - 40 * DAY);
 });
 
 test("renewal checks: only for Google Play plans near or past their end, not after Google says it is over", () => {
@@ -173,14 +169,18 @@ test("a renewal moves the end date to Google's; an expired subscription ends", (
     assert.equal(ended.extended, false);
     assert.equal(ended.set.play_state, "SUBSCRIPTION_STATE_EXPIRED");
     assert.equal(ended.set.expires_at.getTime(), NOW - DAY);
-    // on hold: only the state is noted
+    // on hold (the renewal payment failed): not paid, the plan ends at Google's end
     const hold = R.playRenewalUpdate(plan, subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_ON_HOLD" }, { expiryTime: iso(NOW - DAY) }), NOW);
-    assert.deepEqual(hold.set, { play_state: "SUBSCRIPTION_STATE_ON_HOLD" });
+    assert.equal(hold.set.play_state, "SUBSCRIPTION_STATE_ON_HOLD");
+    assert.equal(hold.set.expires_at.getTime(), NOW - DAY);
+    // revoked: Google's state is expired with the revoke time as the end; a plan paid far ahead ends then
+    const revoked = R.playRenewalUpdate({ ...plan, expires_at: new Date(NOW + 20 * DAY) }, subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_EXPIRED" }, { expiryTime: iso(NOW - 60 * 1000) }), NOW);
+    assert.equal(revoked.set.expires_at.getTime(), NOW - 60 * 1000);
 });
 
 test("a credit pack purchase: purchased, for this account and product, not used yet", () => {
     const p = { purchaseState: 0, consumptionState: 0, orderId: "GPA.9999", obfuscatedExternalAccountId: USER, productId: "credits_1000" };
-    assert.deepEqual(R.readProductPurchase(p, { productId: "credits_1000", userId: USER }), { ok: true, amountInr: 1000, orderId: "GPA.9999" });
+    assert.deepEqual(R.readProductPurchase({ ...p, regionCode: "in", purchaseTimeMillis: String(NOW) }, { productId: "credits_1000", userId: USER }), { ok: true, amountInr: 1000, orderId: "GPA.9999", regionCode: "IN", paidAt: new Date(NOW) });
     assert.equal(R.readProductPurchase({ ...p, productId: undefined }, { productId: "credits_1000", userId: USER }).ok, true);
     assert.deepEqual(R.readProductPurchase(p, { productId: "credits_300", userId: USER }).status, 400);
     assert.deepEqual(R.readProductPurchase({ ...p, obfuscatedExternalAccountId: "x" }, { productId: "credits_1000", userId: USER }).status, 403);
@@ -255,4 +255,102 @@ test("the overview's plan source and term", () => {
     assert.deepEqual(R.planSourceAndTerm({ billing: "manual_monthly" }, "free"), { source: null, term: null, product_id: null, base_plan_id: null });
     assert.deepEqual(R.planSourceAndTerm({ billing: "none" }, "free"), { source: null, term: null, product_id: null, base_plan_id: null });
     assert.deepEqual(R.planSourceAndTerm(null, "pro"), { source: null, term: null, product_id: null, base_plan_id: null });
+});
+
+test("a cancelled subscription (auto-renew off) is paid until its expiry: it is given until then", () => {
+    const r = R.readSubscription(subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_CANCELED" }, { expiryTime: iso(NOW + 12 * DAY), autoRenewingPlan: { autoRenewEnabled: false } }), { productId: "classgrid_pro", userId: USER, now: NOW });
+    assert.equal(r.ok, true);
+    assert.equal(r.expiresAt.getTime(), NOW + 12 * DAY);
+    assert.equal(r.autoRenew, false);
+    const plan = R.planFromSubscription(null, r, { productId: "classgrid_pro", purchaseToken: "tok", now: NOW });
+    assert.equal(plan.cancel_at_period_end, true);
+    assert.equal(plan.expires_at.getTime(), NOW + 12 * DAY);
+    // its expiry passed: not given
+    assert.equal(R.readSubscription(subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_CANCELED" }, { expiryTime: iso(NOW - 1000) }), { productId: "classgrid_pro", userId: USER, now: NOW }).ok, false);
+});
+
+test("another paid plan: the same or a higher tier from elsewhere blocks a Play purchase; a lower one is upgraded", () => {
+    const at = (over) => ({ id: "pro", status: "active", billing: "manual_monthly", expires_at: new Date(NOW + 10 * DAY), ...over });
+    const ask = (plan, key = "pro", extra = {}) => R.otherPlanDecision(plan, { key, purchaseToken: "new", now: NOW, ...extra });
+    assert.equal(ask(at({}), "pro").block, true); // website Pro, buying Pro
+    assert.equal(ask(at({ id: "max", billing: "prepaid_yearly" }), "pro").block, true); // website Max, buying Pro
+    assert.equal(ask(at({ billing: "granted", expires_at: null }), "pro").block, true); // a gift with no end
+    assert.equal(ask(at({ billing: "upi_autopay" }), "pro").block, true);
+    assert.deepEqual(ask(at({}), "max"), { block: false, replaces: "manual_monthly" }); // website Pro, upgrading to Max
+    // nothing running: ended, cancelled, or Free
+    assert.equal(ask(at({ expires_at: new Date(NOW - 1000) }), "pro").block, false);
+    assert.equal(ask(at({ status: "expired" }), "pro").block, false);
+    assert.equal(ask({ id: "free" }, "pro").block, false);
+    assert.equal(ask(null, "pro").block, false);
+    // the same Play subscription, or the one this purchase replaces: never blocked
+    assert.equal(ask(at({ billing: "play", play_purchase_token: "new" }), "pro").block, false);
+    assert.equal(ask(at({ id: "max", billing: "play", play_purchase_token: "old" }), "pro", { linkedPurchaseToken: "old" }).block, false);
+    // another Play subscription this one does not replace, same tier: blocked
+    assert.equal(ask(at({ billing: "play", play_purchase_token: "other" }), "pro").block, true);
+});
+
+test("student offers: read from the line item; an approved student is the GET /api/ai/student rule (verified, not run out)", () => {
+    const r = R.readSubscription(subPurchase({}, { offerDetails: { basePlanId: "pro-yearly", offerId: "student-yearly" }, expiryTime: iso(NOW + 365 * DAY) }), { productId: "classgrid_pro", userId: USER, now: NOW });
+    assert.equal(r.studentOffer, true);
+    assert.equal(r.offerId, "student-yearly");
+    assert.equal(R.planFromSubscription(null, r, { productId: "classgrid_pro", purchaseToken: "t", now: NOW }).note, "student price");
+    assert.equal(R.readSubscription(subPurchase({}, { offerDetails: { basePlanId: "pro-monthly", offerId: "intro-50" } }), { productId: "classgrid_pro", userId: USER, now: NOW }).studentOffer, false);
+    assert.equal(R.studentVerified({ verified_at: new Date(NOW - DAY), expires_at: new Date(NOW + DAY) }, NOW), true);
+    assert.equal(R.studentVerified({ verified_at: new Date(NOW - DAY) }, NOW), true);
+    assert.equal(R.studentVerified({ verified_at: new Date(NOW - 400 * DAY), expires_at: new Date(NOW - DAY) }, NOW), false); // run out
+    assert.equal(R.studentVerified({ verified_at: null }, NOW), false);
+    assert.equal(R.studentVerified(undefined, NOW), false);
+});
+
+test("amounts: what Google charged for the order; else the fallback; a pack bought abroad is booked in its money", () => {
+    assert.deepEqual(R.chargedAmount({ total: { currencyCode: "INR", units: "399", nanos: 0 } }, { currency: "INR", amount: 999 }), { currency: "INR", amount: 399, inr: 399, known: true });
+    assert.deepEqual(R.chargedAmount(null, { currency: "INR", amount: 999 }), { currency: "INR", amount: 999, inr: 999, known: true });
+    assert.deepEqual(R.chargedAmount(null, null), { currency: "", amount: 0, inr: 0, known: false });
+    assert.deepEqual(R.chargedAmount({ total: { currencyCode: "USD", units: "5", nanos: 990000000 } }), { currency: "USD", amount: 5.99, inr: 0, known: true });
+    assert.deepEqual(R.packFallbackPrice({ amountInr: 500, regionCode: "IN" }), { currency: "INR", amount: 500 });
+    assert.equal(R.packFallbackPrice({ amountInr: 500, regionCode: "US" }), null);
+});
+
+test("a renewal under an unchanged end date still books its new order", () => {
+    const plan = { id: "pro", billing: "play", play_purchase_token: "tok", play_product_id: "classgrid_pro", play_base_plan_id: "pro-monthly", last_payment_id: "GPA.1", expires_at: new Date(NOW + 30 * DAY) };
+    const u = R.playRenewalUpdate(plan, subPurchase({ latestOrderId: "GPA.1..0" }, { latestSuccessfulOrderId: "GPA.1..0", expiryTime: iso(NOW + 30 * DAY) }), NOW);
+    assert.equal(u.extended, false);
+    assert.equal(u.newOrder, "GPA.1..0");
+    assert.equal(u.set.last_payment_id, "GPA.1..0");
+    // the same order again: nothing new
+    assert.equal(R.playRenewalUpdate({ ...plan, last_payment_id: "GPA.1..0" }, subPurchase({}, { latestSuccessfulOrderId: "GPA.1..0", expiryTime: iso(NOW + 30 * DAY) }), NOW).newOrder, null);
+});
+
+test("a voided subscription order ends the plan only when it pays for now or Google no longer says it is paid", () => {
+    const plan = { id: "pro", billing: "play", play_purchase_token: "tok", play_product_id: "classgrid_pro", last_payment_id: "GPA.1..1" };
+    const paid = subPurchase({}, { latestSuccessfulOrderId: "GPA.1..1" });
+    assert.equal(R.voidEndsPlan(plan, { purchaseToken: "tok", orderId: "GPA.1..1" }, paid, NOW), true);
+    assert.equal(R.voidEndsPlan(plan, { purchaseToken: "tok", orderId: "GPA.1..0" }, paid, NOW), false); // an older period
+    assert.equal(R.voidEndsPlan(plan, { purchaseToken: "tok", orderId: "GPA.1..0" }, subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_EXPIRED" }, { expiryTime: iso(NOW - 1000) }), NOW), true);
+    assert.equal(R.voidEndsPlan(plan, { purchaseToken: "other", orderId: "GPA.1..1" }, paid, NOW), false);
+    assert.equal(R.voidEndsPlan({ ...plan, billing: "manual_monthly" }, { purchaseToken: "tok", orderId: "GPA.1..1" }, paid, NOW), false);
+});
+
+test("real-time notifications are read from the Pub/Sub push body", () => {
+    const push = (data) => ({ message: { data: Buffer.from(JSON.stringify(data)).toString("base64"), messageId: "m1" }, subscription: "projects/x/subscriptions/y" });
+    const base = { version: "1.0", packageName: "com.classgrid.mobile", eventTimeMillis: String(NOW) };
+    assert.deepEqual(R.parseRtdnPush(push({ ...base, subscriptionNotification: { version: "1.0", notificationType: 12, purchaseToken: "tok" } })),
+        { ok: true, messageId: "m1", token: "tok", orderId: "", productId: "", type: "SUBSCRIPTION_REVOKED", kind: "subscription" });
+    for (const [n, name] of [[1, "SUBSCRIPTION_RECOVERED"], [2, "SUBSCRIPTION_RENEWED"], [3, "SUBSCRIPTION_CANCELED"], [5, "SUBSCRIPTION_ON_HOLD"], [13, "SUBSCRIPTION_EXPIRED"]]) {
+        assert.equal(R.parseRtdnPush(push({ ...base, subscriptionNotification: { notificationType: n, purchaseToken: "tok" } })).type, name);
+    }
+    const p = R.parseRtdnPush(push({ ...base, oneTimeProductNotification: { notificationType: 2, purchaseToken: "pt", sku: "credits_500" } }));
+    assert.deepEqual([p.kind, p.type, p.token, p.productId], ["product", "ONE_TIME_PRODUCT_CANCELED", "pt", "credits_500"]);
+    const v = R.parseRtdnPush(push({ ...base, voidedPurchaseNotification: { purchaseToken: "vt", orderId: "GPA.9", productType: 1, refundType: 1 } }));
+    assert.deepEqual([v.kind, v.token, v.orderId], ["voided", "vt", "GPA.9"]);
+    assert.equal(R.parseRtdnPush(push({ ...base, testNotification: { version: "1.0" } })).kind, "test");
+    assert.equal(R.parseRtdnPush(push({ ...base, packageName: "com.other.app", testNotification: {} })).ok, false);
+    assert.equal(R.parseRtdnPush({ message: { data: "not base64 json" } }).ok, false);
+    assert.equal(R.parseRtdnPush({}).ok, false);
+});
+
+test("the credited mark is short and fixed per token", () => {
+    assert.equal(R.creditMark("abc"), R.creditMark("abc"));
+    assert.notEqual(R.creditMark("abc"), R.creditMark("abd"));
+    assert.equal(R.creditMark("x".repeat(500)).length, 32);
 });

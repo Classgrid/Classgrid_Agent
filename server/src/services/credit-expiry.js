@@ -84,10 +84,14 @@ export function poolAddUpdates(poolName, userId, amount, { now, startDate, endDa
  *   now:                the moment the credits are added (the end date is compared with it)
  *   startDate, endDate: the pool's new dates
  *   startOnlyIfMissing: while the pool is alive, keep the start date it has and write one only when there is none
- * Returns { user, expired, refused }: `user` is the person after the change (null = no such person, or refused),
- * `expired` says the old balance was dropped, `refused` says the amount could not be added.
+ *   once:               { field, mark }: add the credits only if the person's list `field` does not hold `mark` yet,
+ *                       and put the mark there in the same database step (a Google Play pack: its credits are added
+ *                       once, and whether they were can be read back; google-play.service.js)
+ * Returns { user, expired, refused, already }: `user` is the person after the change (null = no such person, or
+ * refused), `expired` says the old balance was dropped, `refused` says the amount could not be added, `already` says
+ * the `once` mark was there, so nothing was added.
  */
-export async function addToPool(User, userId, poolName, amount, { now = new Date(), startDate = null, endDate, startOnlyIfMissing = false } = {}) {
+export async function addToPool(User, userId, poolName, amount, { now = new Date(), startDate = null, endDate, startOnlyIfMissing = false, once = null } = {}) {
     const f = POOLS[poolName];
     if (!f) throw new Error(`Unknown credit pool: ${poolName}`);
     if (!creditAmount(amount)) return { user: null, expired: false, refused: true };
@@ -96,6 +100,15 @@ export async function addToPool(User, userId, poolName, amount, { now = new Date
     if (!startDate) startDate = at; // (no start date given: the pool starts when the credits are added)
     const { whenExpired, whenAlive } = poolAddUpdates(poolName, userId, amount, { now: at, startDate, endDate, startOnlyIfMissing });
     const after = { returnDocument: "after" };
+    const lastTry = { filter: { _id: userId }, update: whenAlive.update };
+    if (once) {
+        for (const step of [whenExpired, whenAlive, lastTry]) {
+            step.filter = { ...step.filter, [once.field]: { $ne: once.mark } };
+            step.update = { ...step.update, $addToSet: { [once.field]: once.mark } };
+        }
+    }
+    const markedAlready = async () => !!once && !!(await User.findOne({ _id: userId, [once.field]: once.mark }).select("_id").lean());
+    const already = { user: null, expired: false, refused: false, already: true };
 
     const aliveDone = async (user) => {
         if (startOnlyIfMissing && !valueAt(user, f.start)) {
@@ -112,11 +125,37 @@ export async function addToPool(User, userId, poolName, amount, { now = new Date
         if (reset) return { user: reset, expired: true, refused: false };
         const added = await User.findOneAndUpdate(whenAlive.filter, whenAlive.update, after);
         if (added) return aliveDone(added);
+        if (attempt === 0 && await markedAlready()) return already;
         if (attempt === 0 && !(await User.findById(userId).select("_id").lean())) return { user: null, expired: false, refused: false };
     }
     // Credits that were paid for or given are never left out: the last try adds them whatever the end date says
-    const added = await User.findOneAndUpdate({ _id: userId }, whenAlive.update, after);
-    return added ? aliveDone(added) : { user: null, expired: false, refused: false };
+    const added = await User.findOneAndUpdate(lastTry.filter, lastTry.update, after);
+    if (added) return aliveDone(added);
+    return (await markedAlready()) ? already : { user: null, expired: false, refused: false };
+}
+
+/**
+ * Takes up to `amount` credits back off a person's pool (a refunded purchase) and returns what was really taken:
+ * never more than the balance holds, so it never goes below zero; credits already spent stay spent. The balance is
+ * changed only while it still covers the amount (an answer may be charging it at the same moment), else read again.
+ * The pool's "in all" figure goes down by what was taken.
+ */
+export async function takeFromPool(User, userId, poolName, amount) {
+    const f = POOLS[poolName];
+    if (!f) throw new Error(`Unknown credit pool: ${poolName}`);
+    const want = creditAmount(amount);
+    for (let attempt = 0; attempt < 4 && want > 0; attempt++) {
+        const row = await User.findById(userId).select(`${f.balance} ${f.total}`).lean();
+        const take = Math.min(want, Math.max(0, Number(valueAt(row, f.balance)) || 0));
+        if (!(take > 0)) return 0;
+        const done = await User.findOneAndUpdate({ _id: userId, [f.balance]: { $gte: take } }, { $inc: { [f.balance]: -take } });
+        if (done) {
+            const total = Math.max(0, (Number(valueAt(done, f.total)) || 0) - take);
+            await User.updateOne({ _id: userId }, { $set: { [f.total]: total } });
+            return take;
+        }
+    }
+    return 0;
 }
 
 // Reads "a.b.c" from a document (a plain object or a Mongoose document)

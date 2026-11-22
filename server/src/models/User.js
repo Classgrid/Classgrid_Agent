@@ -851,6 +851,10 @@ const userSchema = new mongoose.Schema(
       play_base_plan_id: { type: String },
       play_state: { type: String },
     },
+    // Google Play credit packs whose credits are on this account: one short mark per purchase token
+    // (google-play-rules.js creditMark), written in the same database step as the credits, so a pack is never
+    // credited twice and whether it was can always be read back (services/google-play.service.js)
+    play_credited: { type: [String], default: undefined, select: false },
     // The account's added emails (Settings > Account > Emails; owner, 2026-11-15): up to two besides the main email,
     // each confirmed with a code sent to it. Signing in works with any confirmed one and the same password
     // (utils/account-email.js). `school` = it ends in a school domain.

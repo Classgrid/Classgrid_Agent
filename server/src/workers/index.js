@@ -92,6 +92,8 @@ initMarketingEmailWorker();
 initCronLinkJobs(); // agent review emails, ticket auto-close, expired messages (were cron-job.org links)
 initPlanExpiryWorker(); // plan-end reminder and "your plan has ended" emails
 initStudentProofCleanupWorker(); // student application documents, 30 days after the decision
+// Google Play: unfinished acknowledge/consume every 30 minutes, refunds and chargebacks (voided purchases) every day
+import("../services/google-play.service.js").then((m) => m.initGooglePlayJobs()).catch((e) => console.error("[Google Play] jobs not started:", e.message));
 // import './analytics.worker.js';
 
 console.log('👷 Background Workers Initialized');

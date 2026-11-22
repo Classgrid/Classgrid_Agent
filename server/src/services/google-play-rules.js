@@ -3,9 +3,11 @@
 // services/google-play.service.js.
 //
 // The products made in the Play Console (the phone app uses exactly these names):
-//   subscriptions: classgrid_pro (base plans pro-monthly, pro-yearly) and classgrid_max (max-monthly, max-yearly)
+//   subscriptions: classgrid_pro (base plans pro-monthly, pro-yearly) and classgrid_max (max-monthly, max-yearly);
+//     student prices are developer-determined offers on those base plans: student-monthly and student-yearly
 //   one-time credit packs (consumable): credits_500, credits_1000, credits_2000, credits_5000 (the rupee amount)
 // The phone puts the user's Mongo id in obfuscatedAccountId on every purchase; a purchase is only given to that user.
+import crypto from "crypto";
 
 export const PLAY_PACKAGE_NAME = "com.classgrid.mobile";
 
@@ -87,7 +89,7 @@ export function parseServiceAccount(raw) {
     return key;
 }
 
-// ── Subscriptions (purchases.subscriptionsv2.get) ──
+/// ── Subscriptions (purchases.subscriptionsv2.get) ──
 
 export const SUB_ACTIVE = "SUBSCRIPTION_STATE_ACTIVE";
 export const SUB_GRACE = "SUBSCRIPTION_STATE_IN_GRACE_PERIOD";
@@ -95,8 +97,11 @@ export const SUB_CANCELED = "SUBSCRIPTION_STATE_CANCELED"; // auto-renew turned 
 export const SUB_EXPIRED = "SUBSCRIPTION_STATE_EXPIRED";
 export const ACK_PENDING = "ACKNOWLEDGEMENT_STATE_PENDING";
 
-/** A new subscription gives the plan only while Google says it is active or in its grace period */
-export const subscriptionGrantable = (state) => state === SUB_ACTIVE || state === SUB_GRACE;
+/**
+ * The states in which the subscription is paid for: active, in its grace period, or cancelled (auto-renew turned off)
+ * while its line item's expiry is still ahead. The expiry itself is checked on the line item (activeSubscriptionItem).
+ */
+export const subscriptionGrantable = (state) => state === SUB_ACTIVE || state === SUB_GRACE || state === SUB_CANCELED;
 
 /** The line item of a subscription purchase for a product (the first one when no product is named) */
 export function subscriptionLineItem(purchase, productId = null) {
@@ -125,30 +130,63 @@ export function activeSubscriptionItem(purchase, productId = null, now = Date.no
         || items.reduce((a, b) => (ms(b.expiryTime) > ms(a.expiryTime) ? b : a));
 }
 
+/** The line item paid for now, only while the subscription's state is a paid one */
+export const entitledItem = (purchase, productId = null, now = Date.now()) =>
+    (subscriptionGrantable(purchase?.subscriptionState) ? activeSubscriptionItem(purchase, productId, now) : null);
+
 /** The purchase is about this product: one of its line items is it, or will be replaced by it (a deferred change) */
 export const purchaseNamesProduct = (purchase, productId) => (Array.isArray(purchase?.lineItems) ? purchase.lineItems : [])
     .some((li) => li?.productId === productId || li?.deferredItemReplacement?.productId === productId);
 
-/** A Google Money value ({ currencyCode, units, nanos }) in rupees, or 0 when it is not in rupees */
-export function moneyInr(money) {
-    if (!money || money.currencyCode !== "INR") return 0;
+/** A Google Money value ({ currencyCode, units, nanos }) as { currency, amount }, or null when it has no amount */
+export function moneyValue(money) {
+    if (!money || !money.currencyCode) return null;
     const v = Number(money.units || 0) + Number(money.nanos || 0) / 1e9;
-    return Number.isFinite(v) && v > 0 ? Math.round(v * 100) / 100 : 0;
+    return Number.isFinite(v) && v >= 0 ? { currency: String(money.currencyCode), amount: Math.round(v * 100) / 100 } : null;
+}
+
+/** A Google Money value in rupees, or 0 when it is not in rupees */
+export function moneyInr(money) {
+    const m = moneyValue(money);
+    return m && m.currency === "INR" ? m.amount : 0;
+}
+
+/**
+ * What a payment is booked at: what Google charged for the order (orders.get: the total, tax included) when it could
+ * be read, else `fallback` (a renewal's recurring price; a pack's own size when bought in India). Rows keep the
+ * rupee amount in amount_inr (0 when the money was not rupees) and the real currency and amount beside it.
+ */
+export function chargedAmount(order, fallback = null) {
+    const total = moneyValue(order?.total);
+    const charged = total || (fallback && fallback.currency ? { currency: fallback.currency, amount: Number(fallback.amount) || 0 } : null);
+    if (!charged) return { currency: "", amount: 0, inr: 0, known: false };
+    return { ...charged, inr: charged.currency === "INR" ? charged.amount : 0, known: true };
+}
+
+// Student offers on the same base plans (Play Console: developer-determined offers on classgrid_pro and classgrid_max)
+export const STUDENT_OFFER_IDS = Object.freeze(["student-monthly", "student-yearly"]);
+export const isStudentOffer = (li) => STUDENT_OFFER_IDS.includes(String(li?.offerDetails?.offerId || ""));
+
+/** An approved student whose approval has not run out (the same check the website's student purchase uses) */
+export function studentVerified(sv, now = Date.now()) {
+    return !!sv?.verified_at && !(sv.expires_at && ms(sv.expires_at) < ms(now));
 }
 
 /**
  * What a new subscription purchase gives, or why it gives nothing.
- * { ok: true, key, term, expiresAt (Date), state, autoRenew, orderId, priceInr, needsAck } or { ok: false, status, error }
+ * { ok: true, key, term, productId, basePlanId, offerId, studentOffer, linkedPurchaseToken, expiresAt, state,
+ *   autoRenew, orderId, recurringPrice, needsAck } or { ok: false, status, error, code? }
  */
 export function readSubscription(purchase, { productId, userId, now = Date.now() }) {
     if (!accountMatches(purchase?.externalAccountIdentifiers?.obfuscatedExternalAccountId, userId)) {
-        return { ok: false, status: 403, error: "This purchase was made from another Classgrid account." };
+        return { ok: false, status: 403, error: "This purchase was made from another Classgrid account.", code: "other_account" };
     }
     if (!planKeyForProduct(productId)) return { ok: false, status: 400, error: "This subscription plan is not sold by Classgrid." };
     const state = purchase?.subscriptionState || "";
     if (!subscriptionGrantable(state)) return { ok: false, status: 400, error: "This subscription is not active." };
     if (!purchaseNamesProduct(purchase, productId)) return { ok: false, status: 400, error: "This purchase is not for that product." };
-    // What is paid for now (after a deferred downgrade: still the higher plan, until Google renews it as the lower one)
+    // What is paid for now (after a deferred downgrade: still the higher plan, until Google renews it as the lower one;
+    // a cancelled subscription: until its expiry)
     const li = activeSubscriptionItem(purchase, productId, now);
     if (!li) {
         const named = subscriptionLineItem(purchase, productId);
@@ -156,44 +194,69 @@ export function readSubscription(purchase, { productId, userId, now = Date.now()
         return { ok: false, status: 400, error: "This subscription is not active." };
     }
     const plan = planForSubscription(li.productId, li.offerDetails?.basePlanId);
-    const expiry = ms(li.expiryTime);
     return {
         ok: true,
         key: plan.key,
         term: plan.term,
         productId: li.productId,
         basePlanId: li.offerDetails?.basePlanId || "",
-        // (a plan change or a re-signup: the token it replaces, which is no longer this user's subscription)
+        offerId: li.offerDetails?.offerId || "",
+        studentOffer: isStudentOffer(li),
+        // (a plan change or a re-signup: the token it replaces, which is no longer anyone's subscription)
         linkedPurchaseToken: purchase.linkedPurchaseToken || "",
-        expiresAt: new Date(expiry),
+        expiresAt: new Date(ms(li.expiryTime)),
         state,
-        autoRenew: li.autoRenewingPlan?.autoRenewEnabled !== false,
+        autoRenew: state !== SUB_CANCELED && li.autoRenewingPlan?.autoRenewEnabled !== false,
         orderId: li.latestSuccessfulOrderId || purchase.latestOrderId || "",
-        priceInr: moneyInr(li.autoRenewingPlan?.recurringPrice),
+        recurringPrice: moneyValue(li.autoRenewingPlan?.recurringPrice),
         needsAck: purchase.acknowledgementState === ACK_PENDING,
     };
 }
 
+// The plans in order: a higher tier gives more
+const PLAN_TIER = Object.freeze({ free: 0, pro: 1, max: 2, enterprise: 3 });
+export const planTier = (key) => PLAN_TIER[key] ?? 0;
+
+/** The user's plan is a paid one that is on now (not ended, not cancelled; a plan with no end date runs until removed) */
+export function paidPlanOn(plan, now = Date.now()) {
+    if (!plan || planTier(plan.id) === 0) return false;
+    if (plan.status && !["active", "past_due"].includes(plan.status)) return false;
+    return !plan.expires_at || ms(plan.expires_at) > ms(now);
+}
+
 /**
- * The plan a Google Play subscription becomes on the user, given what the user has now: the plan bought, with
- * Google's expiry. When the user already pays for the same plan (not a gift) for longer, those days are kept.
+ * Whether a Google Play subscription may replace the plan the user has now:
+ *   { block: true }   the user already has a plan from somewhere else (the website, a gift, a seat, or another Google
+ *                     Play subscription that this one does not replace) of the same or a higher tier, still running:
+ *                     the purchase is refused (code has_other_plan) and not acknowledged, so Google refunds it
+ *   { block: false, replaces }   nothing paid is running, it is this same subscription or the one it replaces, or a
+ *                     lower tier that this purchase upgrades (replaces = that plan's billing, e.g. "manual_monthly")
  */
+export function otherPlanDecision(current, { key, purchaseToken, linkedPurchaseToken = "", now = Date.now() }) {
+    if (!paidPlanOn(current, now)) return { block: false, replaces: null };
+    if (current.billing === "play" && current.play_purchase_token && (current.play_purchase_token === purchaseToken || current.play_purchase_token === linkedPurchaseToken)) {
+        return { block: false, replaces: null };
+    }
+    if (planTier(current.id) >= planTier(key)) return { block: true, replaces: null };
+    return { block: false, replaces: current.billing || "none" };
+}
+
+/** The plan a Google Play subscription becomes on the user: the plan paid for now, until Google's expiry */
 export function planFromSubscription(current, sub, { productId, purchaseToken, basePlanId, now = Date.now() }) {
     const cur = current || {};
-    const sameActive = cur.id === sub.key && (cur.status || "active") === "active" && cur.billing !== "granted"
-        && Number.isFinite(ms(cur.expires_at)) && ms(cur.expires_at) > ms(now);
-    const expires = sameActive && ms(cur.expires_at) > sub.expiresAt.getTime() ? new Date(ms(cur.expires_at)) : sub.expiresAt;
+    // (the same plan from Google Play running on, e.g. a re-signup or a term change: its start date stays)
+    const samePlayPlan = cur.billing === "play" && cur.id === sub.key && paidPlanOn(cur, now);
     return {
         id: sub.key,
         status: "active",
         billing: "play",
-        started_at: sameActive && cur.started_at ? cur.started_at : new Date(ms(now)),
-        expires_at: expires,
+        started_at: samePlayPlan && cur.started_at ? cur.started_at : new Date(ms(now)),
+        expires_at: sub.expiresAt,
         cancel_at_period_end: sub.state === SUB_CANCELED || sub.autoRenew === false,
         last_payment_id: sub.orderId || "",
         source: "google_play",
         set_by: "",
-        note: "",
+        note: sub.studentOffer ? "student price" : "",
         play_purchase_token: purchaseToken,
         // (the product paid for now, which after a deferred downgrade is the old one until it renews)
         play_product_id: sub.productId || productId,
@@ -210,6 +273,7 @@ const STOP_CHECKING_AFTER = 100 * DAY;
 /**
  * Whether a Google Play plan should be checked with Google now: it came from Google Play, its end has passed or is
  * within the next hour, Google has not said it is over for good, and it ended less than 100 days ago.
+ * (Google's real-time notifications check it at once whatever its end date: google-play.service.js.)
  */
 export function playRefreshDue(plan, now = Date.now()) {
     if (!plan || plan.billing !== "play" || !plan.play_purchase_token) return false;
@@ -221,8 +285,11 @@ export function playRefreshDue(plan, now = Date.now()) {
 }
 
 /**
- * What a renewal check changes on the plan (the fields of user.plan to set), from Google's answer for the plan's own
- * token. null when nothing changes. `extended` = the plan runs longer than before (a renewal, or a grace period).
+ * What Google's answer for the plan's own token changes on the plan (the fields of user.plan to set). The plan
+ * follows Google: its end date is Google's expiry, its plan is the line item paid for now.
+ *   extended   the plan runs longer than before (a renewal, or a grace period)
+ *   newOrder   a Google order the plan has not booked yet (a renewal): its Invoices row is written, whatever the end
+ *              date did
  */
 export function playRenewalUpdate(plan, purchase, now = Date.now()) {
     if (!plan || !purchase) return null;
@@ -230,8 +297,7 @@ export function playRenewalUpdate(plan, purchase, now = Date.now()) {
     const end = ms(plan.expires_at);
     const t = ms(now);
     const set = { play_state: state };
-    // What is paid for now: after a deferred downgrade renews, this is the new (lower) plan's line item
-    const li = state === SUB_ACTIVE || state === SUB_GRACE || state === SUB_CANCELED ? activeSubscriptionItem(purchase, plan.play_product_id || null, t) : null;
+    const li = entitledItem(purchase, plan.play_product_id || null, t);
     if (li) {
         const expiry = ms(li.expiryTime);
         const mapped = planForSubscription(li.productId, li.offerDetails?.basePlanId);
@@ -239,20 +305,36 @@ export function playRenewalUpdate(plan, purchase, now = Date.now()) {
         if (mapped.key !== plan.id || li.productId !== plan.play_product_id || li.offerDetails.basePlanId !== plan.play_base_plan_id) {
             set.id = mapped.key; set.play_product_id = li.productId; set.play_base_plan_id = li.offerDetails.basePlanId;
         }
-        if (!Number.isFinite(end) || expiry > end) {
-            set.expires_at = new Date(expiry);
-            set.status = "active";
-            const orderId = li.latestSuccessfulOrderId || purchase.latestOrderId || "";
-            if (orderId) set.last_payment_id = orderId;
-            return { set, extended: true, term: mapped.term, key: mapped.key, orderId, priceInr: moneyInr(li.autoRenewingPlan?.recurringPrice) };
-        }
-        return { set, extended: false };
+        if (!Number.isFinite(end) || expiry !== end) set.expires_at = new Date(expiry);
+        set.status = "active";
+        const orderId = li.latestSuccessfulOrderId || purchase.latestOrderId || "";
+        const newOrder = orderId && orderId !== plan.last_payment_id ? orderId : null;
+        if (newOrder) set.last_payment_id = newOrder;
+        return {
+            set, extended: !Number.isFinite(end) || expiry > end, newOrder, orderId,
+            key: mapped.key, term: mapped.term, recurringPrice: moneyValue(li.autoRenewingPlan?.recurringPrice),
+        };
     }
-    // Over (expired, refunded, on hold, paused): the plan ends at Google's end if that is earlier than ours
+    // Not paid now (expired, revoked, refunded, on hold, paused): the plan ends at Google's end, or now, if that is
+    // earlier than ours
     const last = subscriptionLineItem(purchase, plan.play_product_id || null) || subscriptionLineItem(purchase);
     const expiry = ms(last?.expiryTime);
-    if (state === SUB_EXPIRED && Number.isFinite(expiry) && Number.isFinite(end) && expiry < end) set.expires_at = new Date(expiry);
-    return { set, extended: false };
+    const endAt = Number.isFinite(expiry) ? Math.min(expiry, t) : t;
+    if (!Number.isFinite(end) || endAt < end) set.expires_at = new Date(endAt);
+    return { set, extended: false, newOrder: null };
+}
+
+/**
+ * A voided (refunded, charged back, revoked) subscription order: whether the user's Play plan ends. It ends when the
+ * plan is this token's and the voided order is the one paying for now, or Google no longer says it is paid; a refund
+ * of an older period leaves the period paid now alone.
+ */
+export function voidEndsPlan(plan, { purchaseToken, orderId }, purchase, now = Date.now()) {
+    if (!plan || plan.billing !== "play" || plan.play_purchase_token !== purchaseToken) return false;
+    const li = entitledItem(purchase, plan.play_product_id || null, now);
+    if (!li) return true;
+    const current = li.latestSuccessfulOrderId || purchase?.latestOrderId || "";
+    return !orderId || orderId === current || orderId === plan.last_payment_id;
 }
 
 /**
@@ -278,18 +360,79 @@ export function planSourceAndTerm(plan, effectiveKey) {
 
 // ── One-time products (purchases.products.get) ──
 
-/** What a credit pack purchase gives, or why it gives nothing: { ok: true, amountInr, orderId } or { ok: false, status, error } */
+/**
+ * What a credit pack purchase gives, or why it gives nothing:
+ * { ok: true, amountInr (the pack's size: what the credits are counted from), orderId, regionCode, paidAt }
+ * or { ok: false, status, error }. A pack bought outside India still gives its pack size in credits; what was
+ * really charged (in that country's money) is booked from the order (chargedAmount).
+ */
 export function readProductPurchase(purchase, { productId, userId }) {
     const amountInr = packAmountInr(productId);
     if (!amountInr) return { ok: false, status: 400, error: "This product is not sold by Classgrid." };
     if (!accountMatches(purchase?.obfuscatedExternalAccountId, userId)) {
-        return { ok: false, status: 403, error: "This purchase was made from another Classgrid account." };
+        return { ok: false, status: 403, error: "This purchase was made from another Classgrid account.", code: "other_account" };
     }
     if (purchase?.productId && purchase.productId !== productId) return { ok: false, status: 400, error: "This purchase is not for that product." };
     if (purchase?.purchaseState === 2) return { ok: false, status: 400, error: "This payment is not complete yet." };
     if (purchase?.purchaseState !== 0) return { ok: false, status: 400, error: "This purchase was cancelled." };
     if (purchase?.consumptionState === 1) return { ok: false, status: 400, error: "This purchase has already been used." };
-    return { ok: true, amountInr, orderId: purchase.orderId || "" };
+    const paid = Number(purchase.purchaseTimeMillis);
+    return {
+        ok: true, amountInr, orderId: purchase.orderId || "", regionCode: String(purchase.regionCode || "").toUpperCase(),
+        paidAt: paid > 0 ? new Date(paid) : null,
+    };
+}
+
+/** What a pack is booked at when Google's order could not be read: its own size in rupees when bought in India */
+export const packFallbackPrice = (pack) => (pack.regionCode === "IN" || !pack.regionCode ? { currency: "INR", amount: pack.amountInr } : null);
+
+/**
+ * The short, fixed mark of a purchase token kept on the user when its credits are added (User.play_credited). The
+ * credits and the mark are written in one database step, so a pack's credits can never be added twice, and whether
+ * they were added can always be read back (google-play.service.js grantCreditPack).
+ */
+export const creditMark = (purchaseToken) => crypto.createHash("sha256").update(String(purchaseToken)).digest("hex").slice(0, 32);
+
+// ── Real-time developer notifications (Pub/Sub push to POST /api/billing/google-play/rtdn) ──
+
+// Google's notification types (developer.android.com/google/play/billing/rtdn-reference)
+export const SUBSCRIPTION_NOTIFICATIONS = Object.freeze({
+    1: "SUBSCRIPTION_RECOVERED", 2: "SUBSCRIPTION_RENEWED", 3: "SUBSCRIPTION_CANCELED", 4: "SUBSCRIPTION_PURCHASED",
+    5: "SUBSCRIPTION_ON_HOLD", 6: "SUBSCRIPTION_IN_GRACE_PERIOD", 7: "SUBSCRIPTION_RESTARTED",
+    8: "SUBSCRIPTION_PRICE_CHANGE_CONFIRMED", 9: "SUBSCRIPTION_DEFERRED", 10: "SUBSCRIPTION_PAUSED",
+    11: "SUBSCRIPTION_PAUSE_SCHEDULE_CHANGED", 12: "SUBSCRIPTION_REVOKED", 13: "SUBSCRIPTION_EXPIRED",
+    17: "SUBSCRIPTION_ITEMS_CHANGED", 18: "SUBSCRIPTION_CANCELLATION_SCHEDULED", 19: "SUBSCRIPTION_PRICE_CHANGE_UPDATED",
+    20: "SUBSCRIPTION_PENDING_PURCHASE_CANCELED", 22: "SUBSCRIPTION_PRICE_STEP_UP_CONSENT_UPDATED",
+});
+export const ONE_TIME_NOTIFICATIONS = Object.freeze({ 1: "ONE_TIME_PRODUCT_PURCHASED", 2: "ONE_TIME_PRODUCT_CANCELED" });
+
+/**
+ * A Pub/Sub push body ({ message: { data: base64 JSON, messageId }, subscription }) read as one notification:
+ * { ok: true, kind: "subscription" | "product" | "voided" | "test" | "other", type, token, orderId, productId,
+ *   messageId } or { ok: false, error } when it is not a notification for this app.
+ */
+export function parseRtdnPush(body) {
+    const message = body?.message;
+    if (!message || typeof message.data !== "string") return { ok: false, error: "not a Pub/Sub push message" };
+    let data;
+    try { data = JSON.parse(Buffer.from(message.data, "base64").toString("utf8")); } catch { return { ok: false, error: "the message data is not JSON" }; }
+    if (!data || data.packageName !== PLAY_PACKAGE_NAME) return { ok: false, error: "not for this app" };
+    const base = { ok: true, messageId: String(message.messageId || message.message_id || ""), token: "", orderId: "", productId: "", type: "" };
+    if (data.subscriptionNotification) {
+        const n = data.subscriptionNotification;
+        return { ...base, kind: "subscription", type: SUBSCRIPTION_NOTIFICATIONS[n.notificationType] || `SUBSCRIPTION_${n.notificationType}`, token: String(n.purchaseToken || "") };
+    }
+    if (data.oneTimeProductNotification) {
+        const n = data.oneTimeProductNotification;
+        return { ...base, kind: "product", type: ONE_TIME_NOTIFICATIONS[n.notificationType] || `ONE_TIME_${n.notificationType}`, token: String(n.purchaseToken || ""), productId: String(n.sku || "") };
+    }
+    if (data.voidedPurchaseNotification) {
+        const n = data.voidedPurchaseNotification;
+        // productType 1 = subscription, 2 = one-time product
+        return { ...base, kind: "voided", type: n.productType === 1 ? "VOIDED_SUBSCRIPTION" : "VOIDED_PRODUCT", token: String(n.purchaseToken || ""), orderId: String(n.orderId || "") };
+    }
+    if (data.testNotification) return { ...base, kind: "test", type: "TEST" };
+    return { ...base, kind: "other", type: "OTHER" };
 }
 
 // ── Idempotency ──

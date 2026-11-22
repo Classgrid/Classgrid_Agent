@@ -13,6 +13,16 @@ const googlePlayPurchaseSchema = new mongoose.Schema(
         // A subscription bought as a plan change (Pro to Max, monthly to yearly) or a re-signup: the token it replaced.
         // That older token is then never given again nor renewed (services/google-play.service.js).
         linkedPurchaseToken: { type: String, default: "", index: true },
+        // The newer token that replaced this subscription (a plan change); this one is then never given or renewed
+        replacedBy: { type: String, default: "" },
+        // A credit pack: the credits it gives (saved before they are added) and whether they are on the account. The
+        // credits and the account's own mark (User.play_credited) are written in one step; this flag follows it, and
+        // a pack that is credited is never rolled back, only finished (google-play.service.js)
+        creditsPlanned: { type: Number, default: 0 },
+        credited: { type: Boolean, default: false },
+        regionCode: { type: String, default: "" },
+        // Orders Google voided (refunded, charged back, revoked) that were applied here
+        voidedOrders: { type: [String], default: undefined },
         // "granting" while a request is giving it, "granted" once it is on the account
         status: { type: String, enum: ["granting", "granted"], default: "granting" },
         // What was given: { plan: { key, term, expires_at } } or { credits_added }
