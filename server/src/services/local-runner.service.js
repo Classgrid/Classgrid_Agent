@@ -9,6 +9,7 @@ import crypto from "node:crypto";
 import { getIO } from "./socket.service.js";
 import { projectForChat } from "./ide-project.service.js";
 import redis from "../config/redis.js";
+import { noSuchJobHere, betterJobReply } from "../utils/runner-job-reply.js";
 
 // ── The app that is chatting runs the step itself (owner's requirement, 2026-11-09) ──────────────────────────
 // While an answer streams to the desktop app or Classgrid Code and the app said it can run steps (body.pcTools),
@@ -190,13 +191,17 @@ async function askRunner(userId, tool, payload) {
     const quiet = withQuietProgress(tool, payload);
     // The app that is chatting runs it (see pcExecutors above); the socket only when there is no such app
     const exec = pcExecutorFor(userId, payload?.chat);
-    if (exec) {
-        const reply = await askViaApp(exec, userId, tool, quiet);
-        if (reply) return withWakeNote(reply);
-    }
     // (the answer's checkpoint goes along on the socket too, so the app keeps its before-copies for the Review tab)
     const checkpoint = exec?.checkpoint || socketCheckpointFor(payload?.chat);
-    return withWakeNote(await askRunnerOnce(userId, tool, checkpoint ? { ...quiet, checkpoint } : quiet));
+    const viaSocket = () => askRunnerOnce(userId, tool, checkpoint ? { ...quiet, checkpoint } : quiet);
+    if (exec) {
+        const reply = await askViaApp(exec, userId, tool, quiet);
+        // A background job is kept by the app that started it: when the chatting app doesn't have it, the person's other
+        // Classgrid apps are asked too, and its own answer stands only when none of them has the job either
+        if (reply && noSuchJobHere(tool, reply)) return withWakeNote(betterJobReply(tool, reply, await viaSocket().catch(() => null)));
+        if (reply) return withWakeNote(reply);
+    }
+    return withWakeNote(await viaSocket());
 }
 // Windows PowerShell draws a progress bar for every piece of a download (Invoke-WebRequest, Expand-Archive...), even in a
 // hidden window, which makes them many times slower: it is switched off for the AI's PowerShell commands
@@ -244,6 +249,9 @@ async function liveSockets(here) {
 // 'getPrimaryDisplay')" (the owner's desktop app chat, 2026-11-18 12:58 IST, with VS Code open next to the app). That
 // answer means the same thing.
 const CANT_RUN_HERE = /can't run on this computer|wasn't opened in the Classgrid app|reading '(getPrimaryDisplay|getSources)'/;
+// The next connection is asked when this one can't do the step, or says the background job isn't one of its own
+// (each Classgrid app keeps the jobs it started: utils/runner-job-reply.js)
+const askNextApp = (tool, reply) => typeof reply?.text === "string" && (CANT_RUN_HERE.test(reply.text) || noSuchJobHere(tool, reply));
 async function askRunnerOnce(userId, tool, payload) {
     const io = getIO();
     const room = runnerRoom(String(userId));
@@ -277,7 +285,7 @@ async function askRunnerOnce(userId, tool, payload) {
                     try { s.disconnect(true); } catch { /* already gone */ } // it answered the probe but not the step: not asked again
                     continue;
                 }
-                if (!(typeof reply?.text === "string" && CANT_RUN_HERE.test(reply.text))) break;
+                if (!askNextApp(tool, reply)) break;
             }
             if (typeof reply?.text !== "string" && lastError) throw lastError;
             return typeof reply?.text === "string" ? reply : null;
@@ -288,7 +296,7 @@ async function askRunnerOnce(userId, tool, payload) {
         const replies = await io.to(room).timeout(timeoutFor(tool, payload?.args)).emitWithAck("local-tool", payload);
         // (every connection answered: one that could do the step wins over one that says it can't)
         const answered = Array.isArray(replies) ? replies.filter((r) => r && typeof r.text === "string") : [];
-        return answered.find((r) => !CANT_RUN_HERE.test(r.text)) || answered[0] || null;
+        return answered.find((r) => !askNextApp(tool, r)) || answered[0] || null;
     } catch (err) {
         return { text: `Error: the Classgrid desktop app didn't answer in time (${err.message}). Ask the user to check the app is open.` };
     }
