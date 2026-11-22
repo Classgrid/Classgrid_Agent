@@ -7,6 +7,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Switch } from "@/components/marketing_ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/marketing_ui/select";
 import { fetchWithRescue } from "@/lib/rescue";
 
 const backendUrl = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
@@ -92,14 +93,22 @@ export function SettingsRemotePcCard() {
         {row(
           "Permission mode on the phone",
           "How the phone starts for this computer's chats. The phone can change it.",
-          <select
+          <Select
             value={server.defaultMode}
             disabled={busy || !server.allowed}
-            onChange={(e) => saveServer({ defaultMode: e.target.value })}
-            className="h-8 rounded-md border border-border bg-background px-2 text-sm text-foreground"
+            onValueChange={(v) => saveServer({ defaultMode: v })}
           >
-            {MODES.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-          </select>,
+            <SelectTrigger className="w-[160px] shrink-0" aria-label="Permission mode on the phone">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {MODES.map((m) => (
+                <SelectItem key={m.id} value={m.id}>
+                  {m.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>,
         )}
         {hasLocal && local && (
           <>
