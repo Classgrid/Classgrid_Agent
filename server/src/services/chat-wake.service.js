@@ -23,6 +23,19 @@ export async function rememberChatMeta(sessionId, meta) {
     await redis.set(META(sessionId), JSON.stringify(meta), "EX", 7 * DAY).catch(() => {});
 }
 
+/**
+ * The model and effort the person last picked in this chat, for a turn Classgrid starts by itself in it: a sleeping
+ * task woken at its time (agent-task.service.js wakeTask). Empty when the chat has none saved.
+ * (owner, 2026-11-22: a test started on Claude Sonnet 5.5 slept three times, and every wake-up ran on DeepSeek V4.1
+ * Flash, the default, because the wake-up didn't send the chat's model; a finished background job's wake-up did.)
+ */
+export async function chatModelChoice(sessionId) {
+    if (!sessionId) return {};
+    let meta = {};
+    try { meta = JSON.parse((await redis.get(META(sessionId))) || "{}"); } catch { /* none */ }
+    return { ...(meta.selectedModel ? { selectedModel: meta.selectedModel } : {}), ...(meta.effort ? { effort: meta.effort } : {}) };
+}
+
 const tell = (userId, data) => { try { getIO().to(String(userId)).emit("chat:woke", data); } catch { /* no socket server */ } };
 // The events of a woken answer the open chat shows live
 const LIVE_EVENTS = new Set(["token", "thought", "tool_start", "tool_result", "status"]);

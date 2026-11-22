@@ -714,6 +714,8 @@ export async function wakeTask(taskId, reason) {
         // A task that belongs to a chat: the person's open app is told that the chat woke and gets the answer as it is
         // written, exactly as for a chat woken without a task (chat-wake.service.js wokenChatEvents)
         const shown = task.session_id ? await import("./chat-wake.service.js").then((m) => m.wokenChatEvents(String(user._id), task.session_id)).catch(() => null) : null;
+        // The woken run uses the model the person picked in that chat, not the default (chat-wake.service.js chatModelChoice)
+        const modelChoice = task.session_id ? await import("./chat-wake.service.js").then((m) => m.chatModelChoice(task.session_id)).catch(() => ({})) : {};
         shown?.start(question);
         const result = await runAgentTask(user, question, task.project_id, (sessionId) => {
             setTaskSession(task._id, sessionId);
@@ -724,7 +726,7 @@ export async function wakeTask(taskId, reason) {
             if (!stepText.startsWith("sleep_until")) steps++;
             if (info?.name === "send_whatsapp_message") sends.push(info);
             logTaskStep(task._id, info);
-        }, { taskOrigin: task.origin }, stop?.signal || null, (data) => { rec.onData(data); try { shown?.event(data); } catch { /* the app's own problem */ } })
+        }, { ...modelChoice, taskOrigin: task.origin }, stop?.signal || null, (data) => { rec.onData(data); try { shown?.event(data); } catch { /* the app's own problem */ } })
             .finally(() => { try { shown?.end(); } catch { /* the app's own problem */ } return clock.done(); });
         await clock.done();
         await rec.end(result);
