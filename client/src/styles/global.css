@@ -239,13 +239,13 @@
     --icon-invert-light: none;
   }
 
-  /* Studio Mode: a grey left sidebar (the marketing site's greys), so it stands apart from the black page */
+  /* Studio Mode: the side panels in background-200 (#FAFAFA light, #000000 dark), the chat in background-100 (owner, 2026-11-23) */
   html.studio-mode {
-    --sidebar-background: #f5f5f5;
+    --sidebar-background: #fafafa;
     --sidebar-accent: #eaeaea;
   }
   html.dark.studio-mode {
-    --sidebar-background: #181818;
+    --sidebar-background: #000000;
     --sidebar-accent: #262626;
   }
   /* Studio Mode's chat: grey layers instead of pure black */
@@ -272,7 +272,7 @@
      from its theme. Incognito keeps its own colors. */
   html.desktop-app,
   html.studio-colors {
-    --sidebar-background: #f5f5f5;
+    --sidebar-background: #fafafa;
     --sidebar-accent: #eaeaea;
   }
   html.desktop-app:not(.dark),
@@ -295,7 +295,7 @@
   }
   html.dark.desktop-app,
   html.dark.studio-colors {
-    --sidebar-background: #181818;
+    --sidebar-background: #000000;
     --sidebar-accent: #262626;
     --background: #121212;
     --color-background: #121212;
