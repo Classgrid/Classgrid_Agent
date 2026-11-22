@@ -206,6 +206,7 @@ export function runRecorder(taskId, { reason = "", attempt = 1 } = {}) {
     const pending = new Map(); // tool name -> [start times], for tools that started and have no result yet
     let thought = "";
     let stepsThisRun = 0;
+    let slept = false;
     const where = { agent_task_id: taskId };
     const ready = (async () => {
         if (!taskId) return;
@@ -251,6 +252,11 @@ export function runRecorder(taskId, { reason = "", attempt = 1 } = {}) {
                 const name = data.tool || data.name || "tool";
                 const started = (pending.get(name) || []).shift() || { at: new Date(), args: {} };
                 const result = String(data.result ?? "");
+                // (the run ended by sleeping: known from the tool itself, since the answer no longer always ends with the
+                // "Waiting for…" line, 2026-11-22)
+                // (its result is an object, { text, stopAnswer }: the text is what says it slept)
+                const said = data.result && typeof data.result === "object" ? data.result.text : data.result;
+                if (name === "sleep_until" && String(said ?? "").startsWith("SLEEPING:")) slept = true;
                 push({ run: runNo, at: started.at, ended_at: new Date(), tool: name, title: String(started.args?.title || ""), args: cutArgs(started.args), result: cut(result), status: failed(result) ? "error" : "ok" });
             } else if (data.type === "thought" && data.thought) {
                 if (thought.length < MAX_THOUGHT) thought += String(data.thought);
@@ -268,7 +274,7 @@ export function runRecorder(taskId, { reason = "", attempt = 1 } = {}) {
             await Promise.all(stopped);
             const doc = await Call.findOne(where).select("session_id").lean().catch(() => null);
             const model = doc?.session_id ? await redis.get(`ai:lastmodel:${doc.session_id}`).catch(() => null) : null;
-            const outcome = result.aborted ? "stopped" : result.quota ? "quota" : result.error ? "error" : /💤 Waiting for/.test(result.answer || "") ? "sleep" : "answer";
+            const outcome = result.aborted ? "stopped" : result.quota ? "quota" : result.error ? "error" : slept || /💤 Waiting for/.test(result.answer || "") ? "sleep" : "answer";
             const i = runNo - 1;
             await write(where, {
                 $set: {

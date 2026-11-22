@@ -36,6 +36,7 @@
 // A call to it is still handled if the model makes one anyway.
 import { cfSwapProvider } from "./cf-retired-models.js";
 import { cfAiFetch, isCfNeuronCapError } from "./cf-neuron-cap.service.js";
+import { stopAnswerText } from "../utils/stop-answer.js";
 
 /** The text without U+FFFD, the replacement character a provider sends for a character it could not decode */
 const withoutBroken = (piece) => (typeof piece === "string" && piece.includes("\uFFFD") ? piece.replace(/\uFFFD/g, "") : piece);
@@ -794,7 +795,7 @@ export async function streamChat({
                 if (toolResult && typeof toolResult === "object" && typeof toolResult.stopAnswer === "string") {
                     // sleep_until: what the AI wrote before it (often its question to the user) is kept, not lost
                     const said = toolName === "sleep_until" ? String(round.text || "").trim() : "";
-                    stopAnswer = said && !toolResult.stopAnswer.includes(said) ? `${said}\n\n${toolResult.stopAnswer}` : toolResult.stopAnswer;
+                    stopAnswer = stopAnswerText(said, toolResult);
                 }
                 if (toolImages && !String(resultText ?? "").startsWith("FAILED")) roundImages.push(...await toolImages.fromResult(toolName, toolResult && typeof toolResult === "object" ? toolResult : null, resultText));
                 // A tool that is missing or failed: the next step doesn't stop to think it over (it goes straight to the

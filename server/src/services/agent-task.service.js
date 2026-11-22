@@ -51,6 +51,10 @@ import { cfAiFetch, isCfNeuronCapError } from "./cf-neuron-cap.service.js";
 
 const MAX_WORK_MS = 48 * 60 * 60 * 1000;
 const ALARM_MS = 5 * 60 * 1000;
+// How often sleeping tasks are checked for their wake time (owner, 2026-11-22: "5 sec only"). Until that day only the
+// 5-minute alarm looked, so a sleep until 11:54 set at 11:53 woke at 11:58:37, the alarm's next round: a chat asked
+// to sleep one or two minutes looked as if it never woke.
+const CLOCK_MS = 5 * 1000;
 const RETRY_MS = 5 * 60 * 1000;
 const STALE_MS = 5 * 60 * 1000; // a run that hasn't checked in for this long has stopped (server restart)
 const NO_PROGRESS_LIMIT = 5;
@@ -381,10 +385,13 @@ export async function sleepFromTool({ user, sessionId, projectId, origin, questi
     }, { upsert: true });
 
     const until = [onReply ? "your reply on WhatsApp" : "", wakeAt ? india(wakeAt) : ""].filter(Boolean).join(" or ");
-    const status = `💤 Waiting for ${until}. I'll continue then.`;
+    // The answer ends with the AI's own words: its message here, and what it wrote before the call (the stream adds
+    // that: utils/stop-answer.js). The fixed "Waiting for…" line is no longer added under them (owner, 2026-11-22:
+    // "that line is to remove, hardcoded"); it is the answer only when the AI said nothing at all, since an answer
+    // can't be empty.
     return {
         text: `SLEEPING: your run ends now. You will be woken by ${until}; this chat then continues.`,
-        stopAnswer: message ? `${message}\n\n${status}` : status,
+        ...(message ? { stopAnswer: message } : { stopAnswer: `💤 Waiting for ${until}. I'll continue then.`, stopAnswerOnlyIfSilent: true }),
     };
 }
 
@@ -674,7 +681,9 @@ export async function wakeTask(taskId, reason) {
             `${task.note ? `\nYour note from before: ${task.note}` : ""}` +
             `\nThe task: ${goal.slice(-4000)}` +
             `${msgs.length ? `\n\nNew WhatsApp messages from the user (oldest first, India time). ${files}\n${messageLines(msgs)}` : ""}` +
-            "\n\nContinue the task.";
+            // (2026-11-22: woken to "sleep again until 11:50", the AI answered "First sleep until 11:50…" in words and
+            // called no tool, so nothing was waiting and it never came back)
+            "\n\nContinue the task. Writing that you will wait or sleep does not make you wait: if the task or your note says to wait again, call sleep_until in this run.";
         // What the small model already replied to these messages, so the big model doesn't say the same thing again
         // (owner's rule: both once started with the same "Got it")
         if (msgs.length) {
@@ -830,10 +839,24 @@ export async function runAlarm() {
     }
 }
 
+// The clock: only "the chosen time has come", every CLOCK_MS, so a sleeping chat wakes within seconds of its time.
+// One small indexed find that is nearly always empty; the alarm's heavier rounds (48 hours over, stopped runs,
+// tokens back) keep their 5 minutes. wakeTask takes a task only once, so a task both rounds see is woken once.
+export async function runClock() {
+    // (two server processes never do the same round: the key is gone again before the next one, a second early)
+    const took = await redis.set("agent-task-clock", String(process.pid), "PX", CLOCK_MS - 1000, "NX").catch(() => "OK");
+    if (!took) return;
+    for (const t of await AgentTask.find({ status: "sleeping", wake_at: { $ne: null, $lte: new Date() }, ...notRunning() }).select("_id").limit(50).lean()) {
+        wakeTask(t._id, "time").catch((e) => console.error("[agent task] wake failed:", e.message));
+    }
+}
+
 export function startAgentTaskAlarm() {
     const tick = () => runAlarm().catch((e) => console.error("[agent task] alarm failed:", e.message));
     setTimeout(tick, 60 * 1000);
     setInterval(tick, ALARM_MS);
+    // (started a minute after the server, like the alarm's first round: the database is connected by then)
+    setTimeout(() => setInterval(() => runClock().catch((e) => console.error("[agent task] clock failed:", e.message)), CLOCK_MS), 60 * 1000);
 }
 
 // ─── Emails to Classgrid AI's own inbox (agent@classgrid.in), owner's design ─

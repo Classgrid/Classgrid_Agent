@@ -149,7 +149,8 @@ server.listen(PORT, () => {
   // WhatsApp call tasks stopped by a restart are continued (main server only, never on local dev)
   if (process.env.CG_LOCAL_DEV !== "1") {
     import("./src/services/whatsapp-call.service.js").then((m) => m.startCallJobResumer()).catch((e) => console.error("[WA call] task resumer failed to start:", e.message));
-    // Long Agent tasks: the 5-minute alarm that wakes sleeping tasks (time, tokens back, restart, 48 h end)
+    // Long Agent tasks: the 5-second clock that wakes sleeping tasks at their time, and the 5-minute alarm for the
+    // rest (tokens back, restart, 48 h end)
     import("./src/services/agent-task.service.js").then((m) => m.startAgentTaskAlarm()).catch((e) => console.error("[agent task] alarm failed to start:", e.message));
     // Emails to Classgrid AI's own inbox (agent@classgrid.in): checked every 45 seconds, handled like WhatsApp messages
     import("./src/services/agent-task.service.js").then((m) => m.startAgentEmailWatcher()).catch((e) => console.error("[agent task] email watcher failed to start:", e.message));

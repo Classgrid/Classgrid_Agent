@@ -43,6 +43,7 @@
 
 import Anthropic from "@anthropic-ai/sdk";
 import { createHash } from "node:crypto";
+import { stopAnswerText } from "../utils/stop-answer.js";
 import { StreamChatError, CONTINUE_PROMPT, THINKING_CUT_PROMPT, budgetStopAnswer, makeRepeatGuard, REFUSED_RESULT, MAX_REFUSED_ROUNDS } from "./llm-stream.js";
 
 export const CLAUDE_CHAT_MODELS = new Set([
@@ -1070,7 +1071,7 @@ export async function streamClaudeChat({
                 if (isObjectResult && typeof content.stopAnswer === "string") {
                     // sleep_until: what the AI wrote before it (often its question to the user) is kept, not lost
                     const said = call.name === "sleep_until" ? String(text || "").trim() : "";
-                    stopAnswer = said && !content.stopAnswer.includes(said) ? `${said}\n\n${content.stopAnswer}` : content.stopAnswer;
+                    stopAnswer = stopAnswerText(said, content);
                 }
                 const refs = isObjectResult && Array.isArray(content.toolReferences)
                     ? content.toolReferences.filter((n) => deferredToolNames.has(n))
