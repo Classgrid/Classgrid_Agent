@@ -63,7 +63,6 @@ function BuyCreditsDialog({ open, onClose, perInr, start }: { open: boolean; onC
           </div>
           <div className="text-xs text-red-500 mt-2 min-h-[14px]">{err}</div>
           <div className="flex justify-between text-[13px] text-muted-foreground mt-2"><span>You get</span><b className="text-foreground font-semibold">{n(Math.max(0, amount) * perInr)} credits</b></div>
-          <div className="flex justify-between text-[13px] text-muted-foreground mt-2"><span>Rate</span><span>₹1 = {n(perInr)} credits</span></div>
         </div>
         <DialogFooter className="mt-2">
           <button type="button" className={btnGrey} onClick={onClose}>Cancel</button>
