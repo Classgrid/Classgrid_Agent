@@ -328,17 +328,20 @@ export function SettingsBillingSection() {
                 )}
               </div>
               <div className="text-[28px] font-semibold mt-2">{n(balance)}<span className="text-sm font-normal text-muted-foreground ml-1.5">credits</span></div>
-              <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-3.5"><span>Credit balance</span><span>Used after your included usage</span></div>
-              <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-1.5">
-                {freePlan ? (
-                  <span>Top-ups are for the Pro and Max plans. Upgrade your plan first.</span>
-                ) : (
-                  <>
-                    <span className="flex items-center gap-2">{auto?.enabled ? <>{pill("Auto top-up on", true)}<span>{inr(auto.amount_inr)} when below {inr(auto.below_inr)}</span></> : pill("Auto top-up off", false)}</span>
-                    <span>Bought credits last 30 days from purchase</span>
-                  </>
-                )}
-              </div>
+              <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-3.5"><span>Credit balance</span><span className="text-right">Used after your included usage</span></div>
+              {freePlan ? (
+                <div className="text-[13px] text-muted-foreground mt-1.5">Top-ups are for the Pro and Max plans. Upgrade your plan first.</div>
+              ) : (
+                <>
+                  {/* (owner, 2026-11-22: the pill and "₹500 when below ₹100" were squeezed into two broken lines next to the
+                      30-days note, and the short text didn't say what happens; each now has its own line) */}
+                  <div className="flex items-center gap-2 text-[13px] text-muted-foreground mt-2">
+                    <span className="shrink-0 whitespace-nowrap">{pill(auto?.enabled ? "Auto top-up on" : "Auto top-up off", !!auto?.enabled)}</span>
+                    {auto?.enabled && <span className="min-w-0">Below {inr(auto.below_inr)}, we email you a link to buy {inr(auto.amount_inr)} of credits</span>}
+                  </div>
+                  <div className="text-[13px] text-muted-foreground mt-1.5">Bought credits last 30 days from purchase</div>
+                </>
+              )}
             </div>
           </div>
 
