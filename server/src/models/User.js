@@ -843,6 +843,13 @@ const userSchema = new mongoose.Schema(
       // The plan-end emails (workers/plan-expiry.worker.js): the expires_at each one was sent for, so each goes once
       reminder_sent_for: { type: String },
       ended_sent_for: { type: String },
+      // A plan bought in the Android app through Google Play (billing "play", source "google_play";
+      // services/google-play.service.js): the purchase token its renewals are checked with, the product and base
+      // plan, and Google's last subscription state
+      play_purchase_token: { type: String },
+      play_product_id: { type: String },
+      play_base_plan_id: { type: String },
+      play_state: { type: String },
     },
     // The account's added emails (Settings > Account > Emails; owner, 2026-11-15): up to two besides the main email,
     // each confirmed with a code sent to it. Signing in works with any confirmed one and the same password

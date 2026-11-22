@@ -109,6 +109,7 @@ import aiRoutes from "../src/routes/ai.routes.js";
 import aiGridRoutes from "../src/routes/ai-grid.routes.js";
 import aiCreditsRoutes from "../src/routes/ai-credits.routes.js";
 import aiCreditsTopupRoutes from "../src/routes/ai-credits-topup.routes.js";
+import googlePlayRoutes from "../src/routes/google-play.routes.js";
 import aiLibraryRoutes from "../src/routes/ai-library.routes.js";
 import sharePageRoutes from "../src/routes/share-page.routes.js";
 import aiScheduleRoutes from "../src/routes/ai-schedule.routes.js";
@@ -395,6 +396,7 @@ app.use("/api/webhooks", webhookRoutes);
 app.use("/api/billing/handoff", billingHandoffRoutes);
 app.use("/api/billing/checkout", billingCheckoutRoutes);
 app.use("/api/billing/demo", billingDemoRoutes);
+app.use("/api/billing/google-play", googlePlayRoutes); // purchases made in the Android app through Google Play
 
 // Razorpay centralized webhook (billing.classgrid.in)
 import razorpayWebhookRoutes from "../src/routes/razorpay-webhook.routes.js";

@@ -10,6 +10,7 @@ import IdeProject from "../models/IdeProject.js";
 import AiUsageLog from "../models/AiUsageLog.js";
 import AiCreditSpend from "../models/AiCreditSpend.js";
 import { planOf, planKeyOf, plansEnabled, filesPerMessage, DEFAULT_FILES_PER_MESSAGE } from "../services/plan-limits.service.js";
+import { playRefreshDue } from "../services/google-play-rules.js";
 import { freeWindow, weekCounters, tokenWindowEnd } from "../services/ai-credits.service.js";
 import { resolveFeatureLimit, resolveResetPeriod, checkWhatsappLimit, formatPeriodLength } from "../services/ai-feature-limits.js";
 import { usedToday, dayKey } from "../services/plan-usage.service.js";
@@ -53,6 +54,12 @@ export async function planOverviewFor(userId) {
             plansEnabled().catch(() => false),
         ]);
         if (!user) return null;
+        // A plan bought through Google Play whose end has passed or is near: asked of Google first (a renewal moves
+        // the end date), at most once per 10 minutes per user; a failed or slow check leaves the plan as it is
+        if (playRefreshDue(user.plan)) {
+            const renewed = await import("../services/google-play.service.js").then((m) => m.refreshPlayPlan(user, { timeoutMs: 5000 })).catch(() => null);
+            if (renewed) user.plan = renewed;
+        }
         const orgId = user.organization_id || null;
         const org = orgId ? await Organization.findById(orgId).select("ai_config").lean().catch(() => null) : null;
         const plan = await planOf(user).catch(() => null);

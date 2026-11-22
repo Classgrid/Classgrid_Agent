@@ -3,6 +3,7 @@
 // GlobalAiConfig.plans_enabled: while it is off, nothing here changes any limit.
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import PlanConfig, { DEFAULT_PLANS, PLAN_KEYS, ensurePlanRows } from "../models/PlanConfig.js";
+import { playRefreshDue } from "./google-play-rules.js";
 
 const CACHE_MS = 15000;
 let cache = { at: 0, enabled: false, plans: {} };
@@ -42,6 +43,9 @@ export function planKeyOf(user) {
 /** The plan row for a user (null while plans are off, and null for Classgrid staff: super admins and @classgrid.in
  * accounts keep the dashboard's global limits, no plan gate applies to them) */
 export async function planOf(user) {
+    // A plan bought through Google Play whose end has passed or is near: Google is asked about its renewal in the
+    // background (at most once per 10 minutes per user); this request is never kept waiting for Google
+    if (playRefreshDue(user?.plan)) import("./google-play.service.js").then((m) => m.refreshPlayPlanSoon(user)).catch(() => {});
     const t = await planTable();
     if (!t.enabled) return null;
     if (user?.role === "super_admin" || String(user?.email || "").toLowerCase().endsWith("@classgrid.in")) return null;

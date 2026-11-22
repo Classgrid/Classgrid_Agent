@@ -28,6 +28,8 @@ async function sendReminders(names) {
     const soon = new Date(now.getTime() + 3 * DAY);
     const users = await User.find({
         "plan.id": { $in: PAID }, "plan.status": { $in: ["active", "past_due", null] }, "plan.expires_at": { $gt: now, $lte: soon },
+        // (a Google Play subscription renews by itself and Google tells the person: no "does not renew" reminder)
+        "plan.billing": { $ne: "play" },
         // not those already reminded for this end date
         $expr: { $ne: [{ $ifNull: ["$plan.reminder_sent_for", ""] }, { $dateToString: { date: "$plan.expires_at", format: "%Y-%m-%dT%H:%M:%S.%LZ" } }] },
     })
@@ -54,6 +56,16 @@ async function sendReminders(names) {
     }
 }
 
+const STILL_PAID = ["SUBSCRIPTION_STATE_ACTIVE", "SUBSCRIPTION_STATE_IN_GRACE_PERIOD", "SUBSCRIPTION_STATE_CANCELED"];
+
+// Whether a Google Play plan whose end date has passed is really over (services/google-play.service.js)
+async function playPlanOver(u) {
+    const { refreshPlayPlan } = await import("../services/google-play.service.js");
+    const plan = (await refreshPlayPlan(u)) || u.plan;
+    if (plan?.expires_at && new Date(plan.expires_at).getTime() > Date.now()) return false; // renewed
+    return !!plan?.play_state && !STILL_PAID.includes(plan.play_state);
+}
+
 async function sendEnded(names) {
     const now = new Date();
     const since = new Date(now.getTime() - 3 * DAY);
@@ -62,6 +74,9 @@ async function sendEnded(names) {
     for (const u of users) {
         const expIso = new Date(u.plan.expires_at).toISOString();
         if (u.plan.ended_sent_for === expIso) continue;
+        // A Google Play subscription has usually renewed: Google is asked first, and the plan ends here only once
+        // Google says it is no longer paid (a check that fails is tried again next hour)
+        if (u.plan.billing === "play" && !(await playPlanOver(u))) continue;
         const claimed = await User.findOneAndUpdate(
             { _id: u._id, "plan.expires_at": u.plan.expires_at, "plan.ended_sent_for": { $ne: expIso } },
             { $set: { "plan.ended_sent_for": expIso, "plan.status": "expired" } }, { projection: { _id: 1 } });
