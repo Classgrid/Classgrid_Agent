@@ -7,6 +7,7 @@ import Organization from "../models/Organization.js";
 import { resolveResetPeriod } from "./ai-feature-limits.js";
 import { planAllowsModel, isFableModel } from "./model-access.service.js";
 import { TOPUP_MIN_INR, TOPUP_MAX_INR } from "../controllers/ai-credits-topup.controller.js";
+import { CREDIT_PACKS_INR } from "./google-play-rules.js";
 import { CHAT_PUBLIC_ORG_ID } from "../utils/chat-onboarding.js";
 import { planTable } from "./plan-limits.service.js";
 
@@ -88,6 +89,8 @@ export async function aiPricingData() {
         creditsPerInr: positiveNumber(config.credits_per_inr),
         topupMinInr: TOPUP_MIN_INR,
         topupMaxInr: TOPUP_MAX_INR,
+        // The credit packs sold on the website and in the phone app (owner, 2026-11-22)
+        topupPacksInr: [...CREDIT_PACKS_INR],
         creditValidityDays: 30,
         plansEnabled: plansNow.enabled === true,
         plans,

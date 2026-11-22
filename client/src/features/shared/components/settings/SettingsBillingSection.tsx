@@ -15,7 +15,12 @@ import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { usePlanOverview, useAutoTopup, useSaveAutoTopup, useStudent, n, inr, dayText, type AutoTopup } from "@/features/shared/queries/usePlanOverview";
 
 const PRICING_URL = "https://classgrid.in/pricing";
-const TOPUP_MAX = 10000;
+// Credits are sold in fixed packs, on the website and in the phone app alike (owner, 2026-11-22; the server checks
+// the same: ai-credits-topup.controller.js). Only the owner's own account may still pay any amount up to ₹10,000.
+const PACKS: number[] = [500, 1000, 2000, 5000];
+const TOPUP_ANY_MAX = 10000;
+/** The pack a number opens (a ?topup= link, a saved setting): that pack, or the nearest pack above it, at most ₹5,000 */
+const packAtOrAbove = (v: number) => PACKS.find((p) => p >= v) ?? PACKS[PACKS.length - 1];
 
 const btn = "inline-flex items-center h-8 px-3.5 rounded-full text-[13px] font-medium cursor-pointer whitespace-nowrap transition-colors";
 const btnGrey = `${btn} bg-black/[0.06] dark:bg-white/[0.09] text-foreground hover:bg-black/[0.1] dark:hover:bg-white/[0.14]`;
@@ -23,21 +28,49 @@ const btnWhite = `${btn} bg-foreground text-background hover:bg-foreground/90`;
 const field = "flex items-center h-11 px-3.5 rounded-[10px] border border-border bg-background text-base gap-1.5 focus-within:border-[#7aa7ff]";
 const input = "flex-1 min-w-0 bg-transparent outline-none text-foreground text-base";
 
-/** The user's own minimum (the server checks the same) */
-const useMinInr = () => {
+/** Whether this account may pay any amount (the server's low-minimum list: the owner's own test payments) */
+const useAnyAmount = () => {
   const { data: me } = useCurrentUser();
-  return String(me?.email || "").trim().toLowerCase() === "nikhilsubsun123@gmail.com" ? 1 : 299;
+  return String(me?.email || "").trim().toLowerCase() === "nikhilsubsun123@gmail.com";
 };
 
+/** The four credit packs, the chosen one marked */
+function PackPicker({ value, onChange, label }: { value: number; onChange: (v: number) => void; label: string }) {
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-2" role="radiogroup" aria-label={label}>
+      {PACKS.map((p) => {
+        const on = value === p;
+        return (
+          <button
+            key={p}
+            type="button"
+            role="radio"
+            aria-checked={on}
+            onClick={() => onChange(p)}
+            className={`h-11 rounded-[10px] border text-[15px] font-medium cursor-pointer transition-colors ${on ? "border-[#7aa7ff] bg-[#7aa7ff]/10 text-foreground" : "border-border bg-background text-foreground/80 hover:bg-black/[0.04] dark:hover:bg-white/[0.06]"}`}
+          >
+            {inr(p)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 function BuyCreditsDialog({ open, onClose, perInr, start }: { open: boolean; onClose: () => void; perInr: number; start?: number | null }) {
-  const minInr = useMinInr();
+  const anyAmount = useAnyAmount();
   const [amountStr, setAmountStr] = useState("500");
-  useEffect(() => { if (open) setAmountStr(String(start && start >= 1 ? start : 500)); }, [open, start]);
+  useEffect(() => {
+    if (!open) return;
+    const want = start && start >= 1 ? start : 500;
+    setAmountStr(String(anyAmount ? Math.min(want, TOPUP_ANY_MAX) : packAtOrAbove(want)));
+  }, [open, start, anyAmount]);
   const topUp = useInitiateAiTopUp("billing");
   const amount = Math.floor(Number(amountStr) || 0);
-  const err = amount < minInr ? `Minimum is ${inr(minInr)}.` : amount > TOPUP_MAX ? `Maximum is ${inr(TOPUP_MAX)}.` : "";
+  const err = !anyAmount ? "" : amount < 1 ? `Minimum is ${inr(1)}.` : amount > TOPUP_ANY_MAX ? `Maximum is ${inr(TOPUP_ANY_MAX)}.` : "";
+  const ok = anyAmount ? !err : PACKS.includes(amount);
   const pay = async () => {
-    if (err) return;
+    if (!ok) return;
     try {
       const r = await topUp.mutateAsync(amount);
       if (!r?.checkout_url) throw new Error("no checkout link");
@@ -56,17 +89,20 @@ function BuyCreditsDialog({ open, onClose, perInr, start }: { open: boolean; onC
         </DialogHeader>
         <div>
           <div className="text-[13px] font-medium">Amount</div>
-          <div className={`${field} mt-2`}>
-            <span className="text-muted-foreground">₹</span>
-            <input data-no-ring="true" className={input} type="number" min={minInr} max={TOPUP_MAX} step={1} value={amountStr} onChange={(e) => setAmountStr(e.target.value)} autoFocus />
-            <span className="text-xs text-muted-foreground whitespace-nowrap">{inr(minInr)} to {inr(TOPUP_MAX)}</span>
-          </div>
+          <PackPicker value={amount} onChange={(v) => setAmountStr(String(v))} label="Amount" />
+          {anyAmount && (
+            <div className={`${field} mt-2`}>
+              <span className="text-muted-foreground">₹</span>
+              <input data-no-ring="true" className={input} type="number" min={1} max={TOPUP_ANY_MAX} step={1} value={amountStr} onChange={(e) => setAmountStr(e.target.value)} />
+              <span className="text-xs text-muted-foreground whitespace-nowrap">{inr(1)} to {inr(TOPUP_ANY_MAX)}</span>
+            </div>
+          )}
           <div className="text-xs text-red-500 mt-2 min-h-[14px]">{err}</div>
           <div className="flex justify-between text-[13px] text-muted-foreground mt-2"><span>You get</span><b className="text-foreground font-semibold">{n(Math.max(0, amount) * perInr)} credits</b></div>
         </div>
         <DialogFooter className="mt-2">
           <button type="button" className={btnGrey} onClick={onClose}>Cancel</button>
-          <button type="button" className={btnWhite} disabled={!!err || topUp.isPending} onClick={pay}>{topUp.isPending ? "One moment" : `Pay ${inr(Math.max(0, amount))}`}</button>
+          <button type="button" className={btnWhite} disabled={!ok || topUp.isPending} onClick={pay}>{topUp.isPending ? "One moment" : `Pay ${inr(Math.max(0, amount))}`}</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -74,18 +110,20 @@ function BuyCreditsDialog({ open, onClose, perInr, start }: { open: boolean; onC
 }
 
 function AutoTopupDialog({ open, onClose, perInr, saved }: { open: boolean; onClose: () => void; perInr: number; saved?: AutoTopup }) {
-  const minInr = useMinInr();
+  const anyAmount = useAnyAmount();
   const save = useSaveAutoTopup();
   const [on, setOn] = useState(false);
   const [belowStr, setBelowStr] = useState("100");
   const [amountStr, setAmountStr] = useState("500");
   useEffect(() => {
     if (!open) return;
-    setOn(!!saved?.enabled); setBelowStr(String(saved?.below_inr ?? 100)); setAmountStr(String(saved?.amount_inr ?? 500));
-  }, [open, saved]);
+    const savedAmount = saved?.amount_inr ?? 500;
+    setOn(!!saved?.enabled); setBelowStr(String(saved?.below_inr ?? 100)); setAmountStr(String(anyAmount ? savedAmount : packAtOrAbove(savedAmount)));
+  }, [open, saved, anyAmount]);
   const below = Math.floor(Number(belowStr) || 0);
   const amount = Math.floor(Number(amountStr) || 0);
-  const err = !on ? "" : below < 1 ? "Enter the balance that starts a top-up." : amount < minInr || amount > TOPUP_MAX ? `Top up amount must be ${inr(minInr)} to ${inr(TOPUP_MAX)}.` : "";
+  const amountOk = anyAmount ? amount >= 1 && amount <= TOPUP_ANY_MAX : PACKS.includes(amount);
+  const err = !on ? "" : below < 1 ? "Enter the balance that starts a top-up." : !amountOk ? `Top up amount must be ${inr(1)} to ${inr(TOPUP_ANY_MAX)}.` : "";
   const submit = async () => {
     if (err) return;
     try {
@@ -116,11 +154,14 @@ function AutoTopupDialog({ open, onClose, perInr, saved }: { open: boolean; onCl
               <span className="text-xs text-muted-foreground whitespace-nowrap">{below > 0 ? `= ${n(below * perInr)} credits` : ""}</span>
             </div>
             <div className="text-[13px] font-medium mt-4">Top up amount</div>
-            <div className={`${field} mt-2`}>
-              <span className="text-muted-foreground">₹</span>
-              <input data-no-ring="true" className={input} type="number" min={minInr} max={TOPUP_MAX} step={1} value={amountStr} onChange={(e) => setAmountStr(e.target.value)} />
-              <span className="text-xs text-muted-foreground whitespace-nowrap">{inr(minInr)} to {inr(TOPUP_MAX)}</span>
-            </div>
+            <PackPicker value={amount} onChange={(v) => setAmountStr(String(v))} label="Top up amount" />
+            {anyAmount && (
+              <div className={`${field} mt-2`}>
+                <span className="text-muted-foreground">₹</span>
+                <input data-no-ring="true" className={input} type="number" min={1} max={TOPUP_ANY_MAX} step={1} value={amountStr} onChange={(e) => setAmountStr(e.target.value)} />
+                <span className="text-xs text-muted-foreground whitespace-nowrap">{inr(1)} to {inr(TOPUP_ANY_MAX)}</span>
+              </div>
+            )}
             <div className="text-xs text-red-500 mt-2 min-h-[14px]">{err}</div>
           </div>
         )}

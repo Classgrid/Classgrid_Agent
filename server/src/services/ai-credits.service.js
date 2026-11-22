@@ -54,7 +54,7 @@ const autoTopupEmail = async (user, orgId, remaining) => {
     const a = user?.ai_auto_topup;
     if (!a?.enabled || !user?.email) return;
     // Top-ups are for paid plans: a Free user gets no top-up email
-    const { topupBlockedByPlan } = await import("../controllers/ai-credits-topup.controller.js");
+    const { topupBlockedByPlan, autoTopupAmountFor } = await import("../controllers/ai-credits-topup.controller.js");
     if (await topupBlockedByPlan(user)) return;
     const cfg = await GlobalAiConfig.findOne({ key: "singleton" }).select("credits_per_inr").lean().catch(() => null);
     const perInr = Number(cfg?.credits_per_inr) > 0 ? Number(cfg.credits_per_inr) : 3000;
@@ -68,7 +68,8 @@ const autoTopupEmail = async (user, orgId, remaining) => {
         { projection: { _id: 1 } }
     );
     if (!claimed) return;
-    const amount = Math.max(1, Math.floor(Number(a.amount_inr) || 500));
+    // (one of the credit packs: a setting saved before the packs becomes the nearest pack at or above it)
+    const amount = autoTopupAmountFor(a.amount_inr, user.email);
     const chatApp = String(process.env.CHAT_APP_URL || "https://chat.classgrid.in").replace(/\/$/, "");
     const link = `${chatApp}/agent/settings?section=billing&topup=${amount}`;
     const name = String(user.name || user.first_name || "there").replace(/[<>&]/g, "");

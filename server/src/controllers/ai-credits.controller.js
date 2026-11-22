@@ -167,9 +167,10 @@ export const getMyCredits = async (req, res) => {
 // Automatic top-ups (Settings > Billing): the setting, and saving it
 export const getAutoTopup = async (req, res) => {
     try {
+        const { autoTopupAmountFor } = await import("./ai-credits-topup.controller.js");
         const user = await User.findById(req.user._id).select("ai_auto_topup").lean();
         const a = user?.ai_auto_topup || {};
-        res.json({ success: true, data: { enabled: !!a.enabled, below_inr: a.below_inr ?? 100, amount_inr: a.amount_inr ?? 500 } });
+        res.json({ success: true, data: { enabled: !!a.enabled, below_inr: a.below_inr ?? 100, amount_inr: autoTopupAmountFor(a.amount_inr ?? 500, req.user.email) } });
     } catch (error) {
         console.error("Get auto top-up error:", error);
         res.status(500).json({ success: false, error: "Failed to read the automatic top-up setting" });
@@ -178,24 +179,25 @@ export const getAutoTopup = async (req, res) => {
 
 export const setAutoTopup = async (req, res) => {
     try {
-        const { TOPUP_MAX_INR, topupMinFor, topupBlockedByPlan, TOPUP_NEEDS_PLAN } = await import("./ai-credits-topup.controller.js");
+        const { topupAmountOk, topupAmountError, autoTopupAmountFor, topupBlockedByPlan, TOPUP_NEEDS_PLAN } = await import("./ai-credits-topup.controller.js");
         const enabled = req.body?.enabled === true;
         if (enabled && await topupBlockedByPlan(req.user)) return res.status(403).json({ success: false, code: "topup_needs_plan", error: TOPUP_NEEDS_PLAN });
         const below = Math.floor(Number(req.body?.below_inr));
         const amount = Math.floor(Number(req.body?.amount_inr));
-        const minInr = topupMinFor(req.user.email);
+        // The amount is one of the credit packs (owner, 2026-11-22), like Buy credits; the "below" balance stays free
+        const amountOk = topupAmountOk(amount, req.user.email);
         if (enabled) {
             if (!Number.isFinite(below) || below < 1) return res.status(400).json({ success: false, error: "Enter the balance that starts a top-up." });
-            if (!Number.isFinite(amount) || amount < minInr || amount > TOPUP_MAX_INR) return res.status(400).json({ success: false, error: `Top up amount must be between ₹${minInr} and ₹${TOPUP_MAX_INR.toLocaleString("en-IN")}.` });
+            if (!amountOk) return res.status(400).json({ success: false, error: topupAmountError(req.user.email) });
         }
         const set = { "ai_auto_topup.enabled": enabled };
         if (Number.isFinite(below) && below >= 1) set["ai_auto_topup.below_inr"] = below;
-        if (Number.isFinite(amount) && amount >= 1) set["ai_auto_topup.amount_inr"] = amount;
+        if (amountOk) set["ai_auto_topup.amount_inr"] = amount;
         if (enabled) set["ai_auto_topup.last_notified_at"] = null; // a fresh setting may send its email at once
         await User.updateOne({ _id: req.user._id }, { $set: set });
         const user = await User.findById(req.user._id).select("ai_auto_topup").lean();
         const a = user?.ai_auto_topup || {};
-        res.json({ success: true, data: { enabled: !!a.enabled, below_inr: a.below_inr ?? 100, amount_inr: a.amount_inr ?? 500 } });
+        res.json({ success: true, data: { enabled: !!a.enabled, below_inr: a.below_inr ?? 100, amount_inr: autoTopupAmountFor(a.amount_inr ?? 500, req.user.email) } });
     } catch (error) {
         console.error("Set auto top-up error:", error);
         res.status(500).json({ success: false, error: "Failed to save the automatic top-up setting" });

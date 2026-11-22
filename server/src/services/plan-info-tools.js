@@ -51,6 +51,7 @@ function plansPart(feed) {
             credits_per_rupee: feed?.creditsPerInr ?? null,
             min_rupees: feed?.topupMinInr ?? null,
             max_rupees: feed?.topupMaxInr ?? null,
+            packs_rupees: feed?.topupPacksInr ?? null,
         },
     };
 }

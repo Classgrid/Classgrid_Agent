@@ -43,12 +43,30 @@ import {
     hashHandoffToken,
 } from "../services/billing-handoff.service.js";
 import { PAYMENT_ATTEMPT_STAGE } from "../utils/billing.utils.js";
+import { CREDIT_PACKS_INR, topupAmountAllowed, packAtOrAbove } from "../services/google-play-rules.js";
 
-export const TOPUP_MIN_INR = 299;
-export const TOPUP_MAX_INR = 10000;
-// Owner's order: this one account can top up from ₹1 (everyone else starts at ₹299).
+// Credits are sold in fixed packs of ₹500, ₹1,000, ₹2,000 and ₹5,000, on the website and in the phone app alike
+// (owner, 2026-11-22; before, any amount from ₹299 to ₹10,000). The packs live in services/google-play-rules.js.
+export const TOPUP_PACKS_INR = CREDIT_PACKS_INR;
+export const TOPUP_MIN_INR = CREDIT_PACKS_INR[0];
+export const TOPUP_MAX_INR = CREDIT_PACKS_INR[CREDIT_PACKS_INR.length - 1];
+// Owner's order: this one account can top up any amount from ₹1 to ₹10,000 (his own test payments).
 export const TOPUP_LOW_MIN_EMAILS = ["nikhilsubsun123@gmail.com"];
-export const topupMinFor = (email) => TOPUP_LOW_MIN_EMAILS.includes(String(email || "").trim().toLowerCase()) ? 1 : TOPUP_MIN_INR;
+export const TOPUP_ANY_MAX_INR = 10000;
+const topupAnyAmount = (email) => TOPUP_LOW_MIN_EMAILS.includes(String(email || "").trim().toLowerCase());
+export const topupMinFor = (email) => topupAnyAmount(email) ? 1 : TOPUP_MIN_INR;
+/** Whether an account may top up this amount: one of the packs (any amount for the accounts on the list above) */
+export const topupAmountOk = (amount, email) => topupAmountAllowed(amount, { anyAmount: topupAnyAmount(email), anyMax: TOPUP_ANY_MAX_INR });
+/** The automatic top-up amount to use for a saved setting: a setting saved before the packs (e.g. ₹300) becomes the
+ *  nearest pack at or above it */
+export const autoTopupAmountFor = (saved, email) => {
+    const v = Math.floor(Number(saved) || 500);
+    return topupAmountOk(v, email) ? v : packAtOrAbove(v);
+};
+/** The refusal for an amount that is not allowed */
+export const topupAmountError = (email) => topupAnyAmount(email)
+    ? `Amount must be between ₹1 and ₹${TOPUP_ANY_MAX_INR.toLocaleString("en-IN")}.`
+    : "Choose a pack of ₹500, ₹1,000, ₹2,000 or ₹5,000.";
 
 /**
  * PHASE 12: Backend AI Top-Up Controller
@@ -203,15 +221,14 @@ export async function topupBlockedByPlan(user) {
 export const createTopupOrder = async (req, res) => {
     const { amount_inr } = req.body;
     if (await topupBlockedByPlan(req.user)) return res.status(403).json({ success: false, code: "topup_needs_plan", error: TOPUP_NEEDS_PLAN });
-    const minInr = topupMinFor(req.user.email);
-    if (!amount_inr || amount_inr < minInr || amount_inr > TOPUP_MAX_INR) {
-        return res.status(400).json({ success: false, error: `Amount must be between ₹${minInr} and ₹10,000` });
+    if (!topupAmountOk(amount_inr, req.user.email)) {
+        return res.status(400).json({ success: false, error: topupAmountError(req.user.email) });
     }
     // Started from Settings > Billing (returnTo "billing"): after paying, back to that page (the desktop and Android
     // apps come back through their classgrid:// link, chosen in startPlatformPayment)
     const origin = String(req.headers.origin || "https://chat.classgrid.in");
     const returnUrl = req.body?.returnTo === "billing" ? `${origin}/agent/settings?section=billing&ai_payment=success` : null;
-    return startPlatformPayment(req, res, { amountInr: amount_inr, paymentType: "AI_TOPUP", label: "AI Credits Top-Up", otpKeyPrefix: "ai-topup-otp", returnUrl });
+    return startPlatformPayment(req, res, { amountInr: Number(amount_inr), paymentType: "AI_TOPUP", label: "AI Credits Top-Up", otpKeyPrefix: "ai-topup-otp", returnUrl });
 };
 
 // A plan bought for one month or one year, paid once (no autopay): the webhook (AI_PLAN) puts the plan on the user.
