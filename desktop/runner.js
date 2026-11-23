@@ -1105,13 +1105,16 @@ async function messageClassgridSession(args) {
   else text = `${who} refused the message (message id ${r.id}): ${r.reason || "no reason given"}.`;
   return { text };
 }
-// Messages other sessions sent that this one has not read yet, put after a tool's answer, then marked read
+// Messages (and "finished its turn" notices) other sessions sent that this one has not read yet, put after a
+// step's answer, then marked read: a busy session reads them at its next step. Only after a step of the answer the
+// chat screen is writing (see runTool), in the words every peer message has (sessions.js promptFor).
 function withPeerInbox(reply) {
   try {
     if (!sessionHandle || !reply || typeof reply.text !== "string") return reply;
     const msgs = sessionHandle.takeInbox();
     if (!msgs.length) return reply;
-    const add = msgs.map((m) => `\n\n[Peer message from @${m.from.name} (session ${m.from.sessionId}, message ${m.id})]: ${m.text}`).join("");
+    const { promptFor } = sessionsLib();
+    const add = msgs.map((m) => `\n\n${promptFor(m)}`).join("");
     sessionHandle.markRead(msgs.map((m) => m.id));
     return { ...reply, text: reply.text + add };
   } catch { return reply; }
@@ -1604,7 +1607,11 @@ async function runTool(req) {
   if (counts) { stepsRunning++; try { onActivity?.(); } catch { /* the listener's own problem */ } }
   try {
     const r = await runToolStep(req);
-    return counts && req?.tool !== "message_classgrid_session" ? withPeerInbox(r) : r;
+    // Unread peer messages go only to the main AI of the answer on this screen: the chat screen says so with
+    // `peer: true` on the steps of its own answer that are not a helper's. A helper's step, another chat's step, a
+    // woken or WhatsApp task's step and anything asked over the socket never carry it. (In 1.0.48 every step did: a
+    // message could end in a helper's step, or in another chat's, marked read, and the chat's AI never saw it.)
+    return counts && req?.peer === true && req?.tool !== "message_classgrid_session" ? withPeerInbox(r) : r;
   }
   finally { if (counts) { stepsRunning--; try { onActivity?.(); } catch { /* the listener's own problem */ } } }
 }

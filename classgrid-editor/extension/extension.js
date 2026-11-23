@@ -70,7 +70,7 @@ function startSession(context, runner) {
     if (!handle) return;
     peer.handle = handle;
     runner.setSessionHandle?.(handle);
-    handle.onMessage?.((m) => peerSend({ cgEvent: "peerMessage", data: { id: m.id, from: m.from, text: m.text, notifyIdle: !!m.notifyIdle, receivedAt: m.receivedAt || Date.now() } }));
+    handle.onMessage?.((m) => peerSend({ cgEvent: "peerMessage", data: { id: m.id, from: m.from, text: m.text, notifyIdle: !!m.notifyIdle, receivedAt: m.receivedAt || Date.now(), ...(m.notice ? { notice: m.notice } : {}) } })); // (notice: "idle" / "exit", a "finished its turn" notice kept like a message)
     handle.onNotice?.((n) => peerSend({ cgEvent: "peerNotice", data: { kind: n.kind, messageId: n.messageId, from: n.from } }));
     context.subscriptions.push({ dispose: () => { try { handle.close(); } catch { /* already closed */ } } });
   } catch (err) {

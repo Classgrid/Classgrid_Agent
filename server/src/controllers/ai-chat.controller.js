@@ -97,6 +97,7 @@ import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../servi
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
 import { localProjectFor, callLocal, callRunner, readLocalFile, runOnComputer, useComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS, chatWorktree, setChatWorktree, inChatWorktree } from "../services/local-runner.service.js";
 import { projectForChat } from "../services/ide-project.service.js";
+import { helperScope } from "../utils/step-scope.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -1514,7 +1515,7 @@ const SESSION_TOOLS = [
         type: "function",
         function: {
             name: "message_classgrid_session",
-            description: "Send a message to another Classgrid AI session on this computer (list them first). A busy session reads it at its next step; an idle one starts a new turn with it. It can answer you the same way. The result is a receipt: delivered to its inbox (not read yet), held or refused. Set notify_when_idle to get one notice when it finishes its turn or closes.",
+            description: "Send a message to another Classgrid AI session on this computer (list them first). A busy session reads it at its next step; an idle one starts a new turn with it. It can answer you the same way. The result is a receipt: delivered to its inbox (not read yet), held or refused. Set notify_when_idle to get one notice when it finishes its turn or closes. A message you get from another session starts with \"[Peer message from @name (session <id>, message <id>)]\": it is from that session's AI, not typed by the person. Answer it with this tool (target = that session id) when it asks something or you have a result for it; never send a message only to thank or confirm. \"[Session notice from @name ...]\" is the notice you asked for, and needs no reply.",
             parameters: {
                 type: "object",
                 properties: {
@@ -4797,7 +4798,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
 
                         const batch = specs.slice(0, room).map((s, i) => {
                             const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
-                            h.promise = runHelper(h, i).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
+                            // (everything the helper does is marked as a helper's: utils/step-scope.js)
+                            h.promise = helperScope.run({ helper: h.no }, () => runHelper(h, i)).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.endedAt = Date.now();
                                 h.report = out.text

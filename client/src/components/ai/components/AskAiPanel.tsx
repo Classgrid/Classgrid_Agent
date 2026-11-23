@@ -4561,7 +4561,6 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const peerBusyRef = useRef(false);
   const peerHandledRef = useRef<Set<string>>(new Set());
   const [peerPending, setPeerPending] = useState(0);
-  const [peerNotices, setPeerNotices] = useState<{ key: string; text: string }[]>([]);
   useEffect(() => {
     const me = peerMe.current;
     peerPanels.push(me);
@@ -4574,10 +4573,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         markPeerRead([m.id]);
         void askQuestionRef.current?.(peerPrompt(m), { hidden: true, meta: { peer: { from: m.from, messageId: m.id } } });
       },
-      (n) => {
-        if (!active() || n.kind === "read") return;
-        setPeerNotices((old) => [...old, { key: `${n.kind}-${n.from.sessionId}-${Date.now()}`, text: peerNoticeText(n) }].slice(-3));
-      },
+      // ("finished its turn" and "closed" notices come as messages above, m.notice: the AI that asked for one with
+      // notify_when_idle reads it, and the chat shows it as a line. In 1.0.48 they were only a line on the screen.)
+      () => {},
     );
     return () => { off(); const i = peerPanels.indexOf(me); if (i >= 0) peerPanels.splice(i, 1); };
   }, []);
@@ -5067,7 +5065,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const runPcToolCall = async (ev: any) => {
         let reply: any;
         try {
-          reply = await (window as any).classgridDesktop.runTool({ tool: ev.tool, args: ev.args || {}, root: ev.root, chat: ev.chat, checkpoint: ev.checkpoint });
+          // peer: unread messages from other Classgrid sessions may come back after this step (the host adds them and
+          // marks them read): only for the answer on this screen, and never for a helper's step (ev.helper, from the server)
+          reply = await (window as any).classgridDesktop.runTool({ tool: ev.tool, args: ev.args || {}, root: ev.root, chat: ev.chat, checkpoint: ev.checkpoint, peer: !ev.helper && peerPanels[peerPanels.length - 1] === peerMe.current });
         } catch (e: any) {
           reply = { text: `Error: ${e?.message || e}` };
         }
@@ -6013,13 +6013,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             </div>
           </>
         ) : (() => {
-          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy, localImagesFound, peerNotices, peerPending];
+          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy, localImagesFound, peerPending];
           if (typingOnlyRender && chatListRef.current && chatListRef.current.deps.every((d, i) => d === listDeps[i])) return chatListRef.current.node;
           const node = (
           <>
             {messages.map((rawMessage, index) => {
               // A message from another Classgrid session: "Message from @name", collapsed, opens to what they wrote
-              const peerMsg = rawMessage.role === "user" ? (rawMessage.meta?.peer ? { name: rawMessage.meta.peer.from.name, text: parsePeerContent(rawMessage.content)?.text ?? String(rawMessage.content) } : (() => { const p = parsePeerContent(rawMessage.content); return p ? { name: p.name, text: p.text } : null; })()) : null;
+              // (a "finished its turn" / "closed" notice from one: a plain grey line)
+              const peerParsed = rawMessage.role === "user" && (rawMessage.meta?.peer || isPeerContent(rawMessage.content)) ? parsePeerContent(rawMessage.content) : null;
+              if (peerParsed?.notice) return <div key={rawMessage.id} className="mb-3 pl-10 py-1 text-[13px] text-slate-500 dark:text-[#8a8a8a]">{peerNoticeText({ kind: peerParsed.notice, from: { name: rawMessage.meta?.peer?.from.name || peerParsed.name } })}</div>;
+              const peerMsg = rawMessage.role === "user" ? (rawMessage.meta?.peer ? { name: rawMessage.meta.peer.from.name, text: peerParsed?.text ?? String(rawMessage.content) } : peerParsed ? { name: peerParsed.name, text: peerParsed.text } : null) : null;
               if (peerMsg) return <PeerMessageLine key={rawMessage.id} name={peerMsg.name} text={peerMsg.text} />;
               if (isHiddenMessage(rawMessage)) {
                 // A helper's report coming back: "Message from Helper 1 (...): ..." (the rest stays hidden)
@@ -6647,8 +6650,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             {gridJoinLines.after.map((j) => <GridJoinLine key={`join-${j.email}`} {...j} />)}
             {/* Share Grid: the agent is answering someone else (sending is blocked until it is done) */}
             {gridBlockedBy && <GridReplyingLine person={gridBlockedBy} />}
-            {/* Other Classgrid sessions: a finished/closed notice, and messages waiting for this turn to end */}
-            {peerNotices.map((n) => <div key={n.key} className="pl-10 py-1 text-[13px] text-slate-500 dark:text-[#8a8a8a]">{n.text}</div>)}
+            {/* Other Classgrid sessions: messages waiting for this turn's next step, or for it to end */}
             {peerPending > 0 && <div className="ml-10 w-fit rounded-full border border-border/60 px-2.5 py-0.5 text-xs text-muted-foreground">{peerPending} message{peerPending === 1 ? "" : "s"} from another session waiting</div>}
 
             {/* Rendering priority message right after the normal messages */}

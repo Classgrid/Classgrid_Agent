@@ -7,6 +7,7 @@
 // durable turn (durable-turn.service.js), so the app's internet dropping loses nothing.
 // Commands come in over HTTP: POST /api/ai/turn/:id/cmd.
 import { StreamChatError } from "./llm-stream.js";
+import { helperScope } from "../utils/step-scope.js";
 
 // An app that is on the answer's stream but never drives a round (an older app, its commands not getting through):
 // the server runs what is left itself, so the answer doesn't wait for ever. A stopped answer never gets here (below).
@@ -37,7 +38,7 @@ export function makeLocalLoopDriver({ turnId, userId, emit, onStop, signal = nul
         const roundId = ++state.nextRound;
         return new Promise((resolve, reject) => {
             const round = {
-                calls, run, resolve, reject,
+                calls, run, resolve, reject, helper,
                 outcomes: new Map(),
                 queue: Promise.resolve(), // runs happen one at a time, in the order the app asks
                 closed: false,
@@ -66,7 +67,10 @@ async function runOne(state, roundId, round, id) {
     // A run the app asked for that had not started when the answer stopped: it never starts
     if (state.stopped) { round.outcomes.set(id, { ...NOT_RUN }); return; }
     let out;
-    try { out = await round.run(id); } catch (e) { out = { content: `Tool error: ${e?.message || e}`, isError: true }; }
+    // (a helper's round: its step runs marked as a helper's. This call comes from the app's HTTP command, outside
+    // the helper's own chain, so the mark is put here: utils/step-scope.js)
+    const ofHelper = round.helper !== undefined && round.helper !== null;
+    try { out = await (ofHelper ? helperScope.run({ helper: round.helper }, () => round.run(id)) : round.run(id)); } catch (e) { out = { content: `Tool error: ${e?.message || e}`, isError: true }; }
     round.outcomes.set(id, out || { content: "", isError: false });
     state.emit({ type: "tool_done", roundId, id, name: call.name, isError: !!out?.isError });
 }

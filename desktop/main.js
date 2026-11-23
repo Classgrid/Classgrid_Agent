@@ -385,7 +385,7 @@ function startPeerSession() {
       if (peerReady && win && !win.isDestroyed()) win.webContents.send(channel, payload);
       else { peerQueue.push([channel, payload]); if (peerQueue.length > 200) peerQueue.shift(); }
     };
-    peerSession.onMessage((m) => toScreens("cg-peer-message", { id: m.id, from: m.from, text: m.text, notifyIdle: m.notifyIdle, receivedAt: m.receivedAt, sessionStatus: m.sessionStatus }));
+    peerSession.onMessage((m) => toScreens("cg-peer-message", { id: m.id, from: m.from, text: m.text, notifyIdle: m.notifyIdle, receivedAt: m.receivedAt, sessionStatus: m.sessionStatus, ...(m.notice ? { notice: m.notice } : {}) })); // (notice: "idle" / "exit", a "finished its turn" notice kept like a message)
     peerSession.onNotice((n) => toScreens("cg-peer-notice", n));
   } catch (e) { console.warn("[sessions] not started:", e.message); }
 }

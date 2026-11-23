@@ -10,6 +10,7 @@ import { getIO } from "./socket.service.js";
 import { projectForChat } from "./ide-project.service.js";
 import redis from "../config/redis.js";
 import { noSuchJobHere, betterJobReply } from "../utils/runner-job-reply.js";
+import { inHelper } from "../utils/step-scope.js";
 
 // ── The app that is chatting runs the step itself (owner's requirement, 2026-11-09) ──────────────────────────
 // While an answer streams to the desktop app or Classgrid Code and the app said it can run steps (body.pcTools),
@@ -55,7 +56,9 @@ async function askViaApp(exec, userId, tool, payload) {
     const id = crypto.randomBytes(12).toString("hex");
     await redis.set(PC_OWNER(id), String(userId), "EX", 3600).catch(() => {});
     const timeoutMs = pcTimeoutFor(tool, payload?.args);
-    const sent = exec.send({ type: "pc_tool_call", id, tool, args: payload?.args || {}, root: payload?.root, projectId: payload?.projectId, chat: payload?.chat, ...(exec.checkpoint ? { checkpoint: exec.checkpoint } : {}), timeout_ms: timeoutMs });
+    // (helper: a helper's step, not the main answer's own. The app hands unread messages from other Classgrid
+    // sessions to the chat's AI after a step of the main answer only: utils/step-scope.js)
+    const sent = exec.send({ type: "pc_tool_call", id, tool, args: payload?.args || {}, root: payload?.root, projectId: payload?.projectId, chat: payload?.chat, ...(exec.checkpoint ? { checkpoint: exec.checkpoint } : {}), ...(inHelper() ? { helper: true } : {}), timeout_ms: timeoutMs });
     if (!sent) return null; // the stream is gone: the caller falls back to the socket
     const until = Date.now() + timeoutMs;
     while (Date.now() < until) {
