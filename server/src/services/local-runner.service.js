@@ -10,7 +10,8 @@ import { getIO } from "./socket.service.js";
 import { projectForChat } from "./ide-project.service.js";
 import redis from "../config/redis.js";
 import { noSuchJobHere, betterJobReply } from "../utils/runner-job-reply.js";
-import { inHelper } from "../utils/step-scope.js";
+import { inHelper, helperScope } from "../utils/step-scope.js";
+import { markHelperJob, HELPER_JOB_NOTE } from "../utils/helper-jobs.js";
 
 // ── The app that is chatting runs the step itself (owner's requirement, 2026-11-09) ──────────────────────────
 // While an answer streams to the desktop app or Classgrid Code and the app said it can run steps (body.pcTools),
@@ -171,9 +172,17 @@ const timeoutFor = (tool, args = null) => (tool === "editor_context" ? 3000 : to
 const WAKE_NOTE = (id) => `It keeps running in the background as job_id ${id}. Don't wait for it and don't check it again and again: you are woken automatically with its result and exit code when it finishes. Tell the user briefly that it is running and end your answer now (or go on with other work that doesn't need its result). Only use check_background_command for its output so far if the user asks, and stop_background_command to stop it.`;
 function withWakeNote(reply) {
     if (typeof reply?.text !== "string") return reply;
+    // A helper's own command: the job is remembered as that helper's, so its result goes to the helper when it ends
+    // and the chat is not woken for it (utils/helper-jobs.js)
+    const helper = helperScope.getStore()?.helper;
+    const note = (id) => {
+        if (helper == null) return WAKE_NOTE(id);
+        markHelperJob(id, helper);
+        return HELPER_JOB_NOTE(id);
+    };
     const text = reply.text
-        .replace(/so it keeps running in the background as job_id (\S+?)\. Wait for it to finish with check_background_command \([^)]*\), or stop it with stop_background_command\./, (_m, id) => `so: ${WAKE_NOTE(id)}`)
-        .replace(/^Started in the background on the user's computer\. job_id: (\S+?)\. Check it with check_background_command\.$/, (_m, id) => `Started on the user's computer. ${WAKE_NOTE(id)}`);
+        .replace(/so it keeps running in the background as job_id (\S+?)\. Wait for it to finish with check_background_command \([^)]*\), or stop it with stop_background_command\./, (_m, id) => `so: ${note(id)}`)
+        .replace(/^Started in the background on the user's computer\. job_id: (\S+?)\. Check it with check_background_command\.$/, (_m, id) => `Started on the user's computer. ${note(id)}`);
     return text === reply.text ? reply : { ...reply, text };
 }
 

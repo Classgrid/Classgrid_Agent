@@ -101,6 +101,7 @@ import { helperScope } from "../utils/step-scope.js";
 import { sharedHelperTools, loadHelperGroups, groupsWithRules } from "../services/helper-tools.js";
 import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
+import { setHelperJobSink } from "../utils/helper-jobs.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -1345,6 +1346,13 @@ async function sendHelperNotes(userId, sessionId, { answerEnded = false } = {}) 
         wake: (note) => wakeChat(userId, sessionId, note),
     });
 }
+// A helper's own background command ended: the helper reads the result with its next step (utils/helper-jobs.js)
+setHelperJobSink((chat, helperNo, text) => {
+    const h = HELPER_BOARDS.get(String(chat))?.helpers.find((x) => x.no === helperNo);
+    if (!h || h.state !== "running") return false;
+    h.jobsDone.push(text);
+    return true;
+});
 const stopHelpers = (sessionId) => {
     const board = HELPER_BOARDS.get(String(sessionId || "none"));
     if (!board) return;
@@ -4659,8 +4667,9 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 return got.map((m) => `[Message from the main AI]: ${m}`).join("\n");
                             };
                             const withInbox = (out) => {
-                                if (!h.inbox.length) return out;
-                                const msgs = takeInbox();
+                                if (!h.inbox.length && !h.jobsDone.length) return out;
+                                // (its own background commands that ended meanwhile come the same way: utils/helper-jobs.js)
+                                const msgs = [...(h.inbox.length ? [takeInbox()] : []), ...h.jobsDone.splice(0)].join("\n\n");
                                 return out && typeof out === "object" ? { ...out, text: `${out.text}\n\n${msgs}` } : `${out}\n\n${msgs}`;
                             };
                             // The main AI's own computer handlers (they already ask the user first), kept apart from the gate below
@@ -4920,7 +4929,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], jobsDone: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             // (everything the helper does is marked as a helper's: utils/step-scope.js)
                             h.promise = helperScope.run({ helper: h.no }, () => runHelper(h, i)).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;

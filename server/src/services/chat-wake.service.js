@@ -170,6 +170,11 @@ async function runWake(userId, sessionId) {
 /** A background command on the user's computer finished (from their desktop app) */
 export async function onLocalJobDone(userId, d) {
     if (!d?.chat || d.stopped) return;
+    // A helper's own command: its result goes to that helper with its next step, and the chat is not woken for
+    // something the main AI never started (utils/helper-jobs.js)
+    const { takeHelperJob, giveToHelper } = await import("../utils/helper-jobs.js");
+    const helper = await takeHelperJob(d.jobId);
+    if (helper !== null) { giveToHelper(d.chat, helper, d); return; }
     // Only that it ended: the AI looks at the result itself (check_background_command), like a person checking a job
     // that finished, and then tells the user what it found
     await wakeChat(userId, String(d.chat), `The background command \`${String(d.command || "").slice(0, 500)}\` (job_id ${d.jobId}) on the user's computer has just ended. Check its result yourself first with check_background_command (job_id "${d.jobId}"), then tell the user what you found.`);
