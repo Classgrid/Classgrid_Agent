@@ -32,10 +32,10 @@ export function ResetPlanUsage({ plan, planName }: { plan: string; planName: str
         <div className="p-6 bg-card flex flex-col gap-6 flex-1">
           <div className="flex flex-col gap-1.5">
             <h3 className="text-lg font-semibold text-foreground tracking-tight">
-              Reset Plan Usage
+              Reset Usage
             </h3>
             <p className="text-sm text-muted-foreground">
-              Force reset the AI usage of everyone on the {planName} plan: session, weekly, Claude and Fable limits go back to 0. This requires a Super Admin security code.
+              Force reset the AI usage of everyone on {planName}: session, weekly, Claude and Fable limits go back to 0. This requires a Super Admin security code.
             </p>
           </div>
         </div>
@@ -62,7 +62,7 @@ export function ResetPlanUsage({ plan, planName }: { plan: string; planName: str
         onOpenChange={setOpen}
         title={`Reset ${planName} Usage`}
         description="Please provide your Super Admin security code to proceed."
-        warningMessage={`This resets the usage of everyone on the ${planName} plan back to 0.`}
+        warningMessage={`This resets the usage of everyone on ${planName} back to 0.`}
         actionLabel="Reset Usage"
         cancelLabel="Cancel"
         isLoading={resetPlan.isPending}
