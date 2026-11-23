@@ -459,6 +459,7 @@
     sessionStatus: function (status) { send("sessionStatus", status); },
     peerRead: function (ids) { send("peerRead", ids); },
     peerInbox: bind("peerInbox"), // unread messages still waiting (read when a turn ends)
+    sendToSession: bind("sendToSession"), // { target, text, replyTo } -> receipt or { error } (a session's answer sent back)
     // Settings → Appearance: light, dark or the same as the computer, for the whole editor. It also says which one that
     // is now (the computer's own for "same as your PC"), so the AI panel switches at once, not after the editor does
     setEditorTheme: function (mode) {

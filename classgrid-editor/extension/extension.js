@@ -70,7 +70,7 @@ function startSession(context, runner) {
     if (!handle) return;
     peer.handle = handle;
     runner.setSessionHandle?.(handle);
-    handle.onMessage?.((m) => peerSend({ cgEvent: "peerMessage", data: { id: m.id, from: m.from, text: m.text, notifyIdle: !!m.notifyIdle, receivedAt: m.receivedAt || Date.now(), ...(m.notice ? { notice: m.notice } : {}) } })); // (notice: "idle" / "exit", a "finished its turn" notice kept like a message)
+    handle.onMessage?.((m) => peerSend({ cgEvent: "peerMessage", data: { id: m.id, from: m.from, text: m.text, notifyIdle: !!m.notifyIdle, receivedAt: m.receivedAt || Date.now(), ...(m.notice ? { notice: m.notice } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}) } })); // (notice: "idle" / "exit", a "finished its turn" notice kept like a message)
     handle.onNotice?.((n) => peerSend({ cgEvent: "peerNotice", data: { kind: n.kind, messageId: n.messageId, from: n.from } }));
     context.subscriptions.push({ dispose: () => { try { handle.close(); } catch { /* already closed */ } } });
   } catch (err) {
@@ -944,6 +944,12 @@ const HANDLERS = {
   peerRead: (p, ids) => { if (p.webview === screens.agent && Array.isArray(ids)) peer.handle?.markRead(ids.map(String)); },
   // Unread messages still in the inbox (came while a turn ran and no later step picked them up): read when the turn ends
   peerInbox: (p) => (p.webview === screens.agent && peer.handle ? peer.handle.peek() : []),
+  // The chat screen sends a message itself: a session's whole answer back to the session that asked (replyTo)
+  sendToSession: async (p, req) => {
+    if (p.webview !== screens.agent || !peer.handle) return { error: "this session is not set up for messaging other sessions" };
+    try { return await require(path.join(DESKTOP_DIR, "sessions.js")).send({ target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle), replyTo: req && req.replyTo, from: peer.handle.identity() }); }
+    catch (err) { return { error: String(err?.message || err) }; }
+  },
   // Studio's Review tab for a folder on this computer: an answer's changes, and its files put back (runner.js keepBefore)
   listCheckpoints: (_p, chat) => parts.runner.listCheckpoints(chat),
   reviewCheckpoint: (_p, chat, cp) => parts.runner.reviewCheckpoint(chat, cp),

@@ -385,7 +385,7 @@ function startPeerSession() {
       if (peerReady && win && !win.isDestroyed()) win.webContents.send(channel, payload);
       else { peerQueue.push([channel, payload]); if (peerQueue.length > 200) peerQueue.shift(); }
     };
-    peerSession.onMessage((m) => toScreens("cg-peer-message", { id: m.id, from: m.from, text: m.text, notifyIdle: m.notifyIdle, receivedAt: m.receivedAt, sessionStatus: m.sessionStatus, ...(m.notice ? { notice: m.notice } : {}) })); // (notice: "idle" / "exit", a "finished its turn" notice kept like a message)
+    peerSession.onMessage((m) => toScreens("cg-peer-message", { id: m.id, from: m.from, text: m.text, notifyIdle: m.notifyIdle, receivedAt: m.receivedAt, sessionStatus: m.sessionStatus, ...(m.notice ? { notice: m.notice } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}) })); // (notice: "idle" / "exit", a "finished its turn" notice kept like a message)
     peerSession.onNotice((n) => toScreens("cg-peer-notice", n));
   } catch (e) { console.warn("[sessions] not started:", e.message); }
 }
@@ -400,7 +400,7 @@ ipcMain.handle("cg:peerInbox", (e) => (fromOurScreens(e) && peerSession ? peerSe
 ipcMain.handle("cg:listSessions", async (e) => (fromOurScreens(e) ? require("./sessions").list({ excludeSelf: true }) : []));
 ipcMain.handle("cg:sendToSession", async (e, req) => {
   if (!fromOurScreens(e)) return { error: "only the Classgrid app itself may send messages" };
-  try { return await require("./sessions").send({ target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle) }); }
+  try { return await require("./sessions").send({ target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle), replyTo: req && req.replyTo }); }
   catch (err) { return { error: err.message }; }
 });
 // Studio's Review tab for a folder on this computer (runner.js keepBefore): an answer's changes, Reject, Undo

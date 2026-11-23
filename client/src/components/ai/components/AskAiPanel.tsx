@@ -262,7 +262,7 @@ import { showDesktopNotification } from "@/lib/desktopNotifications";
 
 import { AgentMapButton } from "./AgentMap";
 
-import { isPeerContent, markPeerRead, parsePeerContent, peerInboxNow, peerNoticeText, peerPrompt, reportSessionStatus, subscribePeers } from "@/lib/peerSessions";
+import { isPeerContent, markPeerRead, parsePeerContent, peerInboxNow, peerNoticeText, peerPrompt, reportSessionStatus, sendPeerAnswer, subscribePeers, type PeerMessage } from "@/lib/peerSessions";
 
 // Session-to-session messaging: the AI panels that are open, the newest one is the one that answers other sessions
 const peerPanels: symbol[] = [];
@@ -4561,6 +4561,20 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const peerBusyRef = useRef(false);
   const peerHandledRef = useRef<Set<string>>(new Set());
   const [peerPending, setPeerPending] = useState(0);
+  // The message that started the turn now running, when its answer goes back by itself (not a notice, not an answer)
+  const peerTurnRef = useRef<{ sessionId: string; messageId: string } | null>(null);
+  const peerMessagesRef = useRef<ChatMessage[]>([]);
+  peerMessagesRef.current = messages;
+  // A message from another session starts a turn here. Its whole answer is sent back when the turn ends (below), the
+  // way a helper's report goes to the main agent: the other session gets a real answer, not a one-line note.
+  const startPeerTurn = (m: PeerMessage) => {
+    peerHandledRef.current.add(m.id);
+    markPeerRead([m.id]);
+    peerTurnRef.current = !m.notice && !m.replyTo && m.from?.sessionId ? { sessionId: m.from.sessionId, messageId: m.id } : null;
+    void askQuestionRef.current?.(peerPrompt(m), { hidden: true, meta: { peer: { from: m.from, messageId: m.id } } });
+  };
+  const startPeerTurnRef = useRef(startPeerTurn);
+  startPeerTurnRef.current = startPeerTurn;
   useEffect(() => {
     const me = peerMe.current;
     peerPanels.push(me);
@@ -4569,9 +4583,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       (m) => {
         if (!active() || peerHandledRef.current.has(m.id)) return;
         if (peerBusyRef.current) { setPeerPending((n) => n + 1); return; } // busy: the host adds it to the next tool result (or sends it again when this turn ends)
-        peerHandledRef.current.add(m.id);
-        markPeerRead([m.id]);
-        void askQuestionRef.current?.(peerPrompt(m), { hidden: true, meta: { peer: { from: m.from, messageId: m.id } } });
+        startPeerTurnRef.current(m);
       },
       // ("finished its turn" and "closed" notices come as messages above, m.notice: the AI that asked for one with
       // notify_when_idle reads it, and the chat shows it as a line. In 1.0.48 they were only a line on the screen.)
@@ -4586,17 +4598,29 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     reportSessionStatus(submitting ? "busy" : "idle");
     if (submitting) return;
     setPeerPending(0);
+    // The turn a message from another session started has ended: its whole answer goes back to that session. Not when
+    // the AI already answered it with the tool in this turn, and never for an answer or a notice (peerTurnRef is null).
+    const asked = peerTurnRef.current;
+    peerTurnRef.current = null;
+    const sendBack = asked ? setTimeout(() => {
+      const list = peerMessagesRef.current;
+      const at = list.findIndex((x) => x.role === "user" && x.meta?.peer?.messageId === asked.messageId);
+      const answer = at >= 0 ? list.slice(at + 1).find((x) => x.role === "assistant") : undefined;
+      const text = String(answer?.content || "").trim();
+      const answeredItself = (answer?.steps || []).some((s: any) => s?.tool === "message_classgrid_session" && /^Delivered to /.test(String(s?.result || "")));
+      if (text && !answeredItself) void sendPeerAnswer(asked.sessionId, text, asked.messageId);
+    }, 300) : null;
     // A message that came while the turn ran and that no later step read is still in the inbox: it starts the next turn
     const t = setTimeout(() => {
       if (peerBusyRef.current || peerPanels[peerPanels.length - 1] !== peerMe.current) return;
       void peerInboxNow().then((msgs) => {
         const m = msgs.find((x) => !peerHandledRef.current.has(x.id));
         if (!m || peerBusyRef.current) return;
-        peerHandledRef.current.add(m.id);
-        markPeerRead([m.id]);
-        void askQuestionRef.current?.(peerPrompt(m), { hidden: true, meta: { peer: { from: m.from, messageId: m.id } } });
+        startPeerTurnRef.current(m);
       });
     }, 400);
+    // (the answer is sent back even when a new turn starts at once: only the next-message timer is dropped)
+    void sendBack;
     return () => clearTimeout(t);
   }, [submitting]);
 

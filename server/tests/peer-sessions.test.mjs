@@ -42,6 +42,7 @@ process.on("message", async (c) => {
     if (c.cmd === "status") h.setStatus(c.status);
     else if (c.cmd === "take") { const msgs = h.takeInbox(); h.markRead(msgs.map((m) => m.id)); return process.send({ ev: "reply", id: c.id, msgs }); }
     else if (c.cmd === "peek") return process.send({ ev: "reply", id: c.id, msgs: h.peek() });
+    else if (c.cmd === "sendReply") { const r = await sessions.send({ target: c.target, text: c.text, replyTo: c.replyTo }).catch((e) => ({ error: e.message })); return process.send({ ev: "reply", id: c.id, r }); }
     else if (c.cmd === "send") { const r = await sessions.send({ target: c.target, text: c.text, notifyIdle: c.notifyIdle }).catch((e) => ({ error: e.message })); return process.send({ ev: "reply", id: c.id, r }); }
     else if (c.cmd === "close") { await h.close(); process.send({ ev: "reply", id: c.id }); return setTimeout(() => process.exit(0), 20); }
     process.send({ ev: "reply", id: c.id });
@@ -239,4 +240,27 @@ test("a deleted key file comes back at the next state change, and the session ca
     assert.equal(r.status, "delivered");
     assert.equal(r.targetStatus, "busy");
     await two.ask({ cmd: "close" });
+});
+
+// ── An answer (replyTo): a session's whole answer sent back by its chat screen when the turn a message started has
+// ended, the way a helper's report goes to the main agent (owner, 2026-11-23: "the reply is two robotic words, not a
+// message like a subagent's reply"). The message says which one it answers, and its text tells the AI it is an
+// answer, so it is not answered in turn.
+test("an answer carries the id of the message it answers, and reads as an answer", async () => {
+    const three = await startSession("peer-three");
+    const before = myMessages.length;
+    const asked = await sessions.send({ target: "peer-three", text: "what does package.json hold?" });
+    const long = "package.json holds the project's name and its 14 packages.\nThe build script runs Vite.\nNothing else is set.";
+    const sent = await three.ask({ cmd: "sendReply", target: "main-test", text: long, replyTo: asked.id });
+    assert.equal(sent.r.status, "delivered");
+    const got = await until(() => myMessages.slice(before).find((m) => m.replyTo), "the answer");
+    assert.equal(got.replyTo, asked.id);
+    assert.equal(got.text, long);
+    const prompt = sessions.promptFor(got);
+    assert.ok(prompt.startsWith(`[Peer message from @peer-three (session ${three.sessionId}, message ${got.id})]: ${long}\n[This is that session's answer to the message you sent it, not typed by the person.`));
+    assert.equal(prompt.includes("call message_classgrid_session"), false);
+    // an ordinary message has no replyTo
+    assert.equal("replyTo" in myMessages.slice(before).find((m) => m.replyTo), true);
+    me.markRead([got.id]);
+    await three.ask({ cmd: "close" });
 });
