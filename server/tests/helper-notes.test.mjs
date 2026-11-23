@@ -5,7 +5,7 @@
 //   - takeNotes: the unread notes for the result of the main AI's next step, each given once
 //   - sendNotes: the chat is not answering: it is woken with the note; answering: nothing is sent (the next step, or
 //     the end of that answer, hands it over); a background task is woken, never from the end of its own run
-// Run: node --test tests/helper-notes.test.mjs
+// Run: node --experimental-test-module-mocks --test tests/helper-notes.test.mjs
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -94,8 +94,39 @@ test("several notes of one helper go in one message, each helper in its own", as
 });
 
 test("the wake-up message of a note is told apart from a finished job's by its first words", () => {
-    // (chat-wake.service.js runWake picks the closing words by this)
+    // (chat-wake.service.js wakeQuestion picks the closing words by this)
     const isNote = (n) => /^Helper \d+ \([\s\S]*?\) says:\n/.test(n);
     assert.equal(isNote(wakeNoteOf(helper({ notes: ["hello"] }))), true);
     assert.equal(isNote("Helper 1 (Find where the login token is checked) finished:\nreport"), false);
+});
+
+// The words that close a wake-up message (chat-wake.service.js wakeQuestion). Owner's test, 2026-11-23: one helper's
+// finding and another helper's question came in one message, the closing words said "a helper wrote this", and the
+// main AI answered the first helper only; the one with the question waited 5 minutes for nothing.
+const { mock } = await import("node:test");
+mock.module("../src/config/redis.js", { defaultExport: {} });
+mock.module("../src/models/User.js", { defaultExport: {} });
+mock.module("../src/services/socket.service.js", { namedExports: { getIO: () => null } });
+const { wakeQuestion } = await import("../src/services/chat-wake.service.js");
+
+test("one helper wrote: answer it; several wrote in one message: answer every one of them", () => {
+    const one = wakeQuestion([wakeNoteOf(helper({ notes: ["Which branch?"] }))]);
+    assert.ok(one.startsWith("[SYSTEM: background work you started in this chat sent you a message while you were not answering."));
+    assert.match(one, /\n\nA helper of this chat wrote this to you\. If it asks something or needs a decision, answer it now with message_helper: a helper that is waiting has your message at once\./);
+
+    const two = wakeQuestion([wakeNoteOf(helper({ notes: ["Finding 1"] })), wakeNoteOf(helper({ no: 3, task: "Scripts (and Sanity)", notes: ["Question: full or short?"], waitingForMain: true }))]);
+    assert.match(two, /\n\nA helper of this chat wrote this to you \(2 helpers wrote, each in its own part above: Helper 1, Helper 3\)\. Answer every one of them that asks something or needs a decision, each with its own message_helper call, before you end this answer: a helper that is waiting/);
+    assert.match(two, /Helper 3 is still working and is waiting for your answer\./);
+    // (the chat screen cuts the closing words off at these first words: they stay the same)
+    assert.equal(two.split("\n\nA helper of this chat wrote this to you").length, 2);
+});
+
+test("a finished report with a working helper's note in the same message: the note is still to be answered", () => {
+    const mixed = wakeQuestion(["Helper 1 (A) finished:\nReport A\n\n[1 other helper of this chat is still working.]", wakeNoteOf(helper({ no: 2, task: "B", notes: ["Should I go on?"] }))]);
+    assert.ok(mixed.startsWith("[SYSTEM: background work you started in this chat has finished while you were not answering."));
+    assert.match(mixed, /\n\nTell the user the result now, /);
+    assert.match(mixed, /A part above where a helper "says" something is a message from a helper that is still working \(Helper 2\): answer it with message_helper before you end this answer\.$/);
+    // (nothing but finished work: the words are as they were)
+    const done = wakeQuestion(["Helper 1 (A) finished:\nReport A"]);
+    assert.ok(done.endsWith("If the user's task needs a next step, do it; otherwise don't start new long work."));
 });

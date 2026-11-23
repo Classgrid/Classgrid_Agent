@@ -91,6 +91,22 @@ export async function chatAnswering(userId, sessionId) {
     return !!(working || running);
 }
 
+const HELPER_NOTE = /^Helper (\d+) \([\s\S]*?\) says:\n/;
+/** The whole message that wakes a chat with these notes (what finished, or what its working helpers wrote) */
+export function wakeQuestion(notes) {
+    const writers = new Set(notes.map((n) => n.match(HELPER_NOTE)?.[1]).filter(Boolean));
+    const body = notes.join("\n\n---\n\n");
+    // (only notes from helpers that are still working: nothing has finished, and the main AI answers the helpers)
+    if (writers.size && notes.every((n) => HELPER_NOTE.test(n))) {
+        const each = writers.size > 1
+            ? ` (${writers.size} helpers wrote, each in its own part above: Helper ${[...writers].join(", Helper ")}). Answer every one of them that asks something or needs a decision, each with its own message_helper call, before you end this answer`
+            : ". If it asks something or needs a decision, answer it now with message_helper";
+        return `[SYSTEM: background work you started in this chat sent you a message while you were not answering. This message is from Classgrid, not the user.]\n\n${body}\n\nA helper of this chat wrote this to you${each}: a helper that is waiting has your message at once. Tell the user about it only if it matters to them, in a sentence or two. Do not do the helper's work yourself and do not start new long work.`;
+    }
+    const alsoNotes = writers.size ? ` A part above where a helper "says" something is a message from a helper that is still working (Helper ${[...writers].join(", Helper ")}): answer it with message_helper before you end this answer.` : "";
+    return `[SYSTEM: background work you started in this chat has finished while you were not answering. This message is from Classgrid, not the user.]\n\n${body}\n\nTell the user the result now, the way you would mention it in the middle of a conversation: what finished, whether it worked and what it means. If the user's task needs a next step, do it; otherwise don't start new long work.${alsoNotes}`;
+}
+
 async function runWake(userId, sessionId) {
     // One woken turn at a time per chat
     if (await chatAnswering(userId, sessionId)) return; // woken when that answer ends (wakeIfPending)
@@ -107,11 +123,10 @@ async function runWake(userId, sessionId) {
         let meta = {};
         try { meta = JSON.parse((await redis.get(META(sessionId))) || "{}"); } catch { /* none */ }
         ran = true;
-        // (only notes from helpers that are still working: nothing has finished, and the main AI answers the helper)
-        const onlyHelperNotes = notes.every((n) => /^Helper \d+ \([\s\S]*?\) says:\n/.test(n));
-        const question = onlyHelperNotes
-            ? `[SYSTEM: background work you started in this chat sent you a message while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nA helper of this chat wrote this to you. If it asks something or needs a decision, answer it now with message_helper: a helper that is waiting has your message at once. Tell the user about it only if it matters to them, in a sentence or two. Do not do the helper's work yourself and do not start new long work.`
-            : `[SYSTEM: background work you started in this chat has finished while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nTell the user the result now, the way you would mention it in the middle of a conversation: what finished, whether it worked and what it means. If the user's task needs a next step, do it; otherwise don't start new long work.`;
+        // Several helpers can write in the same moment and come in one message. The closing words said "a helper
+        // wrote this" and the main AI answered the first one only: owner's test, 2026-11-23, a helper's question that
+        // came together with another helper's finding was never answered, and the helper waited its 5 minutes.
+        const question = wakeQuestion(notes);
         // (note: the open chat shows a helper's report from it as "Message from Helper 1: ...", the rest stays hidden)
         tell(userId, { sessionId, phase: "start", note: question });
         // Remote PC (owner, 2026-11-18: the phone shows everything the computer's chat shows, live): the answer the
