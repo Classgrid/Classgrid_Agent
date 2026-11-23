@@ -624,7 +624,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'message_helper',
-    description: 'Send a message to a Project Mode helper that is still working (e.g. new instructions, an answer to its question, a correction). It gets the message with its next step.',
+    description: 'Send a message to a Project Mode helper that is still working (e.g. new instructions, an answer to its question, a correction). A helper that is waiting for your answer has it at once; another reads it with the result of its next step. The notes and questions a helper sends reach you by themselves, with the result of your next step or as a message that wakes this chat: answer a question with this tool right away.',
     inputSchema: {
       type: 'object',
       properties: { helper: { type: 'number', description: 'Helper number, as given when it started.' }, message: { type: 'string' } },

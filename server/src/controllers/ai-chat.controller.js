@@ -100,6 +100,7 @@ import { projectForChat } from "../services/ide-project.service.js";
 import { helperScope } from "../utils/step-scope.js";
 import { sharedHelperTools, loadHelperGroups, groupsWithRules } from "../services/helper-tools.js";
 import { speakerGenderNote } from "../services/voice-choices.js";
+import { takeNotes } from "../utils/helper-notes.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -1279,6 +1280,8 @@ const HELPER_TRY_MS = 5 * 60 * 60 * 1000;
 // person's credits (the live meter) and the repeated-step check end it. This number is only a backstop far above
 // what 5 hours of steps can reach (a helper took 57 steps in 11 minutes)
 const HELPER_MAX_STEPS = 5000;
+// How long a helper waits in tell_main for the main AI's answer when it asked to wait
+const TELL_MAIN_WAIT_MS = 5 * 60 * 1000;
 // How long one model call of a helper may take (it was 4 minutes; one round can write a whole long file)
 const HELPER_ROUND_MS = 10 * 60 * 1000;
 
@@ -1315,6 +1318,24 @@ async function sendHelperReports(userId, sessionId, { answerEnded = false } = {}
     const { sendReports } = await import("../utils/helper-reports.js");
     await sendReports({
         board, answerEnded, max: WAKE_NOTE_MAX, changesText: helperChangesText,
+        hasTask: async () => {
+            const { default: AgentTask } = await import("../models/AgentTask.js");
+            return !!(await AgentTask.findOne({ session_id: sessionId, status: { $in: ["working", "sleeping", "waiting_tokens"] } }).select("_id").lean().catch(() => null));
+        },
+        wakeTask: () => import("../services/agent-task.service.js").then((m) => m.wakeTaskForSession(sessionId, "helpers")),
+        answering: () => chatAnswering(userId, sessionId),
+        wake: (note) => wakeChat(userId, sessionId, note),
+    });
+}
+// A working helper's note (tell_main) goes to the main AI at once (utils/helper-notes.js): with the result of its next
+// step while the chat is answering (takeNotes in the step wrapper), otherwise the chat is woken with it here.
+async function sendHelperNotes(userId, sessionId, { answerEnded = false } = {}) {
+    const board = HELPER_BOARDS.get(String(sessionId || "none"));
+    if (!board || !userId || !sessionId) return;
+    const { wakeChat, chatAnswering } = await import("../services/chat-wake.service.js");
+    const { sendNotes } = await import("../utils/helper-notes.js");
+    await sendNotes({
+        board, answerEnded,
         hasTask: async () => {
             const { default: AgentTask } = await import("../models/AgentTask.js");
             return !!(await AgentTask.findOne({ session_id: sessionId, status: { $in: ["working", "sleeping", "waiting_tokens"] } }).select("_id").lean().catch(() => null));
@@ -3826,6 +3847,12 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                 }
                 let resultStr;
                 try { resultStr = await handler(args, ...rest); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
+                // What this chat's helpers wrote to the main AI meanwhile comes with the step's result, at once
+                // (utils/helper-notes.js). Not with a helper's own step, and not where the result is more than text.
+                if (rest[0]?.fromHelper !== true && typeof resultStr === "string") {
+                    const notes = takeNotes(HELPER_BOARDS.get(String(sessionId || "none")));
+                    if (notes) resultStr = `${resultStr}\n\n${notes}`;
+                }
 
                 if (!silentTool) {
                     // Pictures a tool returned (view_image, read_local_file) go to the model only; the chat step keeps the text
@@ -4618,11 +4645,22 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 ? [READ_LOCAL_FILE_TOOL, ...COMPUTER_TERMINAL_DEFS].filter((d) => names.includes(d.function.name))
                                 : (await getMcpTools()).filter((t) => names.includes(t.name))
                                     .map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.inputSchema } }));
-                            defs.push({ type: "function", function: { name: "tell_main", description: "Send the main AI a short note or question. It reads your notes while you work and may answer with a message.", parameters: { type: "object", properties: { message: { type: "string" } }, required: ["message"] } } });
+                            defs.push({ type: "function", function: { name: "tell_main", description: "Send the main AI a short note or question. It gets it at once, also when it is not answering just then. Its answer reaches you with the result of one of your next steps. When you cannot go on without its answer, set wait_for_answer: this step then waits for the answer (up to 5 minutes) and gives it to you the moment it comes.", parameters: { type: "object", properties: { message: { type: "string" }, wait_for_answer: { type: "boolean", description: "Wait in this step for the main AI's answer (only when you cannot go on without it)" } }, required: ["message"] } } });
                             // A message from the main AI reaches the helper with the result of its next step
+                            // (each message it reads is a line in the helper's own steps, "Message from the main agent")
+                            const takeInbox = () => {
+                                const got = h.inbox.splice(0);
+                                for (const m of got) {
+                                    const id = `h${i}-${stepNo++}`;
+                                    emitHelper({ helper: i, id, tool: "main_message", args: { message: m } });
+                                    emitHelper({ helper: i, id, result: "Read." });
+                                    helperStepDone(helperStep(h, id, "main_message", { message: m }), "Read.");
+                                }
+                                return got.map((m) => `[Message from the main AI]: ${m}`).join("\n");
+                            };
                             const withInbox = (out) => {
                                 if (!h.inbox.length) return out;
-                                const msgs = h.inbox.splice(0).map((m) => `[Message from the main AI]: ${m}`).join("\n");
+                                const msgs = takeInbox();
                                 return out && typeof out === "object" ? { ...out, text: `${out.text}\n\n${msgs}` } : `${out}\n\n${msgs}`;
                             };
                             // The main AI's own computer handlers (they already ask the user first), kept apart from the gate below
@@ -4675,12 +4713,26 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             }
                             liveHandlers.tell_main = async (a) => {
                                 const note = String(a?.message || "").trim().slice(0, 4000);
-                                if (note) h.notes.push(note);
                                 const id = `h${i}-${stepNo++}`;
                                 emitHelper({ helper: i, id, tool: "tell_main", args: a });
-                                emitHelper({ helper: i, id, result: "Sent to the main AI." });
-                                helperStepDone(helperStep(h, id, "tell_main", a), "Sent to the main AI.");
-                                return withInbox("Sent to the main AI.");
+                                const step = helperStep(h, id, "tell_main", a);
+                                let out = "Delivered to the main AI.";
+                                if (note) {
+                                    const wait = (a?.wait_for_answer === true || a?.wait_for_answer === "true") && !h.inbox.length;
+                                    h.waitingForMain = wait;
+                                    h.notes.push(note);
+                                    // (handed over now: with the main AI's next step, or the chat is woken with it)
+                                    sendHelperNotes(userId, sessionId).catch(() => {});
+                                    if (wait) {
+                                        const until = Math.min(deadline, Date.now() + TELL_MAIN_WAIT_MS);
+                                        while (!h.inbox.length && Date.now() < until && !h.abort.signal.aborted) await sleep(100);
+                                        h.waitingForMain = false;
+                                        out = h.inbox.length ? "Delivered to the main AI, and it answered." : "Delivered to the main AI. It has not answered yet: go on with what you can; its answer comes with the result of one of your next steps.";
+                                    }
+                                }
+                                emitHelper({ helper: i, id, result: out });
+                                helperStepDone(step, out);
+                                return withInbox(out);
                             };
                             // A helper's commands and browser actions ask the user too, in the same permission mode (computer tools
                             // ask inside their own handlers, so they aren't asked twice)
@@ -4790,22 +4842,50 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             timeoutMs: HELPER_ROUND_MS,
                                             signal: h.abort.signal
                                         };
-                                        const r = CLAUDE_CHAT_MODELS.has(model)
+                                        // (extra: the conversation of a later round, see the messages that came too late below)
+                                        const askHelper = (extra = {}) => CLAUDE_CHAT_MODELS.has(model)
                                             // (the desktop app drives each helper's loop too, like the main answer's: local-loop.service.js)
-                                            ? await streamClaudeChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), model, toolsNow: () => defs, answerAtDepthLimit: true, maxContinuations: 3, toolDriver: localLoop ? localLoop.driverFor(h.no) : null })
+                                            ? streamClaudeChat({ ...helperArgs, ...extra, ...meterHooks(model, `Helper ${h.no}`), model, toolsNow: () => defs, answerAtDepthLimit: true, maxContinuations: 3, toolDriver: localLoop ? localLoop.driverFor(h.no) : null })
                                             // (capStandIn: the cap refuses a round of this helper: Claude Sonnet goes on with its work from where it
                                             // stands, instead of the helper starting again on the next model)
-                                            : await streamChat({ ...helperArgs, ...meterHooks(model, `Helper ${h.no}`), capStandIn: capStandInFor("helper", `Helper ${h.no}`, (m) => { h.nowModel = m; return {}; }), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
+                                            : streamChat({ ...helperArgs, ...extra, ...meterHooks(model, `Helper ${h.no}`), capStandIn: capStandInFor("helper", `Helper ${h.no}`, (m) => { h.nowModel = m; return {}; }), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
                                         // A helper on a Claude model of the plan is charged the plan's way, counted on the Claude credits too
                                         // (chargeClaudePool). Not a Claude stand-in for capped Cloudflare (helperStand, or r.standIn in
                                         // the middle of the job): the system's choice, charged like the model it stands in for.
-                                        const helperOnPlanClaude = !r.standIn && model !== helperStand && helperOnPlan(model);
-                                        if (userId) for (const part of usageParts(r, model)) {
-                                            const cost = chargeableTokens(part.usage, part.model);
-                                            (helperOnPlanClaude ? chargeClaudePool(cost, part.model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model: part.model, what: "Chat" } })).catch(() => {});
-                                        }
-                                        h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0) + (r.standIn?.before?.usage?.total_tokens || 0); // shown in the chat's Agent map
+                                        const chargeHelper = (r) => {
+                                            const helperOnPlanClaude = !r.standIn && model !== helperStand && helperOnPlan(model);
+                                            if (userId) for (const part of usageParts(r, model)) {
+                                                const cost = chargeableTokens(part.usage, part.model);
+                                                (helperOnPlanClaude ? chargeClaudePool(cost, part.model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model: part.model, what: "Chat" } })).catch(() => {});
+                                            }
+                                            h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0) + (r.standIn?.before?.usage?.total_tokens || 0); // shown in the chat's Agent map
+                                        };
+                                        let r = await askHelper();
+                                        chargeHelper(r);
                                         if (!String(r.answer || "").trim()) { onlyCapRefusals = false; lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
+                                        // A message from the main AI that came after the helper's last step (while it was writing
+                                        // its report) used to be lost: it reaches a helper with the result of a step, and there
+                                        // was no step left. Now the helper gets it in one more round and writes its report again.
+                                        for (let late = 0; late < 3 && h.inbox.length && !h.abort.signal.aborted && Date.now() < deadline; late++) {
+                                            const said = String(r.answer);
+                                            const msgs = takeInbox();
+                                            try {
+                                                emitHelper({ helper: i, state: "restart" }); // (its report is written again)
+                                                h.live = "";
+                                                const next = await askHelper({ messages: [...helperArgs.messages, { role: "assistant", content: said }, { role: "user", content: `${msgs}\n\nThis reached you after your last step. Do what it asks, with your tools if needed, then write your full final report again: it takes the place of the one above.` }] });
+                                                chargeHelper(next);
+                                                if (!String(next.answer || "").trim()) break; // (the report it already wrote stays)
+                                                r = next;
+                                            } catch (e) {
+                                                // (what the round really used is charged, like a failed try's below; the report it already wrote stays)
+                                                if (userId && e?.usage?.total_tokens > 0) {
+                                                    const cost = chargeableTokens(e.usage, model);
+                                                    (model !== helperStand && helperOnPlan(model) ? chargeClaudePool(cost, model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model, what: "Chat" } })).catch(() => {});
+                                                }
+                                                h.live = said;
+                                                break;
+                                            }
+                                        }
                                         h.usedModel = r.standIn?.model || model;
                                         return { state: "done", text: String(r.answer).slice(0, 40000) };
                                     } catch (e) {
@@ -4948,8 +5028,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         if (!h) return `Error: there is no helper ${args?.helper}. Helpers: ${board.helpers.map((x) => x.no).join(", ") || "none"}.`;
                         if (!text) return "Error: write a message.";
                         if (h.state !== "running") return `Helper ${h.no} has already finished; read its report with check_helpers.`;
+                        const waiting = h.waitingForMain === true;
                         h.inbox.push(text.slice(0, 4000));
-                        return `Message sent. Helper ${h.no} gets it with its next step.`;
+                        return waiting ? `Delivered to Helper ${h.no}. It was waiting for your answer and has it now.` : `Delivered to Helper ${h.no} (not read yet). It reads it with the result of its next step.`;
                     },
                     // Status of the helpers: new notes they sent and the reports of the ones that finished (each shown once)
                     check_helpers: async (args) => {
@@ -4958,7 +5039,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         const waitMs = Math.min(120, Math.max(0, Number(args?.wait_seconds) || 0)) * 1000;
                         const news = () => board.helpers.some((h) => h.notes.length > h.notesRead || (h.state !== "running" && !h.reportTaken));
                         const until = Date.now() + waitMs;
-                        while (!news() && Date.now() < until) await new Promise((r) => setTimeout(r, 1000));
+                        while (!news() && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
                         const reported = [];
                         let room = HELPER_RESULT_ROOM;
                         const lines = board.helpers.map((h) => {
@@ -8060,6 +8141,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // here; this line named it all the same since 2026-11-02, so it threw and never woke anything.
         const runEnded = runKey ? redis.get(runKey).then((newest) => (newest === runId ? redis.del(runKey) : null)).catch(() => {}) : Promise.resolve();
         if (chatOfRun) runEnded.then(() => sendHelperReports(userId, chatOfRun, { answerEnded: true }).catch(() => {}))
+            .then(() => sendHelperNotes(userId, chatOfRun, { answerEnded: true }).catch(() => {}))
             .then(() => import("../services/chat-wake.service.js")).then((m) => m.wakeIfPending(userId, chatOfRun)).catch(() => {});
         if (releaseGridLock) releaseGridLock();
         if (touchedChat) touchChat(req.user?.email, touchedChat);

@@ -107,7 +107,11 @@ async function runWake(userId, sessionId) {
         let meta = {};
         try { meta = JSON.parse((await redis.get(META(sessionId))) || "{}"); } catch { /* none */ }
         ran = true;
-        const question = `[SYSTEM: background work you started in this chat has finished while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nTell the user the result now, the way you would mention it in the middle of a conversation: what finished, whether it worked and what it means. If the user's task needs a next step, do it; otherwise don't start new long work.`;
+        // (only notes from helpers that are still working: nothing has finished, and the main AI answers the helper)
+        const onlyHelperNotes = notes.every((n) => /^Helper \d+ \([\s\S]*?\) says:\n/.test(n));
+        const question = onlyHelperNotes
+            ? `[SYSTEM: background work you started in this chat sent you a message while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nA helper of this chat wrote this to you. If it asks something or needs a decision, answer it now with message_helper: a helper that is waiting has your message at once. Tell the user about it only if it matters to them, in a sentence or two. Do not do the helper's work yourself and do not start new long work.`
+            : `[SYSTEM: background work you started in this chat has finished while you were not answering. This message is from Classgrid, not the user.]\n\n${notes.join("\n\n---\n\n")}\n\nTell the user the result now, the way you would mention it in the middle of a conversation: what finished, whether it worked and what it means. If the user's task needs a next step, do it; otherwise don't start new long work.`;
         // (note: the open chat shows a helper's report from it as "Message from Helper 1: ...", the rest stays hidden)
         tell(userId, { sessionId, phase: "start", note: question });
         // Remote PC (owner, 2026-11-18: the phone shows everything the computer's chat shows, live): the answer the

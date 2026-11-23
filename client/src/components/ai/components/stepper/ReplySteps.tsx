@@ -40,7 +40,7 @@ import { DocumentGenerationView } from "./DocumentGenerationView";
 import { KnowledgeBaseSearchView } from "./KnowledgeBaseSearchView";
 import { CdnUploadView } from "./CdnUploadView";
 import { PublishedPageStep } from "./PublishedPageStep";
-import { PeerMessageLine, PROJECT_EXPLORE_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_BACKGROUND_TOOLS, ProjectExploreGroup, ProjectEditStep, ProjectPushStep, ProjectHelpersStep, CheckHelpersStep, checkHelpersReports, ComputerStep, TerminalStep, ProjectRunChanges } from "./ProjectToolSteps";
+import { PeerMessageLine, HelperMessageLine, AgentMessageLine, stepMessagesOf, PROJECT_EXPLORE_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_BACKGROUND_TOOLS, ProjectExploreGroup, ProjectEditStep, ProjectPushStep, ProjectHelpersStep, CheckHelpersStep, checkHelpersReports, ComputerStep, TerminalStep, ProjectRunChanges } from "./ProjectToolSteps";
 import type { AgentStep } from "../AskAiPanel";
 
 // Some models draft whole code blocks (e.g. widget cards) in their thinking. The thinking panel shows one
@@ -154,6 +154,15 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
       rows.forEach((p, i) => elements.push(p.notice
         ? <div key={`peer-${step.id}-${i}`} className="mb-3 pl-10 py-1 text-[13px] text-slate-500 dark:text-[#8a8a8a]">{peerNoticeText({ kind: p.notice, from: { name: p.name } })}</div>
         : <PeerMessageLine key={`peer-${step.id}-${i}`} name={p.name} text={p.text} />));
+    };
+    // What a helper wrote to the main agent while it works comes with the result of the main agent's next step:
+    // shown under that step, whole, as "Message from Helper 2".
+    const agentRowsAfter = (step: any) => {
+      if (step.type !== 'tool') return;
+      const rows = stepMessagesOf(step.result);
+      if (!rows.length) return;
+      flushThoughts();
+      rows.forEach((m, i) => elements.push(<HelperMessageLine key={`agent-${step.id}-${i}`} no={m.helper} text={m.text} />));
     };
     const drawStep = (step: any) => {
       if (step.type === 'thought') {
@@ -474,6 +483,33 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
           }
         }
 
+        // A message the main agent sent to a helper, and one a helper sent to the main agent: the whole text, with
+        // what the other side's inbox answered under it. One that was not delivered stays a step that says why.
+        if (step.tool === 'message_helper' && typeof step.args?.message === 'string' && step.args.message.trim()) {
+          const answer = typeof step.result === 'string' ? step.result.trim() : '';
+          const delivered = /^(Delivered to Helper|Message sent\.)/.test(answer);
+          const no = Number(step.args?.helper);
+          if ((step.status === 'loading' || delivered) && Number.isFinite(no)) {
+            elements.push(<HelperMessageLine key={step.id} no={no} text={step.args.message.trim()} to receipt={delivered ? answer.split(/\n\n\[/)[0] : undefined} />);
+            return;
+          }
+        }
+        // (in a helper's own steps: a message of the main agent that the helper read)
+        if (step.tool === 'main_message' && typeof step.args?.message === 'string') {
+          elements.push(<AgentMessageLine key={step.id} label="Message from the main agent" text={step.args.message.trim()} />);
+          return;
+        }
+        if (step.tool === 'tell_main' && typeof step.args?.message === 'string' && step.args.message.trim()) {
+          const answer = typeof step.result === 'string' ? step.result.trim() : '';
+          const delivered = /^(Delivered to the main AI|Sent to the main AI)/.test(answer);
+          if (step.status === 'loading' || delivered) {
+            // ("AI" in the server's words for the helper; the chat says "agent")
+            const receipt = delivered ? answer.split(/\n\n\[/)[0]!.replace(/\bthe main AI\b/g, 'the main agent') : (step.args?.wait_for_answer === true ? 'Waiting for the main agent to answer…' : undefined);
+            elements.push(<AgentMessageLine key={step.id} label="Message to the main agent" text={step.args.message.trim()} receipt={receipt} />);
+            return;
+          }
+        }
+
         // Say what the step actually did and found ("Found 5 classroom assignments: …")
         const described = describeStep(step.tool, step.args, step.result, step.status);
         // A connected app: its logo and name on the line (the words stay the described ones, "Found 2 events: …")
@@ -495,7 +531,7 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
         );
       }
     };
-    shownSteps.forEach((step) => { drawStep(step); peerRowsAfter(step); });
+    shownSteps.forEach((step) => { drawStep(step); peerRowsAfter(step); agentRowsAfter(step); });
 
     flushThoughts();
     return elements.map((el, i) => React.isValidElement(el)

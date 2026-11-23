@@ -263,6 +263,7 @@ export function describeStep(tool: string, args: any, result: unknown, status: '
   if (named) return named;
   // A helper's note to the main agent (the Agent map shows a helper's steps like the main agent's)
   if (tool === 'tell_main') return status === 'loading' ? 'Sending a note to the main agent...' : 'Sent a note to the main agent';
+  if (tool === 'main_message') return 'Read a message from the main agent';
   const op = APP[tool] && args?.operation ? String(args.operation) : tool;
   const { verb, noun } = splitAction(op);
   if (!verb || (!PAST[verb] && !ING[verb])) return null;

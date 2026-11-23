@@ -580,13 +580,20 @@ function BackgroundHelpers({ result, tasks, titles }: { result: string; tasks: s
 // A helper's report coming back to the chat (the hidden message that wakes the chat: chat-wake.service.js,
 // utils/helper-reports.js), shown like Claude Code's "Message from @agent: ..." line: one muted line per report that
 // opens to the whole report. null when the message is not a helper's report.
-export type HelperReport = { no: number; task: string; failed: boolean; report: string };
+// note: a message a helper sent while it works (utils/helper-notes.js), not its report
+export type HelperReport = { no: number; task: string; failed: boolean; report: string; note?: boolean };
 export function helperReportsOf(content: unknown): HelperReport[] | null {
   const text = String(content || '');
   if (!text.startsWith('[SYSTEM: background work you started')) return null;
-  const body = text.replace(/^\[SYSTEM:[^\]]*\]\s*/, '').split(/\n\nTell the user the result now/)[0] ?? '';
+  const body = text.replace(/^\[SYSTEM:[^\]]*\]\s*/, '').split(/\n\n(?:Tell the user the result now|A helper of this chat wrote this to you)/)[0] ?? '';
   const out: HelperReport[] = [];
   for (const note of body.split('\n\n---\n\n')) {
+    // (a helper that is still working wrote to the main agent)
+    const said = note.match(/^Helper (\d+) \(([\s\S]*?)\) says:\n([\s\S]*)$/);
+    if (said) {
+      out.push({ no: Number(said[1]), task: said[2] ?? '', failed: false, note: true, report: (said[3] ?? '').split(/\n\n\[Helper \d+ (?:is still working|has stopped working)/)[0]!.trim() });
+      continue;
+    }
     const m = note.match(/^Helper (\d+) \(([\s\S]*?)\) (finished|failed)(?::\n([\s\S]*)|\. ([\s\S]*))$/);
     if (!m) continue;
     const report = (m[4] ?? m[5] ?? '').split(/\n\nFILES CHANGED IN PROJECT:|\n\n\[(?:No helper of this chat|\d+ other helpers? of this chat)/)[0] ?? '';
@@ -619,7 +626,41 @@ function HelperReportLine({ r }: { r: HelperReport }) {
   const snap = useHelperSnapshot();
   const h = snap.helpers.find((x) => x.no === r.no);
   const task = h?.task || r.task;
-  return <ReportRow label={`Message from Helper ${r.no} (${helperTitle({ no: r.no, task, title: h?.title })})`} body={r.report} />;
+  return <ReportRow label={`Message from Helper ${r.no} (${helperTitle({ no: r.no, task, title: h?.title })})`} body={r.report} defaultOpen={r.note === true} />;
+}
+
+// Messages between the main agent and its helpers, shown the way messages between sessions are (owner, 2026-11-23:
+// "fix the UI of it too, how they message each other"): "Message to Helper 2" with the whole text and what the
+// helper's inbox answered under it, "Message from Helper 2" for what a helper wrote while it works. In a helper's own
+// steps (the Agent map) the same two lines are "Message to the main agent" and "Message from the main agent".
+// Before, both were one step line ("Sent a message to Helper 2", "Sent a note to the main agent") and the words
+// themselves were only in the step's details.
+export function HelperMessageLine({ no, text, to = false, receipt }: { no: number; text: string; to?: boolean; receipt?: string }) {
+  const snap = useHelperSnapshot();
+  const h = snap.helpers.find((x) => x.no === no);
+  const who = `Helper ${no}${h ? ` (${helperTitle({ no, task: h.task, title: h.title })})` : ''}`;
+  return <AgentMessageLine label={`${to ? 'Message to' : 'Message from'} ${who}`} text={text} receipt={receipt} />;
+}
+export function AgentMessageLine({ label, text, receipt }: { label: string; text: string; receipt?: string }) {
+  return (
+    <div className="mb-3 flex flex-col">
+      <ReportRow label={label} body={text} defaultOpen />
+      {receipt && <div className="pl-10 pr-2 pt-0.5 text-[13px] text-slate-500 dark:text-[#8a8a8a] break-words">{receipt}</div>}
+    </div>
+  );
+}
+// The helpers' notes that came with a step's result of the main agent ("[Message from Helper 2, still working]: ...",
+// server utils/helper-notes.js takeNotes)
+export type StepMessage = { helper: number; text: string };
+export function stepMessagesOf(result: unknown): StepMessage[] {
+  const text = typeof result === 'string' ? result : '';
+  if (!text.includes('[Message from Helper ')) return [];
+  const out: StepMessage[] = [];
+  for (const block of text.split(/\n\n(?=\[Message from Helper \d+, )/).slice(1)) {
+    const m = block.match(/^\[Message from Helper (\d+), [^\]]*\]: ([\s\S]*)$/);
+    if (m) out.push({ helper: Number(m[1]), text: (m[2] ?? '').split(/\n\n\[To answer a helper, use message_helper/)[0]!.trim() });
+  }
+  return out;
 }
 
 // A message from another Classgrid session (hidden turn started by lib/peerSessions.ts): "Message from @name: text"
