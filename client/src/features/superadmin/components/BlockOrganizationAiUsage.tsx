@@ -100,7 +100,9 @@ export function BlockOrganizationAiUsage({ orgId, orgName, isBlocked }: BlockOrg
           <div className="flex flex-col gap-2.5">
             <label className="text-sm text-foreground/80">Enter Super Admin Security Code</label>
             <input
-              type="password"
+              type="text"
+              inputMode="numeric"
+              autoComplete="one-time-code"
               value={securityCode}
               onChange={(e) => setSecurityCode(e.target.value)}
               placeholder="Security Code"

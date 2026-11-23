@@ -106,6 +106,8 @@ export function SidebarSearch({ searchQuery, setSearchQuery, placeholder = "Sear
           <Search className="absolute left-4 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground opacity-70" />
           <Input 
             type="text"
+            name="sidebar-search"
+            autoComplete="off"
             placeholder={placeholder} 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
