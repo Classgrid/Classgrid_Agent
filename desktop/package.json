@@ -1,7 +1,7 @@
 {
   "name": "classgrid-desktop",
   "productName": "Classgrid",
-  "version": "1.0.53",
+  "version": "1.0.54",
   "description": "Classgrid desktop app: Studio from chat.classgrid.in in a real Windows app, with Project inside it",
   "main": "main.js",
   "private": true,
