@@ -626,7 +626,8 @@ function HelperReportLine({ r }: { r: HelperReport }) {
 // Shown open: the person reads the whole message as it came, not one cut line (owner, 2026-11-23: "I can never see
 // what it is messaging"). `to`: a message this session's AI sent, "Message to @name".
 export function PeerMessageLine({ name, text, to = false }: { name: string; text: string; to?: boolean }) {
-  return <div className="mb-3 flex flex-col"><ReportRow label={`Message ${to ? 'to' : 'from'} @${name}`} body={text} defaultOpen /></div>;
+  const label = to ? (name ? `Message to @${name}` : 'Message to another session') : `Message from @${name}`;
+  return <div className="mb-3 flex flex-col"><ReportRow label={label} body={text} defaultOpen /></div>;
 }
 
 export function HelperReportLines({ reports }: { reports: HelperReport[] }) {

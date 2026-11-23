@@ -458,6 +458,21 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
           return;
         }
 
+        // A message this AI sent to another Classgrid session: shown the same way as one it received, "Message to
+        // @name" with the whole text, not as a step (owner, 2026-11-23: "show sent just how you show message from").
+        // One that was not delivered (held, refused, no such session) stays a step, so the line says what happened.
+        if (step.tool === 'message_classgrid_session' && typeof step.args?.text === 'string' && step.args.text.trim()) {
+          const answer = typeof step.result === 'string' ? step.result.trim() : '';
+          const delivered = answer.match(/^Delivered to @(.+?)'s inbox/);
+          if (step.status === 'loading' || delivered) {
+            const asked = String(step.args?.target ?? '').trim().replace(/^@/, '');
+            // (a session id or a pid is not a name: the name comes from the receipt once it is there)
+            const name = delivered?.[1] ?? (asked && !/^[0-9a-f-]{8,}$/i.test(asked) && !/^\d+$/.test(asked) ? asked : '');
+            elements.push(<PeerMessageLine key={step.id} name={name} text={step.args.text.trim()} to />);
+            return;
+          }
+        }
+
         // Say what the step actually did and found ("Found 5 classroom assignments: …")
         const described = describeStep(step.tool, step.args, step.result, step.status);
         // A connected app: its logo and name on the line (the words stay the described ones, "Found 2 events: …")
