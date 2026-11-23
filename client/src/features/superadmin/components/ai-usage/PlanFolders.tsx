@@ -8,6 +8,7 @@ import { Input } from "@/components/marketing_ui/input";
 import { Button } from "@/components/marketing_ui/button";
 import { Skeleton } from "@/components/marketing_ui/skeleton";
 import { usePlansSummary, usePeople } from "@/features/superadmin/queries/useAiUsage";
+import { ResetPlanUsage } from "@/features/superadmin/components/ResetPlanUsage";
 import { n, type Meter, type PlanOverview } from "@/features/shared/queries/usePlanOverview";
 
 function Folder({ label, subtitle, onClick, icon: Icon }: { label: string; subtitle?: string; onClick: () => void; icon: typeof UserIcon }) {
@@ -67,6 +68,7 @@ export function PlanPeopleFolders({ plan, planName, onOpen }: { plan: string; pl
   const { data, isLoading } = usePeople({ q, plan, how: "", page, limit: 60 });
   const people = data?.data || [];
   return (
+    <div className="flex flex-col gap-6">
     <Card>
       <CardHeader className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <CardTitle className="text-lg">{planName} ({n(data?.total ?? 0)})</CardTitle>
@@ -97,6 +99,8 @@ export function PlanPeopleFolders({ plan, planName, onOpen }: { plan: string; pl
         )}
       </CardContent>
     </Card>
+    <ResetPlanUsage plan={plan} planName={planName} />
+    </div>
   );
 }
 

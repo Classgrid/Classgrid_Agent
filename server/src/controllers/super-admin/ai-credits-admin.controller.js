@@ -501,7 +501,7 @@ export const updateOrgAiLimits = async (req, res) => {
 
 export const requestSecurityCode = async (req, res) => {
     try {
-        const { action, orgId } = req.body;
+        const { action, orgId, plan } = req.body;
         // Check if user is authenticated and super admin
         if (!req.user || req.user.role !== 'super_admin') {
             return res.status(403).json({ success: false, error: "Unauthorized" });
@@ -527,6 +527,7 @@ export const requestSecurityCode = async (req, res) => {
             code,
             action: action || "GENERAL_AI_MUTATION",
             orgId: orgId || null,
+            planKey: action === "RESET_PLAN_USAGE" && RESETTABLE_PLANS.includes(plan) ? plan : null,
             expiresAt
         });
 
@@ -534,6 +535,7 @@ export const requestSecurityCode = async (req, res) => {
         if (action === "RESET_ORG_USAGE") actionDescription = `Resetting AI Usage Limit for Organization: ${orgId || 'Unknown'}`;
         if (action === "BLOCK_ORG_AI") actionDescription = `Changing AI Block status for Organization: ${orgId || 'Unknown'}`;
         if (action === "RESET_USER_USAGE") actionDescription = `Resetting AI Usage Limit for User`;
+        if (action === "RESET_PLAN_USAGE") actionDescription = `Resetting AI Usage Limit for everyone on the plan: ${plan || "Unknown"}`;
         if (action === "BLOCK_USER_AI") actionDescription = `Changing AI Block status for User`;
         if (action === "GENERAL_AI_MUTATION") actionDescription = `Granting AI Credits`;
 
@@ -557,6 +559,59 @@ export const requestSecurityCode = async (req, res) => {
     } catch (error) {
         console.error("Error in requestSecurityCode:", error);
         res.status(500).json({ success: false, error: "Internal server error" });
+    }
+};
+
+// The plans whose people a super admin can reset at once (Plans & Usage > a plan > Reset Plan Usage)
+const RESETTABLE_PLANS = ["free", "pro", "max", "enterprise"];
+
+// POST /api/super-admin/ai-usage/plans/:plan/reset { code }: everyone on the plan (the same people the plan's folder
+// lists) gets the session, weekly, Claude and Fable counters and the free pictures back to 0 (owner, 2026-11-23: "a
+// reset button inside each plan, like the organisation's global limits reset"). The security code is checked and used
+// up here, in the same request, so the reset can't run without it.
+export const resetPlanUsage = async (req, res) => {
+    try {
+        const plan = String(req.params.plan || "");
+        if (!RESETTABLE_PLANS.includes(plan)) return res.status(400).json({ success: false, error: "Unknown plan" });
+        const code = String(req.body?.code || "").trim();
+        if (!/^\d{6}$/.test(code)) return res.status(400).json({ success: false, error: "Security code is required" });
+
+        // (the owner is compared as text, as verifySecurityCode does; then the code is used up in one atomic step)
+        const candidates = await AdminSecurityCode.find({ code, action: "RESET_PLAN_USAGE", planKey: plan, used: false, expiresAt: { $gt: new Date() } }).select("_id superAdminId").lean();
+        const mine = candidates.find((c) => String(c.superAdminId) === String(req.user._id));
+        const used = mine ? await AdminSecurityCode.findOneAndUpdate({ _id: mine._id, used: false }, { $set: { used: true } }, { new: true }) : null;
+        if (!used) return res.status(400).json({ success: false, error: "Invalid or expired security code." });
+
+        const { peopleFilter } = await import("./ai-usage-users.controller.js");
+        const filter = peopleFilter({ plan }, new Date());
+        if (filter.error) return res.status(400).json({ success: false, error: filter.error });
+        const result = await User.updateMany(filter, { $set: { ...ADMIN_USAGE_RESET, "ai_image_free_weekly_used": 0 } });
+        const people = result?.modifiedCount ?? result?.nModified ?? 0;
+
+        const io = req.app.get("io");
+        if (io) {
+            io.to("superadmin:ai_usage").emit("ai_usage_updated");
+            const ids = await User.find(filter).select("_id").lean().catch(() => []);
+            for (const u of ids) io.to(String(u._id)).emit("ai_token_update");
+        }
+        res.status(200).json({ success: true, people, message: `Usage reset for everyone on the ${plan} plan.` });
+
+        const AdminAuditLog = (await import("../../models/AdminAuditLog.js")).default;
+        AdminAuditLog.create({
+            actorId: req.user?._id,
+            actorName: req.user?.name || req.user?.email || "Super admin",
+            actorRole: "super_admin",
+            action: "plan.usage_reset",
+            targetId: plan,
+            targetName: plan,
+            targetType: "users",
+            metadata: { plan, people },
+            ip: req.ip || "",
+            userAgent: req.headers?.["user-agent"] || "",
+        }).catch((e) => console.error("[resetPlanUsage] audit log failed:", e.message));
+    } catch (error) {
+        console.error("Reset Plan Usage Error:", error);
+        if (!res.headersSent) res.status(500).json({ success: false, error: "Failed to reset the plan's usage" });
     }
 };
 

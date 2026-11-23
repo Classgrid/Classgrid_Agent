@@ -61,11 +61,16 @@ const adminSecurityCodeSchema = new mongoose.Schema(
         action: {
             type: String,
             required: true,
-            enum: ["RESET_ORG_USAGE", "BLOCK_ORG_AI", "GENERAL_AI_MUTATION", "BLOCK_USER_AI", "RESET_USER_USAGE"],
+            enum: ["RESET_ORG_USAGE", "BLOCK_ORG_AI", "GENERAL_AI_MUTATION", "BLOCK_USER_AI", "RESET_USER_USAGE", "RESET_PLAN_USAGE"],
             default: "GENERAL_AI_MUTATION",
             index: true
         },
         orgId: {
+            type: String,
+            default: null
+        },
+        // RESET_PLAN_USAGE: the plan whose people the code resets (free, pro, max, enterprise)
+        planKey: {
             type: String,
             default: null
         },

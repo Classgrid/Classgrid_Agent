@@ -56,6 +56,8 @@ export const aiUsageApi = {
   blockOrg: (orgId: string, isBlocked: boolean) => api.put(`/api/super-admin/ai-usage/orgs/${orgId}/block`, { isBlocked }).then(res => res.data),
   resetUserUsage: (userId: string) => api.post(`/api/super-admin/ai-usage/users/${userId}/reset`).then(res => res.data),
   resetOrgUsage: (orgId: string) => api.post(`/api/super-admin/ai-usage/orgs/${orgId}/reset`).then(res => res.data),
+  // (the security code goes with the reset itself: the server checks it and uses it up in the same request)
+  resetPlanUsage: (plan: string, code: string) => api.post(`/api/super-admin/ai-usage/plans/${encodeURIComponent(plan)}/reset`, { code }).then(res => res.data as { success: boolean; people: number }),
   grantCredits: (userId: string, amount: number, options?: { sendEmail?: boolean; startDate?: string; endDate?: string }) => api.post(`/api/super-admin/ai-usage/users/${userId}/grant`, { amount, ...options }).then(res => res.data),
   grantOrgCredits: (orgId: string, amount: number, options?: { sendEmail?: boolean; startDate?: string; endDate?: string }) => api.post(`/api/super-admin/ai-usage/orgs/${orgId}/grant`, { amount, ...options }).then(res => res.data),
   extendCredits: (userId: string, endDate: string) => api.put(`/api/super-admin/ai-usage/users/${userId}/credits/extend`, { endDate }).then(res => res.data),
@@ -63,7 +65,7 @@ export const aiUsageApi = {
   updateOrgLimits: (orgId: string, data: OrgAiLimitsPayload) => api.put(`/api/super-admin/ai-usage/orgs/${orgId}/limits`, data).then(res => res.data),
   
   // Security OTP
-  requestSecurityCode: (action: string, orgId?: string) => api.post(`/api/super-admin/ai-usage/security-code/request`, { action, orgId }).then(res => res.data),
+  requestSecurityCode: (action: string, orgId?: string, plan?: string) => api.post(`/api/super-admin/ai-usage/security-code/request`, { action, orgId, plan }).then(res => res.data),
   verifySecurityCode: (code: string, action: string, orgId?: string) => api.post(`/api/super-admin/ai-usage/security-code/verify`, { code, action, orgId }).then(res => res.data),
 };
 
@@ -201,6 +203,20 @@ export const useResetOrgUsage = () => {
   });
 };
 
+/** Everyone on one plan back to 0 (Plans & Usage > a plan > Reset Plan Usage) */
+export const useResetPlanUsage = () => {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ plan, code }: { plan: string; code: string }) => aiUsageApi.resetPlanUsage(plan, code),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["ai-people"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });
+      queryClient.invalidateQueries({ queryKey: ["ai-plans-summary"] });
+    },
+    onError: (error: any) => toast.error(error?.response?.data?.error || "Failed to reset the plan's usage."),
+  });
+};
+
 export const useUpdateOrgAiLimits = () => {
   const queryClient = useQueryClient();
   return useMutation({
@@ -216,7 +232,7 @@ export const useUpdateOrgAiLimits = () => {
 
 export const useRequestSecurityCode = () => {
   return useMutation({
-    mutationFn: ({ action, orgId }: { action: string, orgId?: string }) => aiUsageApi.requestSecurityCode(action, orgId),
+    mutationFn: ({ action, orgId, plan }: { action: string, orgId?: string, plan?: string }) => aiUsageApi.requestSecurityCode(action, orgId, plan),
     onSuccess: () => {
       toast.success("Security code sent to your email.");
     },
