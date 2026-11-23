@@ -271,7 +271,7 @@ export const importCETAllotments = async (req, res) => {
 
         res.json({
             success: true,
-            message: `Successfully processed file. Imported ${validOps.length} allotments. Failed: ${invalidRows.length}.${autoFlaggedUpgrades.length > 0 ? ` ⚠️ ${autoFlaggedUpgrades.length} potential upgrade(s) detected.` : ""}`,
+            message: `Processed file. Imported ${validOps.length} allotments. Failed: ${invalidRows.length}.${autoFlaggedUpgrades.length > 0 ? ` ⚠️ ${autoFlaggedUpgrades.length} potential upgrade(s) detected.` : ""}`,
             imported_count: validOps.length,
             failed_count: invalidRows.length,
             failed_rows: invalidRows.slice(0, 10),
@@ -521,7 +521,7 @@ export const verifyEmailOTP = async (req, res) => {
         record.purpose = "email_verified_success";
         await record.save();
 
-        res.json({ success: true, message: "Email verified successfully." });
+        res.json({ success: true, message: "Email verified." });
     } catch (err) {
         res.status(500).json({ error: "Email verification failed" });
     }
@@ -594,7 +594,7 @@ export const verifyPhoneOTP = async (req, res) => {
         );
 
         res.json({
-            message: "Phone verified successfully.",
+            message: "Phone verified.",
             token,
             application_id: application._id,
             status: application.status,
@@ -739,7 +739,7 @@ export const submitApplication = async (req, res) => {
             }
         });
 
-        res.json({ message: "Application submitted successfully.", status: application.status });
+        res.json({ message: "Application submitted.", status: application.status });
 
     } catch (err) {
         console.error("Submit Error:", err);
@@ -862,7 +862,7 @@ export const uploadAdmissionDoc = async (req, res) => {
 
         res.status(200).json({
             success: true,
-            message: "Document uploaded successfully",
+            message: "Document uploaded",
             document: docData
         });
     } catch (error) {
@@ -929,7 +929,7 @@ export const verifyAdmissionDoc = async (req, res) => {
             }
         })();
 
-        res.status(200).json({ success: true, message: `Document ${status} successfully` });
+        res.status(200).json({ success: true, message: `Document ${status}` });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }
@@ -1284,7 +1284,7 @@ export const adminEnrollStudent = async (req, res) => {
 
         res.json({
             success: true,
-            message: "Student enrolled successfully",
+            message: "Student enrolled",
             vacancy_left: allocation?.vacancy ?? null
         });
 
@@ -1392,7 +1392,7 @@ export const withdrawApplication = async (req, res) => {
 
         res.json({
             success: true,
-            message: "Application withdrawn successfully",
+            message: "Application withdrawn",
             refundDetails,
             promoted_from_waitlist: promotedStudent ? promotedStudent.full_name : null,
         });
@@ -1564,7 +1564,7 @@ export const applyForAdmission = async (req, res) => {
             application_id: application._id,
             status: application.status,
             printout_url: application.printout_url || null,
-            message: `Application submitted successfully for ${structureType} admission.`
+            message: `Application submitted for ${structureType} admission.`
         });
     } catch (err) {
         console.error("Apply Error:", err);
@@ -2081,7 +2081,7 @@ export const fullEnrollStudent = async (req, res) => {
 
         res.json({
             success: true,
-            message: `${application.full_name} enrolled successfully.`,
+            message: `${application.full_name} enrolled.`,
             user_id: newUser._id,
             prn: prn || null,
             email: studentEmail,

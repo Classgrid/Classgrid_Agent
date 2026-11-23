@@ -210,7 +210,7 @@ const templates = [
         subject: "Payment successful for Classgrid invoice {{invoice_number}}",
         htmlBody: `
 <p>Hello {{admin_name}},</p>
-<p>Your Classgrid subscription payment was completed successfully.</p>
+<p>Your Classgrid subscription payment was completed.</p>
 <ul>
   <li><strong>Organization:</strong> {{organization_name}}</li>
   <li><strong>Invoice number:</strong> {{invoice_number}}</li>
@@ -359,10 +359,10 @@ const templates = [
         name: "INSTITUTION_PAYMENT_ACCOUNT_CONNECTED",
         type: "EMAIL",
         category: "PAYMENT",
-        subject: "Payment account connected successfully",
+        subject: "Payment account connected",
         htmlBody: `
 <p>Hello {{admin_name}},</p>
-<p>The payment account for {{organization_name}} has been connected successfully.</p>
+<p>The payment account for {{organization_name}} has been connected.</p>
 <ul>
   <li><strong>Status:</strong> Connected</li>
   <li><strong>Connected at:</strong> {{event_time}} {{timezone}}</li>
@@ -695,7 +695,7 @@ const templates = [
         subject: "Payment successful — receipt for {{invoice_number}}",
         htmlBody: `
 <p>Hello {{payer_name}},</p>
-<p>Your payment to {{organization_name}} was completed successfully through Classgrid.</p>
+<p>Your payment to {{organization_name}} was completed through Classgrid.</p>
 <ul>
   <li><strong>{{learner_label}}:</strong> {{learner_name}}</li>
   <li><strong>Invoice number:</strong> {{invoice_number}}</li>
@@ -716,7 +716,7 @@ const templates = [
         subject: "Payment received for invoice {{invoice_number}}",
         htmlBody: `
 <p>Hello {{admin_name}},</p>
-<p>A fee payment for {{organization_name}} was completed successfully.</p>
+<p>A fee payment for {{organization_name}} was completed.</p>
 <ul>
   <li><strong>{{learner_label}}:</strong> {{learner_name}}</li>
   <li><strong>{{learner_id_label}}:</strong> {{learner_id}}</li>
@@ -907,7 +907,7 @@ const templates = [
         subject: "Refund completed for payment {{payment_id}}",
         htmlBody: `
 <p>Hello {{payer_name}},</p>
-<p>Your refund has been processed successfully.</p>
+<p>Your refund has been processed.</p>
 <ul>
   <li><strong>Organization:</strong> {{organization_name}}</li>
   <li><strong>Payment ID:</strong> {{payment_id}}</li>

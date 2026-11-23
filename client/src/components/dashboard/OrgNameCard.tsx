@@ -185,7 +185,7 @@ export function OrgNameCard() {
       queryClient.invalidateQueries({ queryKey: ["user-profile"] });
       queryClient.invalidateQueries({ queryKey: ["global-profile"] });
       queryClient.invalidateQueries({ queryKey: ["current-user"] });
-      toast.success("Organization name updated successfully");
+      toast.success("Organization name updated");
     },
     onError: (error: any) => {
       toast.error(error?.message || "Failed to update organization name");

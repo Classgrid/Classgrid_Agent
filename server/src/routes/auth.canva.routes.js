@@ -152,7 +152,7 @@ router.delete("/disconnect", isAuthenticated, async (req, res) => {
         user.canva_name = null;
         await user.save();
 
-        res.json({ message: "Canva disconnected successfully" });
+        res.json({ message: "Canva disconnected" });
     } catch (error) {
         res.status(500).json({ message: "Error disconnecting Canva", error: error.message });
     }

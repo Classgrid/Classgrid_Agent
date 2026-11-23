@@ -241,7 +241,7 @@ export const approveOrganization = async (req, res) => {
             }),
         });
 
-        res.status(200).json({ message: `Organization approved successfully (${plan} plan)`, org: savedOrg });
+        res.status(200).json({ message: `Organization approved (${plan} plan)`, org: savedOrg });
     } catch (err) {
         res.status(500).json({ message: "Server error", error: err.message });
     }
@@ -271,7 +271,7 @@ export const rejectOrganization = async (req, res) => {
         // Fix: permanently remove the pending record so it never reappears
         await OrganizationPending.deleteOne({ _id: id });
 
-        res.status(200).json({ message: "Organization rejected successfully" });
+        res.status(200).json({ message: "Organization rejected" });
     } catch (err) {
         res.status(500).json({ message: "Server error", error: err.message });
     }
@@ -512,7 +512,7 @@ export const suspendUser = async (req, res) => {
             logAdminAction(req, "suspend_user", "user", targetUser._id, targetUser.name, { reason });
         } catch (logErr) { }
 
-        res.json({ message: "User suspended successfully", user: targetUser });
+        res.json({ message: "User suspended", user: targetUser });
     } catch (err) {
         res.status(500).json({ message: "Server error", error: err.message });
     }
@@ -670,7 +670,7 @@ export const reactivateUser = async (req, res) => {
             logAdminAction(req, "reactivate_user", "user", targetUser._id, targetUser.name, { reason: "Reactivated by admin" });
         } catch (logErr) { }
 
-        res.json({ message: "User reactivated successfully", user: targetUser });
+        res.json({ message: "User reactivated", user: targetUser });
     } catch (err) {
         res.status(500).json({ message: "Server error", error: err.message });
     }
@@ -735,7 +735,7 @@ export const createSuperAdmin = async (req, res) => {
             // Non-blocking error
         }
 
-        res.status(201).json({ message: "Super Admin created successfully", user: { name: newSuperAdmin.name, email: newSuperAdmin.email } });
+        res.status(201).json({ message: "Super Admin created", user: { name: newSuperAdmin.name, email: newSuperAdmin.email } });
     } catch (err) {
         res.status(500).json({ message: "Server error", error: err.message });
     }
@@ -785,7 +785,7 @@ export const approveNote = async (req, res) => {
 
         if (error) throw error;
 
-        res.status(200).json({ message: "Note approved successfully", note: data });
+        res.status(200).json({ message: "Note approved", note: data });
     } catch (err) {
         console.error("Approve note error:", err);
         res.status(500).json({ message: "Server error approving note" });
@@ -809,7 +809,7 @@ export const rejectNote = async (req, res) => {
 
         if (error) throw error;
 
-        res.status(200).json({ message: "Note rejected successfully", note: data });
+        res.status(200).json({ message: "Note rejected", note: data });
     } catch (err) {
         console.error("Reject note error:", err);
         res.status(500).json({ message: "Server error rejecting note" });
@@ -871,7 +871,7 @@ export const approveOrgNote = async (req, res) => {
 
         if (error) throw error;
 
-        res.status(200).json({ message: "Note approved successfully", note: data });
+        res.status(200).json({ message: "Note approved", note: data });
     } catch (err) {
         console.error("Org admin approve note error:", err);
         res.status(500).json({ message: "Server error approving note" });
@@ -909,7 +909,7 @@ export const rejectOrgNote = async (req, res) => {
 
         if (error) throw error;
 
-        res.status(200).json({ message: "Note rejected successfully", note: data });
+        res.status(200).json({ message: "Note rejected", note: data });
     } catch (err) {
         console.error("Org admin reject note error:", err);
         res.status(500).json({ message: "Server error rejecting note" });

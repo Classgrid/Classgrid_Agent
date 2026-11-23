@@ -133,7 +133,7 @@ router.delete("/disconnect", isAuthenticated, async (req, res) => {
         user.spotify_name = null;
         user.spotify_email = null;
         await user.save();
-        res.json({ message: "Spotify disconnected successfully" });
+        res.json({ message: "Spotify disconnected" });
     } catch (error) {
         res.status(500).json({ message: "Error disconnecting Spotify", error: error.message });
     }

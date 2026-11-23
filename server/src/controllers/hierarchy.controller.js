@@ -217,7 +217,7 @@ export async function createNode(req, res) {
         });
 
         return res.status(201).json({
-            message: `${level_type} "${name}" created successfully.`,
+            message: `${level_type} "${name}" created.`,
             node,
         });
     } catch (err) {

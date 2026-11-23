@@ -80,7 +80,7 @@ export function SettingsDeleteAccountCard() {
       return response.data;
     },
     onSuccess: () => {
-      toast.success("Account deleted successfully.");
+      toast.success("Account deleted.");
       setOpen(false);
       navigate("/login");
     },

@@ -194,7 +194,7 @@ export const applyOrganization = async (req, res) => {
             session.endSession();
 
             res.status(201).json({
-                message: "Application submitted successfully. We will review it shortly.",
+                message: "Application submitted. We will review it shortly.",
                 pendingOrgId: pendingOrg._id,
             });
         } catch (txnError) {
@@ -332,7 +332,7 @@ export const addFaculty = async (req, res) => {
         // Audit log (fire-and-forget)
         logAdminAction(req, "add_faculty", "faculty", user._id, user.name);
 
-        res.status(201).json({ message: "Faculty added successfully. Invitation sent.", faculty: user });
+        res.status(201).json({ message: "Faculty added. Invitation sent.", faculty: user });
     } catch (err) {
         console.error("addFaculty Error:", err);
         res.status(500).json({ message: "Server error", error: err.message });
@@ -369,7 +369,7 @@ export const removeFaculty = async (req, res) => {
         // Audit log
         logAdminAction(req, "remove_faculty", "faculty", faculty._id, faculty.name);
 
-        res.json({ message: "Faculty removed from organization successfully" });
+        res.json({ message: "Faculty removed from organization" });
     } catch (err) {
         res.status(500).json({ message: "Server error", error: err.message });
     }
@@ -425,7 +425,7 @@ export const removeStudent = async (req, res) => {
         // Audit log
         logAdminAction(req, "remove_student", "student", student._id, student.name);
 
-        res.json({ message: "Student successfully removed from the organization" });
+        res.json({ message: "Student removed from the organization" });
     } catch (err) {
         console.error("removeStudent Error:", err);
         res.status(500).json({ message: "Server error removing student", error: err.message });
@@ -458,7 +458,7 @@ export const updateFaculty = async (req, res) => {
         }
 
         await faculty.save();
-        res.json({ message: "Faculty details updated successfully", faculty });
+        res.json({ message: "Faculty details updated", faculty });
     } catch (err) {
         console.error("updateFaculty error:", err);
         res.status(500).json({ message: "Server error updating faculty", error: err.message });
@@ -514,7 +514,7 @@ export const updateFacultyRole = async (req, res) => {
         // Audit log
         logAdminAction(req, "change_role", "user", targetUser._id, targetUser.name, { oldRole, newRole: role });
 
-        res.json({ message: `Role successfully updated to ${role}`, user: targetUser });
+        res.json({ message: `Role updated to ${role}`, user: targetUser });
     } catch (err) {
         console.error("updateFacultyRole error:", err);
         res.status(500).json({ message: "Server error updating role", error: err.message });
@@ -826,7 +826,7 @@ export const updateOrgLogo = async (req, res) => {
             metadata: { updatedField: "logo_url" },
         });
 
-        return res.json({ message: "Logo updated successfully", logo_url: s3Url });
+        return res.json({ message: "Logo updated", logo_url: s3Url });
     } catch (err) {
         console.error("updateOrgLogo error:", err);
         res.status(500).json({ message: "Server error", error: err.message });
@@ -1150,7 +1150,7 @@ export const validateOrganization = async (req, res) => {
         });
 
         return res.json({
-            message: "Organization connected successfully!",
+            message: "Organization connected!",
             organizationId: org._id,
             organizationName: org.name,
             organizationLogo: org.logo_url || "",
@@ -1243,8 +1243,8 @@ export const verifyOrgCode = async (req, res) => {
 
         return res.json({
             message: type === 'faculty'
-                ? "Faculty joined organization successfully!"
-                : "You have successfully joined the organization! Please complete your profile for verification.",
+                ? "Faculty joined organization!"
+                : "You have joined the organization! Please complete your profile for verification.",
             organizationId: org._id,
             organizationName: org.name,
             organizationLogo: org.logo_url || "",
@@ -1516,7 +1516,7 @@ export const createOrganizationAnnouncement = async (req, res) => {
                 console.error('[OrgAnnouncement] sync/delivery failed:', deliveryErr.message);
             }
 
-            res.status(201).json({ message: 'Announcement created successfully', announcement, notificationDelivery });
+            res.status(201).json({ message: 'Announcement created', announcement, notificationDelivery });
         } catch (limitErr) {
             if (limitErr.message && limitErr.message.startsWith('PLAN_LIMIT_REACHED')) {
                 return res.status(403).json({ message: limitErr.message.replace('PLAN_LIMIT_REACHED: ', ''), code: 'PLAN_LIMIT_REACHED' });
@@ -1668,7 +1668,7 @@ export const updateOrganizationAnnouncement = async (req, res) => {
                 console.error('[OrgAnnouncement] update sync/delivery failed:', deliveryErr.message);
             }
 
-            res.json({ message: 'Announcement updated successfully', announcement: { ...announcement, _id: announcement.id }, notificationDelivery });
+            res.json({ message: 'Announcement updated', announcement: { ...announcement, _id: announcement.id }, notificationDelivery });
         } catch (limitErr) {
             return res.status(403).json({ message: limitErr.message.replace('PLAN_LIMIT_REACHED: ', ''), code: 'PLAN_LIMIT_REACHED' });
         }
@@ -1700,7 +1700,7 @@ export const deleteOrganizationAnnouncement = async (req, res) => {
 
         logAdminAction(req, 'delete_announcement', 'announcement', id, id);
 
-        res.json({ message: 'Announcement deleted successfully' });
+        res.json({ message: 'Announcement deleted' });
     } catch (err) {
         console.error('deleteOrganizationAnnouncement error:', err);
         res.status(500).json({ message: 'Server error', error: err.message });
@@ -1787,7 +1787,7 @@ export const changeOrgAdminPassword = async (req, res) => {
         user.mustResetPassword = false;
         await user.save();
 
-        res.json({ message: '✅ Password changed successfully.' });
+        res.json({ message: '✅ Password changed.' });
     } catch (err) {
         console.error('changeOrgAdminPassword error:', err);
         res.status(500).json({ message: 'Server error changing password.' });
@@ -2076,7 +2076,7 @@ export const createTestAccount = async (req, res) => {
         await newUser.save();
 
         res.status(201).json({
-            message: "Test account created successfully.",
+            message: "Test account created.",
             account: {
                 _id: newUser._id,
                 name: newUser.name,
@@ -2136,7 +2136,7 @@ export const resetTestAccountPassword = async (req, res) => {
         await testAccount.save();
 
         res.status(200).json({
-            message: "Password reset successfully.",
+            message: "Password reset.",
             plaintextPassword: finalPassword
         });
 
@@ -2177,7 +2177,7 @@ export const deleteTestAccount = async (req, res) => {
 
         await User.deleteOne({ _id: id });
 
-        res.status(200).json({ message: "Test account deleted successfully." });
+        res.status(200).json({ message: "Test account deleted." });
 
     } catch (err) {
         console.error("deleteTestAccount error:", err);

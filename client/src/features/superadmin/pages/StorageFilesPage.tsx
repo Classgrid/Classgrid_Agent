@@ -786,7 +786,7 @@ export function StorageFilesPage() {
         
         // Single unified toast notification
         if (successCount > 0 && errorCount === 0) {
-          toast.success(`Successfully uploaded ${successCount} file${successCount > 1 ? 's' : ''}.`);
+          toast.success(`Uploaded ${successCount} file${successCount > 1 ? 's' : ''}.`);
         } else if (successCount > 0 && errorCount > 0) {
           toast.warning(`Uploaded ${successCount} file(s), but ${errorCount} failed.`);
         } else if (errorCount > 0) {
@@ -798,7 +798,7 @@ export function StorageFilesPage() {
           try {
             new Notification('Classgrid Storage Upload', {
               body: successCount > 0 && errorCount === 0 
-                ? `Successfully uploaded ${successCount} files.` 
+                ? `Uploaded ${successCount} files.` 
                 : (successCount > 0 ? `Uploaded ${successCount} files, ${errorCount} failed.` : `Failed to upload ${errorCount} files.`),
               icon: '/favicon.ico'
             });
@@ -1088,7 +1088,7 @@ export function StorageFilesPage() {
           setActiveFile(null); 
         }
         refetch();
-        toast.success("Moved successfully");
+        toast.success("Moved");
       }
     });
   };

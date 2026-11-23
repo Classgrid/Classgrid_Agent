@@ -86,7 +86,7 @@ export const cancelSchedule = async (req, res) => {
     if (schedule.status === 'pending') {
       await freeWhatsappResend(schedule).catch((e) => console.error('[WhatsApp] the place of a deleted schedule could not be given back:', e.message));
     }
-    res.status(200).json({ success: true, message: 'Schedule deleted successfully' });
+    res.status(200).json({ success: true, message: 'Schedule deleted' });
   } catch (error) {
     console.error('Error deleting schedule:', error);
     res.status(500).json({ success: false, error: error.message });

@@ -39,7 +39,7 @@ export function BlockUserAiUsage({ userId, userName, isBlocked }: BlockUserAiUsa
 
       blockMutation.mutate({ userId, isBlocked: !isBlocked }, {
         onSuccess: () => {
-          toast.success(`User AI access has been ${!isBlocked ? 'blocked' : 'unblocked'} successfully.`);
+          toast.success(`User AI access has been ${!isBlocked ? 'blocked' : 'unblocked'}.`);
           setOpen(false);
           setSecurityCode("");
         }

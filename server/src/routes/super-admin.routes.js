@@ -487,7 +487,7 @@ router.patch("/subscribers/:email/pause", async (req, res) => {
             return res.status(500).json({ success: false, message: "Failed to pause subscriber." });
         }
 
-        return res.json({ success: true, message: "Subscriber paused successfully." });
+        return res.json({ success: true, message: "Subscriber paused." });
     } catch (err) {
         console.error("[SuperAdmin] subscriber pause route error:", err.message);
         return res.status(500).json({ success: false, message: "Server error" });
@@ -517,7 +517,7 @@ router.patch("/subscribers/:email/resume", async (req, res) => {
             return res.status(500).json({ success: false, message: "Failed to resume subscriber." });
         }
 
-        return res.json({ success: true, message: "Subscriber resumed successfully." });
+        return res.json({ success: true, message: "Subscriber resumed." });
     } catch (err) {
         console.error("[SuperAdmin] subscriber resume route error:", err.message);
         return res.status(500).json({ success: false, message: "Server error" });
@@ -553,7 +553,7 @@ router.patch("/subscribers/:email/preferences", async (req, res) => {
             return res.status(500).json({ success: false, message: "Failed to update subscriber preferences." });
         }
 
-        return res.json({ success: true, message: "Subscriber preferences updated successfully." });
+        return res.json({ success: true, message: "Subscriber preferences updated." });
     } catch (err) {
         console.error("[SuperAdmin] subscriber preferences route error:", err.message);
         return res.status(500).json({ success: false, message: "Server error" });
@@ -578,7 +578,7 @@ router.delete("/subscribers/:email", async (req, res) => {
             return res.status(500).json({ success: false, message: "Failed to remove subscriber." });
         }
 
-        return res.json({ success: true, message: "Subscriber removed successfully." });
+        return res.json({ success: true, message: "Subscriber removed." });
     } catch (err) {
         console.error("[SuperAdmin] subscriber delete route error:", err.message);
         return res.status(500).json({ success: false, message: "Server error" });
@@ -830,7 +830,7 @@ router.delete("/custom-domains/:orgId", async (req, res) => {
 
         await org.save();
 
-        return res.json({ success: true, message: "Custom domain removed successfully" });
+        return res.json({ success: true, message: "Custom domain removed" });
     } catch (err) {
         console.error("[SuperAdmin] custom domain delete error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });
@@ -1154,7 +1154,7 @@ router.post("/leads/:id/create-sandbox", async (req, res) => {
 
     return res.status(201).json({
       success: true,
-      message: `Sandbox organization created successfully for 31 days`,
+      message: `Sandbox organization created for 31 days`,
       organization: {
         _id: result.organization._id,
         name: result.organization.name,
@@ -1231,7 +1231,7 @@ router.post("/provision-direct", async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: `Organization "${institutionName}" provisioned successfully`,
+            message: `Organization "${institutionName}" provisioned`,
             organization: result.organization,
             admin: {
                 _id: result.admin?._id,

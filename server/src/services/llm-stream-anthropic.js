@@ -1044,7 +1044,9 @@ export async function streamClaudeChat({
                             : null;
                         content = nativeImage
                             ? { text: `The image is attached below; look at it yourself to answer: ${String(call.input?.question || "describe it").slice(0, 500)}`, imageBlocks: [nativeImage] }
-                            : await toolHandlers[call.name](call.input ?? {});
+                            // (sleep_until is told what the AI wrote in this answer before the call: with nothing
+                            // written and no message it does not sleep, it asks for the AI's own words)
+                            : await toolHandlers[call.name](call.input ?? {}, call.name === "sleep_until" ? { said: String(text || "").trim() } : undefined);
                     } catch (e) {
                         content = `Tool error: ${e instanceof Error ? e.message : String(e)}`;
                         isError = true;

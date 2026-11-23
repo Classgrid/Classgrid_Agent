@@ -334,7 +334,7 @@ router.post("/send-whatsapp-otp", isAuthenticated, async (req, res) => {
     // Saved after a successful send (expires in 10 minutes)
     await redis.set(key, JSON.stringify({ otp, phoneNumber: `+${digits}`, sentAt: Date.now(), wrong: 0 }), "EX", WA_CODE_TTL_SECONDS);
 
-    res.json({ message: "OTP sent successfully via WhatsApp" });
+    res.json({ message: "OTP sent via WhatsApp" });
   } catch (error) {
     console.error("SEND WHATSAPP OTP ERROR:", error.message);
     res.status(500).json({ message: "Server error sending OTP" });
@@ -383,7 +383,7 @@ router.post("/verify-whatsapp-otp", isAuthenticated, async (req, res) => {
     await redis.del(`user:profile:${req.user._id}`);
     await redis.del(`user:profile:v2:${req.user._id}`);
 
-    res.json({ message: "WhatsApp number verified successfully", phoneNumber });
+    res.json({ message: "WhatsApp number verified", phoneNumber });
   } catch (error) {
     console.error("VERIFY WHATSAPP OTP ERROR:", error.message);
     res.status(500).json({ message: "Server error verifying OTP" });
@@ -694,7 +694,7 @@ router.put("/update", isAuthenticated, attachInstitutionProfile({ required: fals
     }
 
     res.json({
-      message: "Profile updated successfully",
+      message: "Profile updated",
       user: {
         id: user._id,
         name: user.name,
@@ -994,7 +994,7 @@ router.post("/fcm-token", isAuthenticated, async (req, res) => {
         .catch((e) => console.error("[fcm-token] not kept on the sign-in:", e.message));
     }
 
-    res.json({ success: true, message: "FCM token registered successfully", devices: saved.devices });
+    res.json({ success: true, message: "FCM token registered", devices: saved.devices });
   } catch (error) {
     console.error("FCM TOKEN REGISTRATION ERROR:", error.message);
     res.status(500).json({ message: "Server error registering token" });

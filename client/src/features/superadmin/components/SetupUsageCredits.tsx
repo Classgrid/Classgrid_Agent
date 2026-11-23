@@ -264,7 +264,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                 </div>
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={() => setOpenIndividual(false)} disabled={updateLimitsMutation.isPending}>Cancel</Button>
-                  <Button type="button" onClick={() => handleSave(setOpenIndividual, "Individual limit saved successfully!")} disabled={updateLimitsMutation.isPending}>
+                  <Button type="button" onClick={() => handleSave(setOpenIndividual, "Individual limit saved!")} disabled={updateLimitsMutation.isPending}>
                     {updateLimitsMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
                     Save changes
                   </Button>
@@ -298,7 +298,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                 </div>
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={() => setOpenOrg(false)} disabled={updateLimitsMutation.isPending}>Cancel</Button>
-                  <Button type="button" onClick={() => handleSave(setOpenOrg, "Organization pool limit saved successfully!")} disabled={updateLimitsMutation.isPending}>
+                  <Button type="button" onClick={() => handleSave(setOpenOrg, "Organization pool limit saved!")} disabled={updateLimitsMutation.isPending}>
                     {updateLimitsMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
                     Save changes
                   </Button>
@@ -340,7 +340,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                 </div>
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={() => setOpenImages(false)} disabled={updateLimitsMutation.isPending}>Cancel</Button>
-                  <Button type="button" onClick={() => handleSave(setOpenImages, "Image limit saved successfully!")} disabled={updateLimitsMutation.isPending}>
+                  <Button type="button" onClick={() => handleSave(setOpenImages, "Image limit saved!")} disabled={updateLimitsMutation.isPending}>
                     {updateLimitsMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
                     Save changes
                   </Button>
@@ -379,7 +379,7 @@ export function SetupUsageCredits({ orgId, orgName, currentPoolLimit, currentUse
                 </div>
                 <DialogFooter>
                   <Button variant="outline" type="button" onClick={() => setOpenWhatsapp(false)} disabled={updateLimitsMutation.isPending}>Cancel</Button>
-                  <Button type="button" onClick={() => handleSave(setOpenWhatsapp, "WhatsApp limit saved successfully!")} disabled={updateLimitsMutation.isPending}>
+                  <Button type="button" onClick={() => handleSave(setOpenWhatsapp, "WhatsApp limit saved!")} disabled={updateLimitsMutation.isPending}>
                     {updateLimitsMutation.isPending && <Spinner className="w-4 h-4 mr-2" />}
                     Save changes
                   </Button>

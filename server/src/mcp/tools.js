@@ -1169,14 +1169,15 @@ export const getMcpTools = () => [
   },
   {
     name: 'sleep_until',
-    description: "Pause this task and end your run now, until something wakes you: a time (wake_at), the user's next WhatsApp message (wake_on_whatsapp_reply), or both. Nothing runs and no tokens are used while you sleep. When you wake, this chat continues and you are told what woke you.",
+    description: "Pause this task and end your run now, until something wakes you: a time (wake_at), the user's next WhatsApp message (wake_on_whatsapp_reply), or both. Nothing runs and no tokens are used while you sleep. When you wake, this chat continues and you are told what woke you. Your answer ends here with your own words and nothing is written for you: say what you are waiting for and until when, in your answer before this call or in message.",
     inputSchema: {
       type: 'object',
       properties: {
         wake_at: { type: 'string', description: 'When to wake, ISO 8601 with the time zone (for example 2026-10-23T23:05:00+05:30).' },
         wake_on_whatsapp_reply: { type: 'boolean', description: "Wake when the user sends a WhatsApp message." },
         note: { type: 'string', description: 'What you will do when you wake (only you see this).' },
-        message: { type: 'string', description: 'Optional short text for the user now. When the task came from WhatsApp, it is also sent to them on WhatsApp.' }
+        message: { type: 'string', description: 'Short text for the user now, in your own words: what you are waiting for and until when. Needed when you wrote nothing in this answer before the call. When the task came from WhatsApp, it is also sent to them on WhatsApp.' },
+        chat_line: { type: 'string', description: "Only for a task that came from WhatsApp, when the person needs no WhatsApp message: one short sentence in your own words for this chat's record (never sent on WhatsApp)." }
       }
     }
   },
@@ -1846,7 +1847,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           }
         }
 
-        return { content: [{ type: 'text', text: `Preferences updated successfully. The new preferences are now active.` }] };
+        return { content: [{ type: 'text', text: `Preferences updated. The new preferences are now active.` }] };
       } catch (err) {
         return { content: [{ type: 'text', text: `Error updating preferences: ${err.message}` }] };
       }
@@ -1872,7 +1873,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         }
         // JSON.stringify keeps quotes and line breaks valid; backticks are escaped so they can't close the block
         const skillJson = JSON.stringify({ name: args.name, instructions: args.instructions }).replace(/`/g, '\\u0060');
-        return { content: [{ type: 'text', text: `Skill "${args.name}" created successfully. YOU MUST NOW output exactly this to the user:\n\nCreated skill\n\`\`\`skill\n${skillJson}\n\`\`\`` }] };
+        return { content: [{ type: 'text', text: `Skill "${args.name}" created. YOU MUST NOW output exactly this to the user:\n\nCreated skill\n\`\`\`skill\n${skillJson}\n\`\`\`` }] };
       } catch (err) {
         return { content: [{ type: 'text', text: `Error creating skill: ${err.message}` }] };
       }
@@ -1921,7 +1922,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         const deleted = await AiSkill.findOneAndDelete({ _id: args.skill_id, userId: user._id, is_default: false });
         if (!deleted) return { content: [{ type: 'text', text: 'Error: Skill not found, already deleted, or cannot delete a default skill.' }] };
 
-        return { content: [{ type: 'text', text: `Skill deleted successfully.` }] };
+        return { content: [{ type: 'text', text: `Skill deleted.` }] };
       } catch (err) {
         return { content: [{ type: 'text', text: `Error deleting skill: ${err.message}` }] };
       }
@@ -1941,7 +1942,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         );
         if (!updated) return { content: [{ type: 'text', text: 'Error: Skill not found or access denied.' }] };
 
-        return { content: [{ type: 'text', text: `Skill "${args.name}" updated successfully.` }] };
+        return { content: [{ type: 'text', text: `Skill "${args.name}" updated.` }] };
       } catch (err) {
         return { content: [{ type: 'text', text: `Error updating skill: ${err.message}` }] };
       }
@@ -2593,7 +2594,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         const when = schedule.repeat === 'once'
           ? `for ${schedule.scheduled_at.toISOString()}`
           : `to repeat ${describeRepeat(schedule)}, first run ${schedule.scheduled_at.toISOString()}`;
-        return { content: [{ type: 'text', text: `Successfully scheduled task "${args.title}" ${when}. The user will receive it at that time. IMPORTANT: The schedule_id is ${schedule._id}. Save this ID if you need to update or delete it later (deleting it stops the whole repeat).${whatsappNote}` }] };
+        return { content: [{ type: 'text', text: `Scheduled task "${args.title}" ${when}. The user will receive it at that time. IMPORTANT: The schedule_id is ${schedule._id}. Save this ID if you need to update or delete it later (deleting it stops the whole repeat).${whatsappNote}` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error creating schedule: ${e.message}` }] };
       }
@@ -2645,7 +2646,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           throw saveError;
         }
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully updated schedule execution time.` }] };
+        return { content: [{ type: 'text', text: `Updated schedule execution time.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error updating schedule time: ${e.message}` }] };
       }
@@ -2664,7 +2665,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (args.title) schedule.title = args.title;
         await schedule.save();
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully updated schedule title.` }] };
+        return { content: [{ type: 'text', text: `Updated schedule title.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error updating schedule title: ${e.message}` }] };
       }
@@ -2683,7 +2684,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (args.email_subject) schedule.email_subject = args.email_subject;
         await schedule.save();
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully updated schedule email subject.` }] };
+        return { content: [{ type: 'text', text: `Updated schedule email subject.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error updating schedule email subject: ${e.message}` }] };
       }
@@ -2702,7 +2703,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (args.email_body) schedule.email_body = args.email_body;
         await schedule.save();
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully updated schedule email body.` }] };
+        return { content: [{ type: 'text', text: `Updated schedule email body.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error updating schedule email body: ${e.message}` }] };
       }
@@ -2721,7 +2722,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (args.summary) schedule.summary = args.summary;
         await schedule.save();
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully updated schedule summary.` }] };
+        return { content: [{ type: 'text', text: `Updated schedule summary.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error updating schedule summary: ${e.message}` }] };
       }
@@ -2740,7 +2741,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (args.description) schedule.description = args.description;
         await schedule.save();
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully updated schedule description.` }] };
+        return { content: [{ type: 'text', text: `Updated schedule description.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error updating schedule description: ${e.message}` }] };
       }
@@ -2759,7 +2760,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (args.action_info) schedule.action_info = args.action_info;
         await schedule.save();
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully updated schedule action info.` }] };
+        return { content: [{ type: 'text', text: `Updated schedule action info.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error updating schedule action info: ${e.message}` }] };
       }
@@ -2782,7 +2783,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         }
         await schedule.save();
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully deleted attachment from schedule.` }] };
+        return { content: [{ type: 'text', text: `Deleted attachment from schedule.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error deleting schedule attachment: ${e.message}` }] };
       }
@@ -2827,7 +2828,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           await freeWhatsappResend(schedule).catch((e) => console.error('[WhatsApp] the place of a deleted schedule could not be given back:', e.message));
         }
         await emitScheduleUpdate(schedule.user_id, schedule._id);
-        return { content: [{ type: 'text', text: `Successfully deleted schedule ${args.schedule_id}.` }] };
+        return { content: [{ type: 'text', text: `Deleted schedule ${args.schedule_id}.` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Error deleting schedule: ${e.message}` }] };
       }
@@ -2929,7 +2930,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           ticket.status = 'closed';
           ticket.resolvedAt = new Date();
           await ticket.save();
-          return { content: [{ type: 'text', text: 'Ticket closed successfully.' }] };
+          return { content: [{ type: 'text', text: 'Ticket closed.' }] };
         }
 
         // 5. REOPEN
@@ -2943,7 +2944,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           ticket.status = 'reopened';
           ticket.resolvedAt = null;
           await ticket.save();
-          return { content: [{ type: 'text', text: 'Ticket reopened successfully.' }] };
+          return { content: [{ type: 'text', text: 'Ticket reopened.' }] };
         }
 
         // 6. ASSIGN
@@ -2953,7 +2954,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           ticket.events.push({ type: 'assigned', label: `Assigned to ${args.assignedTo}`, actorName: aiName, actorRole: 'super_admin', createdAt: new Date() });
           ticket.assignedTo = args.assignedTo;
           await ticket.save();
-          return { content: [{ type: 'text', text: `Ticket assigned to ${args.assignedTo} successfully.` }] };
+          return { content: [{ type: 'text', text: `Ticket assigned to ${args.assignedTo}.` }] };
         }
 
         // 7. REPLY (with email ON/OFF)
@@ -2981,7 +2982,7 @@ export const handleToolCall = async (name, args, context = {}) => {
               return { content: [{ type: 'text', text: `Reply added but email failed: ${emailErr.message}` }] };
             }
           }
-          return { content: [{ type: 'text', text: `Reply added successfully. Email sent: ${!!args.sendEmail}` }] };
+          return { content: [{ type: 'text', text: `Reply added. Email sent: ${!!args.sendEmail}` }] };
         }
 
         // 8. ATTACH FILE
@@ -2992,7 +2993,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           ticket.attachments.push({ url: args.fileUrl, name: args.fileName || 'attachment' });
           ticket.events.push({ type: 'attachmentAdded', label: 'File attached', actorName: aiName, actorRole: 'super_admin', createdAt: new Date() });
           await ticket.save();
-          return { content: [{ type: 'text', text: 'File attached successfully.' }] };
+          return { content: [{ type: 'text', text: 'File attached.' }] };
         }
 
         // 9. EDIT REPLY
@@ -3006,7 +3007,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           if (mIdx !== -1) { ticket.messages[mIdx].body = args.message; edited = true; }
           if (!edited) return { content: [{ type: 'text', text: 'Error: Reply not found.' }], isError: true };
           await ticket.save();
-          return { content: [{ type: 'text', text: 'Reply edited successfully.' }] };
+          return { content: [{ type: 'text', text: 'Reply edited.' }] };
         }
 
         // 10. ADD INTERNAL NOTE
@@ -3017,7 +3018,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           ticket.messages.push({ author: aiName, role: 'admin', body: args.message, date: now, footer: 'internal_note', avatar: aiAvatar, attachments: [] });
           ticket.events.push({ type: 'internalNote', label: 'Internal note added', actorName: aiName, actorRole: 'super_admin', createdAt: now });
           await ticket.save();
-          return { content: [{ type: 'text', text: 'Internal note added successfully.' }] };
+          return { content: [{ type: 'text', text: 'Internal note added.' }] };
         }
 
         // 11. READ DRAFT
@@ -3033,13 +3034,13 @@ export const handleToolCall = async (name, args, context = {}) => {
             { draftContent: args.draftContent, source: 'ai_generated' },
             { upsert: true, returnDocument: 'after' }
           ).lean();
-          return { content: [{ type: 'text', text: 'Draft saved successfully.' }] };
+          return { content: [{ type: 'text', text: 'Draft saved.' }] };
         }
 
         // 13. DELETE DRAFT
         if (name === 'delete_support_ticket_draft' || name === 'delete_classgrid_talk_draft') {
           await MessageDraft.findOneAndDelete({ ticketId: targetId });
-          return { content: [{ type: 'text', text: 'Draft deleted successfully.' }] };
+          return { content: [{ type: 'text', text: 'Draft deleted.' }] };
         }
 
         // 14. DELETE TICKET
@@ -3224,7 +3225,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             }
           } catch {}
           
-          return { content: [{ type: 'text', text: `Message sent successfully. ID: ${msg.id}` }] };
+          return { content: [{ type: 'text', text: `Message sent. ID: ${msg.id}` }] };
         }
 
         // 3.5 UPLOAD 1:1 FILE
@@ -3303,7 +3304,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             }
           } catch {}
 
-          return { content: [{ type: 'text', text: `File uploaded successfully. Message ID: ${msg.id}` }] };
+          return { content: [{ type: 'text', text: `File uploaded. Message ID: ${msg.id}` }] };
         }
 
         // 4. GET 1:1 ATTACHMENT
@@ -3505,7 +3506,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             }
           } catch {}
 
-          return { content: [{ type: 'text', text: `Message sent successfully. ID: ${msg.id}` }] };
+          return { content: [{ type: 'text', text: `Message sent. ID: ${msg.id}` }] };
         }
 
         // 5. GET ATTACHMENT URL
@@ -3581,7 +3582,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             }
           } catch {}
 
-          return { content: [{ type: 'text', text: `File uploaded successfully. Message ID: ${msg.id}` }] };
+          return { content: [{ type: 'text', text: `File uploaded. Message ID: ${msg.id}` }] };
         }
 
         // 7. SEND ANNOUNCEMENT
@@ -3649,7 +3650,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             }
           } catch {}
 
-          return { content: [{ type: 'text', text: `Announcement sent successfully. ID: ${msg.id}` }] };
+          return { content: [{ type: 'text', text: `Announcement sent. ID: ${msg.id}` }] };
         }
 
         // 8. LIST POLLS
@@ -3722,7 +3723,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             poll: { ...poll, voteCounts: {}, totalVoters: 0, myVotes: [] },
             messageId: insertedMsg.id,
           }).catch(() => {});
-          return { content: [{ type: 'text', text: `Poll created successfully. ID: ${poll.id}` }] };
+          return { content: [{ type: 'text', text: `Poll created. ID: ${poll.id}` }] };
         }
 
         // 11. LIST GROUP MEMBERS
@@ -3937,12 +3938,12 @@ export const handleToolCall = async (name, args, context = {}) => {
 
         if (name === 'assign_lead') {
           const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { assignedTo: args.assignedTo, assignedAt: new Date() }, { returnDocument: 'after' });
-          return { content: [{ type: 'text', text: `Lead assigned successfully.` }] };
+          return { content: [{ type: 'text', text: `Lead assigned.` }] };
         }
 
         if (name === 'update_lead_info') {
           const lead = await DemoRequest.findByIdAndUpdate(args.leadId, { $set: args.updates }, { returnDocument: 'after' });
-          return { content: [{ type: 'text', text: `Lead info updated successfully.` }] };
+          return { content: [{ type: 'text', text: `Lead info updated.` }] };
         }
 
         if (name === 'update_lead_meeting_notes') {
@@ -3973,14 +3974,14 @@ export const handleToolCall = async (name, args, context = {}) => {
           if (lead.status === "new") lead.status = "contacted";
           lead.lifecycleStage = "meeting_scheduled";
           await lead.save();
-          return { content: [{ type: 'text', text: `Meeting scheduled and lead updated successfully.` }] };
+          return { content: [{ type: 'text', text: `Meeting scheduled and lead updated.` }] };
         }
 
         if (name === 'approve_lead_and_provision') {
           // Wrap the actual service
           const { approveLeadAndProvision: approveService } = await import("../services/lead-conversion.service.js");
           const result = await approveService(args.leadId, { plan: args.plan || "demo" }, null);
-          return { content: [{ type: 'text', text: `Lead approved and provisioned successfully! New Org ID: ${result.organization?._id}` }] };
+          return { content: [{ type: 'text', text: `Lead approved and provisioned! New Org ID: ${result.organization?._id}` }] };
         }
 
       } catch (e) {
@@ -4394,7 +4395,7 @@ export const handleToolCall = async (name, args, context = {}) => {
       const { title, details } = args;
       console.log(`\nÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â°ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¸ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â§ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â  [THOUGHT] ${title}: ${details}`);
       return {
-        content: [{ type: 'text', text: `Thought recorded successfully. Proceed with your next action.` }]
+        content: [{ type: 'text', text: `Thought recorded. Proceed with your next action.` }]
       };
     }
 
@@ -4668,7 +4669,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           return { content: [{ type: 'text', text: `File not found: /data/${filePath}. Available files can be listed with read_sandbox_file using filePath: "." to list directory.` }] };
         }
 
-        console.log(`[SANDBOX] Successfully read file: ${filePath} (${stdout.length} bytes)`);
+        console.log(`[SANDBOX] read file: ${filePath} (${stdout.length} bytes)`);
         return { content: [{ type: 'text', text: stdout }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Failed to read sandbox file: ${e.message}` }] };
@@ -4985,7 +4986,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (action === 'delete') {
           if (!id) throw new Error("ID required for delete action");
           const result = await coll.deleteOne({ _id: new ObjectId(id) });
-          return { content: [{ type: 'text', text: result.deletedCount > 0 ? `Successfully deleted document ${id}` : `Document ${id} not found.` }] };
+          return { content: [{ type: 'text', text: result.deletedCount > 0 ? `Deleted document ${id}` : `Document ${id} not found.` }] };
         }
 
         if (action === 'create' || action === 'update') {
@@ -5022,13 +5023,13 @@ export const handleToolCall = async (name, args, context = {}) => {
               createdAt: new Date(),
               updatedAt: new Date()
             });
-            return { content: [{ type: 'text', text: `Successfully created RAG Document! ID: ${result.insertedId}` }] };
+            return { content: [{ type: 'text', text: `Created RAG Document! ID: ${result.insertedId}` }] };
           } else {
             const result = await coll.updateOne(
               { _id: new ObjectId(id) },
               { $set: { chunkText, embedding, documentType, sourceUrl, updatedAt: new Date() } }
             );
-            return { content: [{ type: 'text', text: result.matchedCount > 0 ? `Successfully updated RAG Document ${id}` : `Document ${id} not found.` }] };
+            return { content: [{ type: 'text', text: result.matchedCount > 0 ? `Updated RAG Document ${id}` : `Document ${id} not found.` }] };
           }
         }
 
@@ -5268,14 +5269,14 @@ export const handleToolCall = async (name, args, context = {}) => {
     //           uploadedUrls.push({ path: file.path, url });
     //        }
     //        return {
-    //          content: [{ type: 'text', text: `Successfully uploaded ${files.length} files to Classgrid Cloud R2 under websites/${siteId}/.\nThe website is now instantly live at: https://${siteId}.sites.classgrid.in` }]
+    //          content: [{ type: 'text', text: `Uploaded ${files.length} files to Classgrid Cloud R2 under websites/${siteId}/.\nThe website is now instantly live at: https://${siteId}.sites.classgrid.in` }]
     //        };
     //     } else if (operation === 'upload_file') {
     //        if (!fileKey || !fileContent || !contentType) throw new Error("fileKey, fileContent, and contentType are required");
     //        const buffer = Buffer.from(fileContent, 'utf-8');
     //        const url = await uploadBufferToR2(buffer, fileKey, contentType, fileKey);
     //        return {
-    //          content: [{ type: 'text', text: `Successfully uploaded file to ${url}` }]
+    //          content: [{ type: 'text', text: `Uploaded file to ${url}` }]
     //        };
     //     } else {
     //        throw new Error(`Unsupported R2 operation: ${operation}`);
@@ -5536,7 +5537,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             media: { mimeType: mime, body: Readable.from(buffer) },
             fields: 'id, name, webViewLink'
           });
-          data = { message: "File successfully uploaded to Google Drive.", ...res.data };
+          data = { message: "File uploaded to Google Drive.", ...res.data };
         } else if (operation === 'list_emails') {
           const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
 
@@ -5649,7 +5650,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             id: args.messageId,
             requestBody: { removeLabelIds: ['UNREAD'] }
           });
-          data = { message: "Email marked as read successfully." };
+          data = { message: "Email marked as read." };
         } else if (operation === 'send_email') {
           if (!args.to || !args.subject || !args.body) throw new Error("to, subject, and body are required for send_email");
           const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
@@ -5668,7 +5669,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             userId: 'me',
             requestBody: { raw: encodedMessage }
           });
-          data = { message: "Email sent successfully!" };
+          data = { message: "Email sent!" };
         } else if (operation === 'get_form') {
           if (!args.formId) throw new Error("formId is required for get_form");
           const forms = google.forms({ version: 'v1', auth: oauth2Client });
@@ -5807,7 +5808,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           if (requestBody.materials.length === 0) delete requestBody.materials;
 
           const res = await classroom.courses.courseWork.create({ courseId: args.courseId, requestBody });
-          data = { message: "Assignment created successfully!", coursework: res.data };
+          data = { message: "Assignment created!", coursework: res.data };
         } else if (operation === 'create_classroom_announcement') {
           if (!args.courseId || !args.description) throw new Error("courseId and description are required for create_classroom_announcement");
           const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
@@ -5822,7 +5823,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           if (requestBody.materials.length === 0) delete requestBody.materials;
 
           const res = await classroom.courses.announcements.create({ courseId: args.courseId, requestBody });
-          data = { message: "Announcement created successfully!", announcement: res.data };
+          data = { message: "Announcement created!", announcement: res.data };
         } else if (operation === 'get_classroom_coursework') {
           if (!args.courseId || !args.courseworkId) throw new Error("courseId and courseworkId are required for get_classroom_coursework");
           const classroom = google.classroom({ version: 'v1', auth: oauth2Client });
@@ -6079,7 +6080,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             const errData = await res.json().catch(() => null);
             throw new Error(`Failed to send email: ${errData?.error?.message || res.statusText}`);
           }
-          return { content: [{ type: 'text', text: "Email sent successfully." }] };
+          return { content: [{ type: 'text', text: "Email sent." }] };
         } else if (operation === 'mark_email_read') {
           if (!messageId) throw new Error("messageId is required for mark_email_read");
           const res = await fetch(`https://graph.microsoft.com/v1.0/me/messages/${messageId}`, {
@@ -6091,7 +6092,7 @@ export const handleToolCall = async (name, args, context = {}) => {
             const errData = await res.json().catch(() => null);
             throw new Error(`Failed to mark email as read: ${errData?.error?.message || res.statusText}`);
           }
-          return { content: [{ type: 'text', text: "Email marked as read successfully." }] };
+          return { content: [{ type: 'text', text: "Email marked as read." }] };
         } else if (operation === 'list_teams') {
           const res = await fetch(`https://graph.microsoft.com/v1.0/me/joinedTeams`, {
             headers: { "Authorization": `Bearer ${accessToken}` }
@@ -6332,7 +6333,7 @@ export const handleToolCall = async (name, args, context = {}) => {
           });
           const data = await res.json();
           if (!data.ok) throw new Error(data.error || "Failed to archive channel");
-          return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Successfully deleted/archived channel ${channelId}` }, null, 2) }] };
+          return { content: [{ type: 'text', text: JSON.stringify({ success: true, message: `Deleted/archived channel ${channelId}` }, null, 2) }] };
         } else if (operation === 'search_channels') {
           if (!query) throw new Error("query is required for search_channels");
           const q = String(query).toLowerCase().replace(/^#/, '');
@@ -6963,7 +6964,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         // delivery report takes it off the count again)
         await recordDirectWhatsappSend(sender._id, data.messages?.[0]?.id);
 
-        return { content: [{ type: 'text', text: `WhatsApp message sent successfully to ${toPhoneNumber}. Message ID: ${data.messages[0].id}` }] };
+        return { content: [{ type: 'text', text: `WhatsApp message sent to ${toPhoneNumber}. Message ID: ${data.messages[0].id}` }] };
       } catch (e) {
         return { content: [{ type: 'text', text: `Failed to send WhatsApp message: ${e.message}` }] };
       }

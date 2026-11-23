@@ -403,7 +403,7 @@ router.patch("/domains", isAuthenticated, requireRole("org_admin"), async (req, 
         logAdminAction(req, "update_domains", "organization", req.user.organization_id, updatedOrg.name, { domains: cleanedDomains });
 
         res.json({
-            message: "Organization domains updated successfully",
+            message: "Organization domains updated",
             allowed_domains: updatedOrg.allowed_domains
         });
     } catch (err) {
@@ -438,7 +438,7 @@ router.patch("/type", isAuthenticated, requireRole("org_admin"), async (req, res
         logAdminAction(req, "update_org_type", "organization", req.user.organization_id, updatedOrg.name, { org_type });
 
         res.json({
-            message: "Organization type updated successfully",
+            message: "Organization type updated",
             org_type: updatedOrg.org_type
         });
     } catch (err) {
@@ -533,7 +533,7 @@ router.post("/invite-staff", isAuthenticated, requireRole("org_admin"), async (r
         }
 
         res.status(201).json({
-            message: "Invitation sent successfully.",
+            message: "Invitation sent.",
             user: { _id: newUser._id, name: newUser.name, email: newUser.email, role: newUser.role }
         });
 
@@ -874,7 +874,7 @@ router.delete("/members/:userId", isAuthenticated, requireRole("org_admin"), asy
         await User.findByIdAndDelete(req.params.userId);
         logAdminAction(req, 'remove_member', 'user', user._id, user.name, { role: user.role });
 
-        res.json({ message: 'Member removed successfully.' });
+        res.json({ message: 'Member removed.' });
     } catch (err) {
         console.error('[Remove Member] Error:', err.message);
         res.status(500).json({ message: 'Server error removing member.' });
@@ -917,7 +917,7 @@ router.post("/members/:userId/resend", isAuthenticated, requireRole("org_admin")
             ),
         });
 
-        res.json({ message: 'Invitation resent successfully.' });
+        res.json({ message: 'Invitation resent.' });
     } catch (err) {
         console.error('[Resend Invite] Error:', err.message);
         res.status(500).json({ message: 'Server error resending invitation.' });
@@ -1040,7 +1040,7 @@ router.put("/academic-config", isAuthenticated, requireRole("org_admin"), async 
 
         logAdminAction(req, "update_academic_config", "organization", orgId, "Academic config", update);
         res.json({
-            message: "Academic configuration updated successfully",
+            message: "Academic configuration updated",
             academic_config: updatedOrg.academic_config,
         });
     } catch (err) {
@@ -1437,7 +1437,7 @@ router.post("/bulk-suspend", isAuthenticated, requireRole("org_admin"), async (r
         );
 
         logAdminAction(req, `bulk_${action}`, "users", orgId, `${result.modifiedCount} users`, { userIds });
-        res.json({ message: `${result.modifiedCount} user(s) ${action}ed successfully.`, modifiedCount: result.modifiedCount });
+        res.json({ message: `${result.modifiedCount} user(s) ${action}ed.`, modifiedCount: result.modifiedCount });
     } catch (err) {
         console.error("[Bulk Suspend] Error:", err.message);
         res.status(500).json({ message: "Server error" });
@@ -1919,7 +1919,7 @@ router.post("/promote", isAuthenticated, requireRole("org_admin"), async (req, r
             logAdminAction(req, "schedule_promotion", "academic", orgId, `Target Year ${target_year_id}`, { scheduled_for });
 
             return res.json({
-                message: "Promotion successfully scheduled!",
+                message: "Promotion scheduled!",
                 scheduled_for: executeAt
             });
         }
@@ -2003,7 +2003,7 @@ router.post("/promote", isAuthenticated, requireRole("org_admin"), async (req, r
         logAdminAction(req, "promote_students", "academic", orgId, `Batch ${batch.id}`, result);
 
         res.json({
-            message: "Promotion completed successfully!",
+            message: "Promotion completed!",
             batch_id: batch.id,
             ...result,
         });
@@ -2288,7 +2288,7 @@ router.post("/regenerate-org-code", isAuthenticated, requireRole("org_admin"), a
 
         res.json({
             success: true,
-            message: "Organization join codes regenerated successfully.",
+            message: "Organization join codes regenerated.",
             organizationCode,
             honorCode,
             expires_at: update.org_code_expires_at || "Never",
@@ -2455,7 +2455,7 @@ router.patch("/subdomain", isAuthenticated, requireRole("org_admin"), async (req
 
         res.json({
             success: true,
-            message: `Subdomain set to "${slug}" successfully.`,
+            message: `Subdomain set to "${slug}".`,
             subdomain: slug,
             url: `${slug}.classgrid.in`,
         });
@@ -3114,7 +3114,7 @@ router.post("/custom-domain/verify", isAuthenticated, requireRole("org_admin"), 
                         const errData = await vercelRes.json();
                         console.error("[Vercel API Error]:", errData);
                     } else {
-                        console.log(`[Vercel API] Successfully attached ${domain} to project ${targetProjectId}.`);
+                        console.log(`[Vercel API] attached ${domain} to project ${targetProjectId}.`);
                     }
                 } catch (vercelErr) {
                     console.error("[Vercel Fetch Error]:", vercelErr.message);
@@ -3144,7 +3144,7 @@ router.post("/custom-domain/verify", isAuthenticated, requireRole("org_admin"), 
         } else if (!isFullyVerified) {
             message = "Verification pending. Check both the ownership TXT record and the routing CNAME or A record.";
         } else {
-            message = "Domain verified successfully! SSL provisioning will begin.";
+            message = "Domain verified! SSL provisioning will begin.";
         }
 
         res.json({
@@ -3237,7 +3237,7 @@ router.delete("/custom-domain", isAuthenticated, requireRole("org_admin"), async
                 if (!vercelRes.ok) {
                     console.error("[Vercel API Error on Delete]:", await vercelRes.json());
                 } else {
-                    console.log(`[Vercel API] Successfully detached ${domainToDelete} from project ${targetProjectId}.`);
+                    console.log(`[Vercel API] detached ${domainToDelete} from project ${targetProjectId}.`);
                 }
             } catch (err) {
                 console.error("[Vercel Fetch Error on Delete]:", err.message);
@@ -3425,7 +3425,7 @@ router.patch("/branding", isAuthenticated, requireRole("org_admin"), async (req,
         }
 
         res.json({
-            message: "Organization branding updated successfully",
+            message: "Organization branding updated",
             branding: {
                 logo_url: updatedOrg.logo_url,
                 sidebar_logo_url: updatedOrg.sidebar_logo_url,
@@ -3480,7 +3480,7 @@ router.post("/switch-role", isAuthenticated, async (req, res) => {
 
         await req.user.save();
 
-        res.json({ message: "Active role switched successfully." });
+        res.json({ message: "Active role switched." });
     } catch (err) {
         console.error("[Switch Role Error]:", err.message);
         res.status(500).json({ error: "Server error switching role." });

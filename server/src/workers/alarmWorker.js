@@ -95,7 +95,7 @@ export const alarmWorker = new Worker('ai-build-alarms', async (job) => {
           isSystemAlarm: true
         })
       });
-      console.log(`[Alarm Worker] Wake up call sent successfully to AI for step ${stepId}.`);
+      console.log(`[Alarm Worker] Wake up call sent to AI for step ${stepId}.`);
     } catch (fetchErr) {
       console.error("[Alarm Worker] Failed to send wake-up fetch call:", fetchErr);
     }

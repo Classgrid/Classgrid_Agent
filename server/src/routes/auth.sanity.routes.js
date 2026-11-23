@@ -61,7 +61,7 @@ router.post('/connect', isAuthenticated, async (req, res) => {
             sanity_access_token: apiToken,
         });
 
-        res.json({ success: true, message: 'Sanity connected successfully.' });
+        res.json({ success: true, message: 'Sanity connected.' });
     } catch (err) {
         console.error('[Sanity Connect Error]', err);
         res.status(500).json({ success: false, message: 'Internal server error.' });
@@ -74,7 +74,7 @@ router.post('/disconnect', isAuthenticated, async (req, res) => {
             sanity_project_id: null,
             sanity_access_token: null,
         });
-        res.json({ success: true, message: 'Sanity disconnected successfully.' });
+        res.json({ success: true, message: 'Sanity disconnected.' });
     } catch (err) {
         console.error('[Sanity Disconnect Error]', err);
         res.status(500).json({ success: false, message: 'Internal server error.' });

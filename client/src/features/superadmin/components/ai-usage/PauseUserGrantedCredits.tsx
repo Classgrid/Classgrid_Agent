@@ -28,7 +28,7 @@ export function PauseUserGrantedCredits({ userId, transactionId, isPaused }: { u
     setIsLoading(true);
     try {
       await apiClient.post(`/api/super-admin/ai-usage/users/${userId}/credits/${transactionId}/pause`, { isPaused: !isPaused });
-      toast.success(`Granted credits ${!isPaused ? 'paused' : 'unpaused'} successfully.`);
+      toast.success(`Granted credits ${!isPaused ? 'paused' : 'unpaused'}.`);
       // Invalidate the user details query
       queryClient.invalidateQueries({ queryKey: ["aiUsage", "user", userId] });
       // Invalidate broader stats

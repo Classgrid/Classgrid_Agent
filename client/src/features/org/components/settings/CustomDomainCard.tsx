@@ -88,7 +88,7 @@ export function CustomDomainCard() {
         mutationFn: (subdomain: string) => apiClient.patch("/api/org-admin/subdomain", { subdomain }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ["current-user"] });
-            toast.success("Subdomain updated successfully!");
+            toast.success("Subdomain updated!");
         },
         onError: (err: any) => {
             toast.error(err.response?.data?.message || "Failed to update subdomain.");
@@ -488,7 +488,7 @@ function DomainConfigCard({
         verifyMutation.mutate({ domainType }, {
             onSuccess: (data) => {
                 if (data.isFullyVerified) {
-                    toast.success("Domain verified successfully! SSL provisioning has started.", { duration: 5000 });
+                    toast.success("Domain verified! SSL provisioning has started.", { duration: 5000 });
                     // Show both green ticks for 2.5s before transitioning to the verified card
                     setShowVerifiedCelebration(true);
                     setIsPolling(false);
@@ -516,7 +516,7 @@ function DomainConfigCard({
         try {
             await removeMutation.mutateAsync({ domainType });
             setRemoveConfirmOpen(false);
-            toast.success("Domain removed successfully.");
+            toast.success("Domain removed.");
         } catch (err) {
             // Error is handled by the hook's onError
         }
@@ -848,7 +848,7 @@ function DomainConfigCard({
                                             <h4 className={`font-semibold ${textClasses}`}>Domain is active and verified</h4>
                                         </div>
                                         <p className={`text-sm ${textSubClasses} mt-1`}>
-                                            Your custom domain is successfully pointing to Classgrid. SSL certificates have been provisioned and your platform is now accessible at <strong>https://{domainConfig.domain}</strong>.
+                                            Your custom domain is pointing to Classgrid. SSL certificates have been provisioned and your platform is now accessible at <strong>https://{domainConfig.domain}</strong>.
                                         </p>
                                         
                                         <div className={`mt-5 space-y-4 bg-background/50 rounded-lg p-4 border ${borderClasses}`}>

@@ -15,3 +15,28 @@ export function stopAnswerText(said, result) {
     if (!own || !fromTool) return own || fromTool;
     return fromTool.includes(own) ? fromTool : own.includes(fromTool) ? own : `${own}\n\n${fromTool}`;
 }
+
+// What a sleeping answer says (sleep_until): always the AI's own words, never a sentence written for it. Until
+// 2026-11-23 an AI that said nothing got the fixed line "💤 Waiting for <time>. I'll continue then." as its answer
+// (owner: "this is hardcoded, and the emoji too: fix it"). Now the sleep is not set until the AI has said something:
+//   - what it wrote in this answer before the call (`said`), or
+//   - `message` (shown to the person; on a task from WhatsApp it is also sent there), or
+//   - `chat_line` (a task from WhatsApp only: one sentence for the chat's record, never sent on WhatsApp).
+// Returns { refuse } (the tool's answer: the sleep is not set, the AI calls again with its words), or
+// { stopAnswer, quiet }: what the tool adds to the answer, and whether nothing of this answer goes to WhatsApp.
+export function sleepWords({ message = "", chatLine = "", said = "", origin = "chat" } = {}) {
+    const msg = String(message || "").trim();
+    const line = String(chatLine || "").trim();
+    const spoke = String(said || "").trim();
+    if (!msg && !spoke && !(origin === "whatsapp" && line)) {
+        return {
+            refuse: origin === "whatsapp"
+                ? "ERROR: not sleeping yet. You have said nothing in this answer, and nothing is written for you. Call sleep_until again with the same values and one of: `message` (one short sentence in your own words, sent to the person on WhatsApp), or `chat_line` (one short sentence in your own words for this chat's record only, not sent on WhatsApp): what you are waiting for and until when."
+                : "ERROR: not sleeping yet. You have said nothing in this answer, and nothing is written for you. Call sleep_until again with the same values and `message`: one short sentence in your own words telling the person what you are waiting for and until when.",
+        };
+    }
+    // (the chat's own line is used only when there is nothing else: with a message or written words it is left out,
+    // because everything in such an answer is sent on WhatsApp)
+    const quiet = !msg && !spoke;
+    return { stopAnswer: msg || (quiet ? line : ""), quiet };
+}

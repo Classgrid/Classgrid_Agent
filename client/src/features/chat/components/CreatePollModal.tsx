@@ -76,7 +76,7 @@ export function CreatePollModal({ threadId, onClose }: CreatePollModalProps) {
   const { mutate, isPending } = useMutation({
     mutationFn: () => createThreadPoll(threadId, question, options.filter(o => o.trim().length > 0), allowMultiple),
     onSuccess: () => {
-      toast.success("Poll created successfully");
+      toast.success("Poll created");
       onClose();
     },
     onError: (err: any) => {

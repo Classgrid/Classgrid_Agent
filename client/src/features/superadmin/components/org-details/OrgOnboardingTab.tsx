@@ -83,7 +83,7 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     key: "first_login",
     label: "First Login Completed",
-    description: "The Admin successfully logged into the main ERP dashboard for the first time.",
+    description: "The Admin logged into the main ERP dashboard for the first time.",
     icon: <LayoutDashboard className="size-4" />,
     phase: 2,
     isComplete: (p) => !!p.first_login_completed,

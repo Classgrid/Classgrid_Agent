@@ -43,7 +43,7 @@ export const useDeleteAgentReview = () => {
     mutationFn: (id: string) => aiAgentReviewsApi.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["ai-agent-reviews"] });
-      toast.success("Review deleted successfully");
+      toast.success("Review deleted");
     },
     onError: () => {
       toast.error("Failed to delete review");
@@ -57,7 +57,7 @@ export const useBulkDeleteAgentReviews = () => {
     mutationFn: (ids: string[]) => aiAgentReviewsApi.bulkDelete(ids),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ["ai-agent-reviews"] });
-      toast.success(`Successfully deleted ${variables.length} reviews`);
+      toast.success(`Deleted ${variables.length} reviews`);
     },
     onError: () => {
       toast.error("Failed to bulk delete reviews");

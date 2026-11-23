@@ -280,7 +280,7 @@ export const deleteSuperAdminSupportConversation = async (req, res) => {
     }
     
     if (!deleted) return res.status(404).json({ message: "Ticket not found." });
-    res.json({ success: true, message: "Ticket deleted successfully." });
+    res.json({ success: true, message: "Ticket deleted." });
   } catch (err) {
     console.error("[SuperAdmin Helpdesk Delete] Error:", err.message);
     res.status(500).json({ message: "Server error" });

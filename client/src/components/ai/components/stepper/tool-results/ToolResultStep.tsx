@@ -1,7 +1,8 @@
-// A tool step in the agent stepper, shown the way claude.ai shows tool calls:
-//   1. the usual "Successfully used …" line with an arrow,
-//   2. click → a small card with the step row ("Used Classgrid  Get my profile ›"),
-//   3. click the row → a grey box with the Request and Response as plain label / value rows.
+// A tool step in the agent stepper:
+//   1. the step's line, saying what it really did, with an arrow,
+//   2. click → a grey box with what was asked (Request) and what came back (Response) as plain label / value rows.
+// (Until 2026-11-23 a card stood between the two, "Loaded Classgrid" / "Used Classgrid  Message classgrid session",
+// and the box needed a second click: the owner asked for the plain, direct view Claude Code has.)
 import React, { useMemo, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -35,24 +36,24 @@ const APP_NAMES: Record<string, string> = {
   whatsapp_business_connector: 'WhatsApp', aws_ses_connector: 'AWS SES', canva_connector: 'Canva', spotify_connector: 'Spotify',
 };
 
-/** "Used Google Workspace  List drive files" / "Used Classgrid  Get my profile" */
-function rowTitle(tool: string, args: any) {
-  // Custom connectors: "Used Linear  Create issue"
+/** A connected app's step: which app and which of its actions, as one small line above the Request ("Google
+ * Workspace · List drive files"). Classgrid's own tools show none: the step's line already says what was done. */
+function appAction(tool: string, args: any): string | null {
   if (tool === 'custom_mcp_connector') {
-    const name = String(args?.server || args?.app || args?.name || 'Custom connector');
-    return { app: name, action: humanizeKey(String(args?.tool || args?.operation || tool)) };
+    const name = String(args?.server || args?.app || args?.name || '').trim();
+    const action = String(args?.tool || args?.operation || '').trim();
+    return name ? `${name}${action ? ` · ${humanizeKey(action)}` : ''}` : null;
   }
-  const app = APP_NAMES[tool] ?? 'Classgrid';
-  const action = APP_NAMES[tool] && args?.operation ? String(args.operation) : tool;
-  return { app, action: humanizeKey(action) };
+  if (!APP_NAMES[tool]) return null;
+  return `${APP_NAMES[tool]}${args?.operation ? ` · ${humanizeKey(String(args.operation))}` : ''}`;
 }
 
 export function ToolResultStep({ tool, args, result, status, text, defaultOpen = false }: ToolResultStepProps) {
   const [cardOpen, setCardOpen] = useState(defaultOpen);
-  const [detailOpen, setDetailOpen] = useState(defaultOpen);
+  const detailOpen = cardOpen;
   const hasResult = result !== undefined && result !== null && result !== '';
   const canOpen = status !== 'loading' && (hasResult || !!requestFields(args));
-  const { app, action } = rowTitle(tool, args);
+  const fromApp = appAction(tool, args);
   // The JavaScript the agent runs in the page, shown under its step like a command (browser_run_js)
   const code = tool === 'browser_run_js' && typeof args?.code === 'string' && args.code.trim() ? args.code.trim() : null;
 
@@ -95,24 +96,10 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
       )}
 
       {cardOpen && canOpen && (
-        <div className="ml-10 mr-2 mb-2 mt-0.5 rounded-xl border border-slate-200 dark:border-[#2a2a2a] bg-white dark:bg-[#171717] overflow-hidden">
-          <div className="flex items-center gap-2 px-3.5 py-2.5 text-[14px] border-b border-slate-200 dark:border-[#2a2a2a]">
-            <span className="text-slate-400 dark:text-[#7d7d7d]">Loaded</span>
-            <span className="text-slate-800 dark:text-[#e6e6e6]">{app}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => setDetailOpen((o) => !o)}
-            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-[14px] cursor-pointer hover:bg-slate-50 dark:hover:bg-[#1d1d1d] transition-colors"
-            aria-expanded={detailOpen}
-          >
-            <span className="text-slate-400 dark:text-[#7d7d7d]">Used {app}</span>
-            <span className="text-slate-800 dark:text-[#e6e6e6] min-w-0 break-words">{action}</span>
-            <ChevronRight className={cn('h-3.5 w-3.5 shrink-0 text-slate-400 transition-transform', detailOpen && 'rotate-90')} />
-          </button>
-
+        <div className="ml-10 mr-2 mb-2 mt-0.5">
           {detailOpen && body && (
-            <div className="mx-3 mb-3 flex flex-col gap-3 rounded-lg bg-[#f1f1ef] dark:bg-[#222222] px-3 py-2.5 max-h-[460px] overflow-y-auto [scrollbar-width:thin]">
+            <div className="flex flex-col gap-3 rounded-lg bg-[#f1f1ef] dark:bg-[#222222] px-3 py-2.5 max-h-[460px] overflow-y-auto [scrollbar-width:thin]">
+              {fromApp && <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">{fromApp}</span>}
               {body.request && (
                 <div className="flex flex-col gap-1">
                   <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">Request</span>

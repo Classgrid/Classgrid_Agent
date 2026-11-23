@@ -794,7 +794,7 @@ export function SupportTicketsPage() {
       setSelectedTicket(result.ticket);
       setEditingReplyId(null);
       refetch();
-      toast.success("Reply updated successfully");
+      toast.success("Reply updated");
     } catch {
       toast.error("Failed to update reply");
     }

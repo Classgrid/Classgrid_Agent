@@ -188,5 +188,5 @@ export const initCronJobs = () => {
         }
     }, { timezone: "Asia/Kolkata" });
 
-    console.log("Background cron jobs initialized successfully.");
+    console.log("Background cron jobs initialized.");
 };

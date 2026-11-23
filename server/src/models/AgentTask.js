@@ -19,6 +19,8 @@ const agentTaskSchema = new mongoose.Schema({
   wake_on_reply: { type: Boolean, default: true },
   note: { type: String, default: '' },
   sleep_message: { type: String, default: '' },
+  // The sleeping answer is only the chat's own line (sleep_until chat_line): nothing of it is sent on WhatsApp
+  sleep_quiet: { type: Boolean, default: false },
   // The Agent's last answer, so the small model knows what the user is replying to
   last_answer: { type: String, default: '' },
   slept_at: { type: Date, default: null },

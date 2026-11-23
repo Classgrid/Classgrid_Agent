@@ -90,7 +90,7 @@ export const createOrganization = async (req, res) => {
             status: "pending"
         });
         
-        res.status(201).json({ success: true, organization: org, message: "Organization created successfully" });
+        res.status(201).json({ success: true, organization: org, message: "Organization created" });
     } catch (err) {
         console.error("Create organization error:", err);
         res.status(500).json({ success: false, message: err.message });

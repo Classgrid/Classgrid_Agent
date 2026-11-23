@@ -1852,6 +1852,9 @@ async function keepMasteroPictures(userId, sessionId, messageId, images) {
 // Tools the phone app never gets (see the phone gate in streamAskAi): changing projects, the browser, the computer
 const PHONE_BLOCKED_TOOLS = new Set(["write_project_file", "write_project_file_from_spec", "edit_project_file", "push_project_to_github", "create_github_repo_for_project", "update_project_github_repo", "rename_project", "make_project", "run_project_helpers", "use_worktree", "execute_project_command", "delete_project_file", "move_project_file"]);
 
+// The hidden note the app sends after the person connected an app in the middle of a task (AiHubModal.tsx). Apps up
+// to desktop 1.0.49 wrote it with one more word, which is why both forms are known here.
+const CONNECTED_APP_NOTE = /^\[SYSTEM: I have (?:successfully )?connected /;
 export const streamAskAi = async (req, res) => {
     const requestStartedAt = Date.now();
     const body = req.body || {};
@@ -2597,7 +2600,7 @@ export const streamAskAi = async (req, res) => {
 
         // An app was connected while no chat was open: there is no task to carry on, so nothing runs and no chat is
         // made (it used to start an empty chat named "Gmail Connected" each time; older apps still send it)
-        if (!sessionId && typeof body.question === "string" && body.question.trim().startsWith("[SYSTEM: I have successfully connected ")) {
+        if (!sessionId && typeof body.question === "string" && CONNECTED_APP_NOTE.test(body.question.trim())) {
             if (!res.headersSent) res.status(204);
             return res.end();
         }
@@ -2607,7 +2610,7 @@ export const streamAskAi = async (req, res) => {
             let initialTitle = body.question;
             let skipAutoTitle = false;
             
-            if (initialTitle.trim().startsWith("[SYSTEM: I have successfully connected ")) {
+            if (CONNECTED_APP_NOTE.test(initialTitle.trim())) {
                 const match = initialTitle.match(/connected (.*?)! Please/);
                 initialTitle = match ? `${match[1]} Connected` : "Integration Connected";
                 skipAutoTitle = true;
@@ -3080,7 +3083,7 @@ If you are asked to interact with a 3rd party service (like Zoom, Google Workspa
 
 // TODO: Re-evaluate the 3-search hard limit once user Token Billing is implemented.
 ANTI-HALLUCINATION RULE:
-1. If a tool execution returns an error (e.g., "Failed to execute API call") and no other tool can get the result, you MUST read the error and tell the user exactly what failed (if another way worked, follow the tool error rule: finish the task, and only staff get a one-line note). NEVER pretend that a tool succeeded if it actually returned an error. NEVER fabricate links or success messages for tasks you did not successfully complete.
+1. If a tool execution returns an error (e.g., "Failed to execute API call") and no other tool can get the result, you MUST read the error and tell the user exactly what failed (if another way worked, follow the tool error rule: finish the task, and only staff get a one-line note). NEVER pretend that a tool succeeded if it actually returned an error. NEVER fabricate links or success messages for tasks you did not complete.
 2. PREMISE CONFIRMATION BIAS: Beware of trick questions! If a user asks about an event, person, or shipment, and your web search reveals that the underlying premise is FALSE (e.g. the shipment hasn't happened yet), you must explicitly tell the user their premise is incorrect. DO NOT stitch unrelated facts together to force an answer.
 3. MISSING INFORMATION: If you cannot find the answer after searching Google, the knowledge base, or our website, STOP SEARCHING. You are strictly allowed a MAXIMUM of 3 search attempts per question. After 3 searches, you must immediately stop searching. Do not get stuck in an infinite loop. Simply admit that the information is not available, provide your best logical assessment based on your existing knowledge, and ABSOLUTELY DO NOT lie or fabricate facts.`);
 
@@ -4420,7 +4423,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             await new Promise(r => setTimeout(r, 3));
                         }
 
-                        return "Thought logged successfully. Proceed with the next step in your workflow sequence.";
+                        return "Thought logged. Proceed with the next step in your workflow sequence.";
                     },
                     execute_terminal_command: async (args) => {
                         const blocked = await bigFileCommand(args?.command);
@@ -5211,7 +5214,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const checkCmd = await ssh.execCommand(`test -f "${hostFilePath}" && echo "exists" || echo "not found"`);
                             if (!checkCmd.stdout.includes('exists')) {
                                 ssh.dispose();
-                                return `FAILED: File ${sandboxFilePath} does not exist in the sandbox. Did your script run successfully?`;
+                                return `FAILED: File ${sandboxFilePath} does not exist in the sandbox. Did your script run?`;
                             }
 
                             const catCmd = await ssh.execCommand(`cat "${hostFilePath}" | base64 -w 0`);
@@ -5783,12 +5786,13 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             return "Web Search failed: " + e;
                         }
                     },
-                    sleep_until: async (args) => {
+                    // (ctx.said: what the AI wrote in this answer before the call, from the model loop)
+                    sleep_until: async (args, ctx) => {
                         try {
                             const { sleepFromTool } = await import('../services/agent-task.service.js');
                             return await sleepFromTool({
                                 user: req.user, sessionId: isIncognito ? null : sessionId, projectId: body.projectId,
-                                origin: body.taskOrigin === 'whatsapp' ? 'whatsapp' : 'chat', question: body.question, args,
+                                origin: body.taskOrigin === 'whatsapp' ? 'whatsapp' : 'chat', question: body.question, args, said: ctx?.said,
                             });
                         } catch (e) {
                             return `FAILED to sleep: ${e.message}`;
@@ -6060,7 +6064,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                                     content: buffer.toString('base64'),
                                                     encoding: 'base64'
                                                 });
-                                                console.log(`[send_email] Successfully fetched and base64-encoded URL attachment: ${att.filename}`);
+                                                console.log(`[send_email] fetched and base64-encoded URL attachment: ${att.filename}`);
                                             } else {
                                                 console.error(`[send_email] Failed to fetch URL attachment ${att.path}. Status: ${res.status} ${res.statusText}`);
                                             }
@@ -6104,7 +6108,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 userId: req.user?._id || null
                             });
 
-                            return `SUCCESS: Email sent successfully to ${args.to} from ${emailPayload.fromEmail}`;
+                            return `SUCCESS: Email sent to ${args.to} from ${emailPayload.fromEmail}`;
                         } catch (e) {
                             return `FAILED to send email: ${e.message}`;
                         }
@@ -8618,7 +8622,7 @@ export const shareChatSession = async (req, res) => {
         });
 
         console.info(`[Chat API] ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ Chat transcript emailed to ${req.user.email} for session ${id}`);
-        res.json({ success: true, message: "Email sent successfully" });
+        res.json({ success: true, message: "Email sent" });
     } catch (e) {
         console.error(`[Chat API] ÃƒÂ¢Ã‚ÂÃ…â€™ Failed to email chat transcript:`, e);
         res.status(500).json({ error: "Failed to share session" });
@@ -8889,7 +8893,7 @@ export const submitAiFeedback = async (req, res) => {
             });
         }
 
-        res.json({ success: true, message: "Feedback submitted successfully" });
+        res.json({ success: true, message: "Feedback submitted" });
     } catch (e) {
         console.error("Error submitting AI feedback:", e);
         res.status(500).json({ error: "Failed to submit feedback" });
@@ -9020,7 +9024,7 @@ We wanted to reach out and say thank you for the feedback you recently submitted
 
 We are so sorry about the frustrating experience you had. You were completely right - it was our mistake, and the AI should not have responded to you that way. 
 
-Our engineering team has reviewed your report and we have successfully updated the underlying model. We have updated the system, and you can rest assured that our AI agent will not make that same mistake or respond in that way again. 
+Our engineering team has reviewed your report and we have updated the underlying model. We have updated the system, and you can rest assured that our AI agent will not make that same mistake or respond in that way again. 
 
 Your feedback is incredibly valuable to us and directly helps us build a better platform. Thank you for taking the time to report this to us!
 
@@ -9095,7 +9099,7 @@ export const deleteAgentReview = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Agent review deleted successfully"
+            message: "Agent review deleted"
         });
     } catch (e) {
         console.error("Error deleting agent review:", e);
@@ -9131,7 +9135,7 @@ export const bulkDeleteAgentReviews = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: `Successfully deleted ${ids.length} reviews`
+            message: `Deleted ${ids.length} reviews`
         });
     } catch (e) {
         console.error("Error bulk deleting agent reviews:", e);

@@ -388,7 +388,7 @@ router.post("/clients/register", isAuthenticated, async (req, res) => {
 
         await client.save();
         res.status(201).json({
-            message: "App registered successfully",
+            message: "App registered",
             clientId,
             clientSecret
         });

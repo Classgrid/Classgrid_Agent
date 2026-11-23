@@ -45,7 +45,7 @@ export function EmailSentView({ toCount, subject }: EmailSentViewProps) {
           {/* Info */}
           <div className="flex flex-col overflow-hidden">
             <span className="text-[14px] font-medium text-slate-800 dark:text-[#eeeeee] truncate">
-              Email successfully sent
+              Email sent
             </span>
             <span className="text-[13px] text-slate-500 dark:text-[#8a8a8a] mt-0.5 truncate">
               Delivered to {toCount} {toCount === 1 ? 'recipient' : 'recipients'}

@@ -91,7 +91,7 @@ export function useUpdateEmailPreferences() {
     onSuccess: (updatedPrefs) => {
       queryClient.setQueryData(["email-preferences"], updatedPrefs);
       queryClient.invalidateQueries({ queryKey: ["email-preferences"] });
-      toast.success("Settings saved successfully.");
+      toast.success("Settings saved.");
     },
     onError: () => {
       toast.error("Failed to save settings. Please try again.");

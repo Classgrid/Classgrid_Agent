@@ -36,7 +36,7 @@ export function ResetUserDailyLimit({ userId, userName }: ResetUserDailyLimitPro
       
       resetMutation.mutate(userId, {
         onSuccess: () => {
-          toast.success(`Usage for ${userName} has been reset successfully.`);
+          toast.success(`Usage for ${userName} has been reset.`);
           setOpen(false);
           setSecurityCode("");
         }

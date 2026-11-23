@@ -352,7 +352,7 @@ export function SharedProfilePage({ publicUser, groupData, mode = "user", onClos
         updateProfile.mutate(updatePayload);
       }
       
-      toast.success(`${type} updated successfully!`, { id: loadingToast });
+      toast.success(`${type} updated!`, { id: loadingToast });
     } catch (err) {
       console.error(err);
       toast.error(`Failed to upload ${type}`, { id: loadingToast });

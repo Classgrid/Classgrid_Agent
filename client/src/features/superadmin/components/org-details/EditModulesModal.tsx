@@ -112,7 +112,7 @@ export function EditModulesModal({ profile, orgId }: { profile: any; orgId: stri
   const mutation = useMutation({
     mutationFn: () => organizationControlCenterApi.updateOrganizationConfig(orgId, { featureFlags: flags, limits }),
     onSuccess: () => {
-      toast.success("Modules updated successfully");
+      toast.success("Modules updated");
       qc.invalidateQueries({ queryKey: ["super-admin", "org-full-profile", orgId] });
       setOpen(false);
     },

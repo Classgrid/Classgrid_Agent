@@ -53,7 +53,7 @@ export function WhatsappConfigModal({ isOpen, onClose, onSuccess, backendUrl }: 
       const data = await res.json();
 
       if (res.ok && data.success) {
-        toast.success("WhatsApp Meta credentials verified successfully!");
+        toast.success("WhatsApp Meta credentials verified!");
         onSuccess();
         onClose();
       } else {

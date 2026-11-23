@@ -52,7 +52,7 @@ export function SanityConfigModal({ isOpen, onClose, onSuccess, backendUrl }: Sa
       const data = await res.json();
 
       if (res.ok && data.success) {
-        toast.success("Sanity credentials verified successfully!");
+        toast.success("Sanity credentials verified!");
         onSuccess();
         onClose();
       } else {

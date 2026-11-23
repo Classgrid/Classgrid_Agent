@@ -218,7 +218,7 @@ const passportConfig = () => {
                 }
             )
         );
-        console.log("✅ GoogleStrategy successfully registered with Passport");
+        console.log("✅ GoogleStrategy registered with Passport");
 
         passport.use(
             'google-chat',
@@ -276,7 +276,7 @@ const passportConfig = () => {
                 }
             )
         );
-        console.log("✅ GoogleStrategy (Chat) successfully registered with Passport");
+        console.log("✅ GoogleStrategy (Chat) registered with Passport");
     } else {
         console.error("❌ CRITICAL ERROR: process.env.GOOGLE_CLIENT_ID is missing!");
         console.error("❌ Passport skipped registering the Google Strategy.");
@@ -352,7 +352,7 @@ const passportConfig = () => {
                 }
             )
         );
-        console.log("✅ GitHubStrategy (Chat) successfully registered with Passport");
+        console.log("✅ GitHubStrategy (Chat) registered with Passport");
         if (process.env.GITHUB_RESCUE_CLIENT_ID && process.env.GITHUB_RESCUE_CLIENT_SECRET) {
             passport.use(
                 'github-chat-rescue',
@@ -367,7 +367,7 @@ const passportConfig = () => {
                     passport._strategy('github-chat')._verify
                 )
             );
-            console.log("✅ GitHubStrategy (Rescue) successfully registered with Passport");
+            console.log("✅ GitHubStrategy (Rescue) registered with Passport");
         }
     } else {
         console.error("❌ CRITICAL ERROR: process.env.GITHUB_CLIENT_ID is missing!");

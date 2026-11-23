@@ -179,7 +179,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["group-info", groupId] });
       queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
-      toast.success("Members added successfully!");
+      toast.success("Members added!");
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.error || "Failed to add members");
@@ -218,7 +218,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
     mutationFn: () => deleteGroup(groupId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["chat-threads"] });
-      toast.success("Group deleted successfully");
+      toast.success("Group deleted");
       onClose();
       onLeaveGroup?.();
     },
@@ -233,7 +233,7 @@ export function GroupSettingsModal({ groupId, onClose, onLeaveGroup, onUserClick
       toggleAdminRole(groupId, userId, role),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["group-info", groupId] });
-      toast.success("Role updated successfully");
+      toast.success("Role updated");
     },
     onError: (err: any) => {
       toast.error(err?.response?.data?.error || "Failed to update role");

@@ -96,7 +96,7 @@ export const handleManualProvisioning = async (req, res) => {
         if (io) io.emit("platform_analytics_updated");
 
         res.status(201).json({
-            message: "Tenant provisioned successfully",
+            message: "Tenant provisioned",
             data: result
         });
 

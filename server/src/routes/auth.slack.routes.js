@@ -216,7 +216,7 @@ router.delete("/disconnect", isAuthenticated, async (req, res) => {
         user.slack_email = null;
         await user.save();
 
-        res.json({ message: "Slack disconnected successfully" });
+        res.json({ message: "Slack disconnected" });
     } catch (error) {
         res.status(500).json({ message: "Error disconnecting Slack", error: error.message });
     }

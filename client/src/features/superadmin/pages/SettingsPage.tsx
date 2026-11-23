@@ -130,7 +130,7 @@ export function SettingsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["superadmin-settings"] });
       queryClient.invalidateQueries({ queryKey: ["global-profile"] });
-      toast.success("Settings saved successfully.");
+      toast.success("Settings saved.");
     },
     onError: () => {
       toast.error("Failed to save settings. Please try again.");

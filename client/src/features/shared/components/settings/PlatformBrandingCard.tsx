@@ -124,7 +124,7 @@ export function PlatformBrandingCard() {
       if (!response.ok) throw new Error(`Upload failed`);
 
       await updateProfile.mutateAsync({ platformLogo: data.publicUrl });
-      toast.success(`Platform Logo updated successfully!`, { id: loadingToast });
+      toast.success(`Platform Logo updated!`, { id: loadingToast });
       setCropOpen(false);
     } catch (err) {
       console.error(err);
@@ -136,7 +136,7 @@ export function PlatformBrandingCard() {
     const loadingToast = toast.loading(`Removing Platform Logo...`);
     try {
       await updateProfile.mutateAsync({ platformLogo: "" });
-      toast.success(`Platform Logo removed successfully!`, { id: loadingToast });
+      toast.success(`Platform Logo removed!`, { id: loadingToast });
     } catch (error) {
       toast.error(`Failed to remove logo`, { id: loadingToast });
     }

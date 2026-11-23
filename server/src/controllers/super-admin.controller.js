@@ -1294,7 +1294,7 @@ export const deleteDemoLead = async (req, res) => {
         if (!lead) {
             return res.status(404).json({ success: false, message: "Lead not found" });
         }
-        return res.json({ success: true, message: "Demo lead deleted successfully" });
+        return res.json({ success: true, message: "Demo lead deleted" });
     } catch (err) {
         console.error("[SuperAdmin] deleteDemoLead error:", err.message);
         return res.status(500).json({ success: false, message: "Failed to delete demo lead" });
@@ -1351,7 +1351,7 @@ export const cleanLogs = async (req, res) => {
 
         res.json({
             success: true,
-            message: "Logs cleaned successfully",
+            message: "Logs cleaned",
             output: stdout,
             errors: stderr
         });
@@ -1488,7 +1488,7 @@ export const deleteOrganization = async (req, res) => {
         // 4. Delete the organization
         await Organization.findByIdAndDelete(id);
 
-        res.json({ success: true, message: 'Organization deleted successfully' });
+        res.json({ success: true, message: 'Organization deleted' });
     } catch (err) {
         console.error('[SuperAdmin] deleteOrganization error:', err.message);
         res.status(500).json({ success: false, message: 'Server error' });
@@ -1522,7 +1522,7 @@ export const updateOrganizationStatus = async (req, res) => {
             io.emit("superadmin:org_updated", { orgId: id });
         }
 
-        res.json({ success: true, message: 'Organization status updated successfully', organization: org });
+        res.json({ success: true, message: 'Organization status updated', organization: org });
     } catch (err) {
         console.error('[SuperAdmin] updateOrganizationStatus error:', err.message);
         res.status(500).json({ success: false, message: 'Server error' });

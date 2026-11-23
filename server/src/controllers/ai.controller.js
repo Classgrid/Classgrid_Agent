@@ -131,7 +131,7 @@ export const indexMaterial = async (req, res) => {
 
         if (error) throw error;
 
-        res.json({ message: "Material indexed successfully", chunks: chunks.length });
+        res.json({ message: "Material indexed", chunks: chunks.length });
     } catch (err) {
         console.error("[AI Controller] Index error:", err);
         res.status(500).json({ message: "Indexing failed", error: err.message });

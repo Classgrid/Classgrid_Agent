@@ -293,7 +293,7 @@ export const updateBillingSettings = async (req, res) => {
             { $set: { "billing_settings.invoice_email": invoice_email, "billing_settings.state": state, "billing_settings.address": address } },
             { returnDocument: 'after', runValidators: true }
         );
-        return res.json({ message: "Settings updated successfully.", settings: org?.billing_settings || {} });
+        return res.json({ message: "Settings updated.", settings: org?.billing_settings || {} });
     } catch (error) {
         console.error("[UpdateBillingSettings] Error:", error.message);
         return res.status(500).json({ message: "Unable to update billing settings." });
@@ -353,7 +353,7 @@ export const sendBillingEmailVerification = async (req, res) => {
             fromEmail: "billing@classgrid.in"
         });
         
-        return res.json({ message: "Verification email sent successfully." });
+        return res.json({ message: "Verification email sent." });
     } catch (error) {
         console.error("[SendEmailVerification] Error:", error);
         return res.status(500).json({ message: "Unable to send verification email." });
@@ -381,7 +381,7 @@ export const verifyBillingEmail = async (req, res) => {
         org.billing_settings.verification_token = "";
         await org.save();
         
-        return res.json({ message: "Email verified successfully.", billingSettings: org.billing_settings });
+        return res.json({ message: "Email verified.", billingSettings: org.billing_settings });
     } catch (error) {
         console.error("[VerifyEmail] Error:", error);
         return res.status(500).json({ message: "Unable to verify email." });
@@ -405,7 +405,7 @@ export const sendBillingPhoneOtp = async (req, res) => {
         org.billing_settings.verification_expires_at = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
         await org.save();
         
-        return res.json({ message: "OTP sent successfully." });
+        return res.json({ message: "OTP sent." });
     } catch (error) {
         console.error("[SendPhoneOTP] Error:", error);
         return res.status(500).json({ message: "Unable to send OTP." });
@@ -433,7 +433,7 @@ export const verifyBillingPhoneOtp = async (req, res) => {
         org.billing_settings.verification_otp = "";
         await org.save();
         
-        return res.json({ message: "Phone verified successfully.", billingSettings: org.billing_settings });
+        return res.json({ message: "Phone verified.", billingSettings: org.billing_settings });
     } catch (error) {
         console.error("[VerifyPhoneOTP] Error:", error);
         return res.status(500).json({ message: "Unable to verify OTP." });
@@ -506,7 +506,7 @@ export const updateOrganizationBillingSettings = async (req, res) => {
             req.body
         );
 
-        return res.json({ message: "Billing settings updated successfully.", billingSettings: org.billing_settings, fees_razorpay_key_id: org.fees_razorpay_key_id, has_fees_razorpay_key_secret: !!org.fees_razorpay_key_secret, has_fees_razorpay_webhook_secret: !!org.fees_razorpay_webhook_secret });
+        return res.json({ message: "Billing settings updated.", billingSettings: org.billing_settings, fees_razorpay_key_id: org.fees_razorpay_key_id, has_fees_razorpay_key_secret: !!org.fees_razorpay_key_secret, has_fees_razorpay_webhook_secret: !!org.fees_razorpay_webhook_secret });
     } catch (error) {
         console.error("[UpdateBillingSettings] Error:", error);
         return res.status(500).json({ message: "Unable to update billing settings." });

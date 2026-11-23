@@ -117,7 +117,7 @@ router.post("/", async (req, res) => {
         });
 
         await review.save();
-        res.status(201).json({ message: "Review posted successfully", review });
+        res.status(201).json({ message: "Review posted", review });
     } catch (err) {
         console.error("Post review error:", err);
         res.status(500).json({ message: "Server error" });
@@ -148,7 +148,7 @@ router.post("/feedback", isAuthenticated, async (req, res) => {
         });
 
         await review.save();
-        res.status(201).json({ message: "Feedback submitted successfully" });
+        res.status(201).json({ message: "Feedback submitted" });
     } catch (err) {
         console.error("Post feedback error:", err);
         res.status(500).json({ message: "Server error" });

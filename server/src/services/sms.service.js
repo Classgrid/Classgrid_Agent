@@ -124,7 +124,7 @@ export const sendSMS = async (phoneNumber, message) => {
         });
 
         const response = await snsClient.send(command);
-        console.log(`✅ SMS successfully delivered to ${formattedNumber} (MessageId: ${response.MessageId})`);
+        console.log(`✅ SMS delivered to ${formattedNumber} (MessageId: ${response.MessageId})`);
         return { success: true, data: response, messageId: response.MessageId };
     } catch (error) {
         console.error('❌ SMS transmission failed:', error.message);

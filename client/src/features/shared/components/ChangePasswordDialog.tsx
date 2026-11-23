@@ -128,7 +128,7 @@ export function ChangePasswordDialog({ open, onOpenChange }: ChangePasswordDialo
             </div>
           ) : success ? (
             <div className="p-4 bg-success/10 text-success rounded-lg border border-success/20 text-sm font-medium text-center">
-              Password updated successfully!
+              Password updated!
             </div>
           ) : (
             <form onSubmit={handleSubmit} className="flex flex-col gap-4">

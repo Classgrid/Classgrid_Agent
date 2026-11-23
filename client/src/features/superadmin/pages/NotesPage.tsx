@@ -954,7 +954,7 @@ export function NotesPage() {
               togglePin.mutate(activeNote._id, {
                 onSuccess: (updatedNote) => {
                   setActiveNote(updatedNote);
-                  toast.success(updatedNote.isPinned ? "Note pinned successfully" : "Note unpinned successfully");
+                  toast.success(updatedNote.isPinned ? "Note pinned" : "Note unpinned");
                 }
               });
             }}
@@ -980,7 +980,7 @@ export function NotesPage() {
               { id: activeNote._id, title: v.title, content: v.content, tags: v.tags, category: v.category, icon: v.icon, visibility: v.visibility },
               {
                 onSuccess: (updated) => {
-                  toast.success("Version restored successfully");
+                  toast.success("Version restored");
                   setActiveNote(updated);
                   setRestoreVersion(null);
                 },
@@ -1003,7 +1003,7 @@ export function NotesPage() {
           onConfirm={() => {
             deleteNote.mutate(activeNote._id, {
               onSuccess: () => {
-                toast.success("Note deleted successfully");
+                toast.success("Note deleted");
                 setActiveNote(null);
                 setShowDeleteConfirm(false);
               }

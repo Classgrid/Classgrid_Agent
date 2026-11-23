@@ -186,7 +186,7 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
 
       if (res.data.success && res.data.schedule) {
         setSchedule(res.data.schedule);
-        toast.success("Schedule updated successfully");
+        toast.success("Schedule updated");
       }
     } catch (err: any) {
       console.error("Failed to update schedule:", err);
@@ -376,7 +376,7 @@ export const ScheduleDetailPage: React.FC<{ id?: string }> = ({ id: propId }) =>
             )}
             {schedule.status === "sent" && (
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                Task was completed successfully at the scheduled time.
+                Task was completed at the scheduled time.
               </p>
             )}
           </section>

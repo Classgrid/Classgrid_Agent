@@ -40,7 +40,7 @@ export function ResetOrganizationDailyLimit({ orgId, orgName }: ResetOrganizatio
       
       resetMutation.mutate(orgId, {
         onSuccess: () => {
-          toast.success(`Usage for ${orgName} has been reset successfully.`);
+          toast.success(`Usage for ${orgName} has been reset.`);
           setOpen(false);
           setSecurityCode("");
           setResetAmount(5000);

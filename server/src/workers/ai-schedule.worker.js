@@ -68,7 +68,7 @@ cron.schedule('* * * * *', async () => {
         );
         if (!claimed) continue;
 
-        console.log(`[AiSchedule Worker] Successfully marked schedule ${schedule._id} as sent for ${schedule.user_email}${next ? ` (next run ${next.toISOString()})` : ''}`);
+        console.log(`[AiSchedule Worker] marked schedule ${schedule._id} as sent for ${schedule.user_email}${next ? ` (next run ${next.toISOString()})` : ''}`);
 
         try {
           const { getIO } = await import('../services/socket.service.js');

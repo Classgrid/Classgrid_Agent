@@ -27,7 +27,7 @@ export function RemoveUserGrantedCredits({ userId, transactionId }: { userId: st
     setIsLoading(true);
     try {
       await apiClient.post(`/api/super-admin/ai-usage/users/${userId}/credits/${transactionId}/remove`);
-      toast.success("Granted credits removed successfully.");
+      toast.success("Granted credits removed.");
       queryClient.invalidateQueries({ queryKey: ["aiUsage", "user", userId] });
       queryClient.invalidateQueries({ queryKey: ["aiUsage"] });
       setIsDialogOpen(false);

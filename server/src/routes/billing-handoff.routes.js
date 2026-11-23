@@ -325,7 +325,7 @@ router.post("/resend-otp", generalLimiter, async (req, res) => {
             idempotencyKey: `payment-otp:${handoff._id}:resend:${handoff.resendCount}`,
         });
 
-        return res.json({ success: true, message: "OTP resent successfully" });
+        return res.json({ success: true, message: "OTP resent" });
     } catch (error) {
         return publicError(res, error);
     }

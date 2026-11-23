@@ -111,7 +111,7 @@ export function useDeleteLead() {
     mutationFn: (id: string) => leadsApi.delete(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: LEADS_KEY });
-      toast.success("Lead deleted successfully");
+      toast.success("Lead deleted");
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.message || "Failed to delete lead");
@@ -146,7 +146,7 @@ export function useUpdateLeadNotes() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: LEADS_KEY });
-      toast.success("Saved successfully", { id: "save-lead-update" });
+      toast.success("Saved", { id: "save-lead-update" });
     },
     onError: (err: any, variables, context: any) => {
       if (context?.previous) {

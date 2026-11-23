@@ -123,7 +123,7 @@ export const resetCredits = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid targetType" });
         }
 
-        res.status(200).json({ success: true, message: "Credits reset successfully" });
+        res.status(200).json({ success: true, message: "Credits reset" });
     } catch (error) {
         console.error("Error resetting credits:", error);
         res.status(500).json({ success: false, message: "Server error" });
@@ -150,7 +150,7 @@ export const toggleBlockAi = async (req, res) => {
             return res.status(400).json({ success: false, message: "Invalid targetType" });
         }
 
-        res.status(200).json({ success: true, message: `AI access ${block ? 'blocked' : 'unblocked'} successfully` });
+        res.status(200).json({ success: true, message: `AI access ${block ? 'blocked' : 'unblocked'}` });
     } catch (error) {
         console.error("Error toggling AI block:", error);
         res.status(500).json({ success: false, message: "Server error" });

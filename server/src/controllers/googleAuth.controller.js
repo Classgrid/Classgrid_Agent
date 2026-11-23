@@ -123,7 +123,7 @@ const sendFirstGoogleLoginEmail = async (user) => {
 
         await sendEmail({
             to: user.email,
-            subject: "🎉 Welcome to Classgrid - Account Created Successfully",
+            subject: "🎉 Welcome to Classgrid - Account Created",
             channel: "notification",
             html: html,
             text: text,
@@ -225,7 +225,7 @@ export const googleCallback = async (req, res) => {
             });
 
             await user.save();
-            console.log("✅ Google user created successfully");
+            console.log("✅ Google user created");
 
             // Send welcome email (non-blocking)
             sendFirstGoogleLoginEmail(user);

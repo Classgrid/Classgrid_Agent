@@ -731,7 +731,7 @@ export async function listObjects(req, res) {
             }
         );
 
-        return sendSuccess(res, "Files and folders retrieved successfully.", {
+        return sendSuccess(res, "Files and folders retrieved.", {
             folders,
             files,
             nextCursor: result.IsTruncated ? (result.NextContinuationToken || null) : null,
@@ -759,7 +759,7 @@ export async function uploadFile(req, res) {
         auditStorageAction(req, "upload", key);
         emitStorageUpdated("upload");
         
-        return sendSuccess(res, "File uploaded successfully.", {
+        return sendSuccess(res, "File uploaded.", {
             key,
             cdnUrl: buildCdnUrl(key),
             size: req.file.size,
@@ -799,7 +799,7 @@ export async function getPresignedUploadUrl(req, res) {
         // Generate a presigned URL valid for 15 minutes
         const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 900 });
 
-        return sendSuccess(res, "Presigned URL generated successfully.", {
+        return sendSuccess(res, "Presigned URL generated.", {
             presignedUrl,
             key,
             cdnUrl: buildCdnUrl(key)
@@ -860,7 +860,7 @@ export async function deleteObject(req, res) {
         invalidateStorageAnalyticsCache();
         auditStorageAction(req, "delete", key);
         emitStorageUpdated("delete");
-        return sendSuccess(res, "File or folder deleted successfully.", {
+        return sendSuccess(res, "File or folder deleted.", {
             deletedKey: key,
         });
     } catch (error) {
@@ -919,7 +919,7 @@ export async function deleteObjects(req, res) {
         invalidateStorageAnalyticsCache();
         auditStorageAction(req, "bulk-delete", keys);
         emitStorageUpdated("bulk-delete");
-        return sendSuccess(res, "Files or folders deleted successfully.", {
+        return sendSuccess(res, "Files or folders deleted.", {
             deletedCount,
         });
     } catch (error) {
@@ -946,7 +946,7 @@ export async function createFolder(req, res) {
         invalidateStorageAnalyticsCache();
         auditStorageAction(req, "create-folder", folderKey);
         emitStorageUpdated("create-folder");
-        return sendSuccess(res, "Folder created successfully.", {
+        return sendSuccess(res, "Folder created.", {
             folderKey,
         });
     } catch (error) {
@@ -969,7 +969,7 @@ export async function getPresignedUrl(req, res) {
             { expiresIn: STORAGE_PRESIGNED_URL_EXPIRY_SECONDS },
         );
 
-        return sendSuccess(res, "Temporary download URL generated successfully.", {
+        return sendSuccess(res, "Temporary download URL generated.", {
             downloadUrl,
             expiresIn: "1 hour",
         });
@@ -988,7 +988,7 @@ export async function getObjectMetadata(req, res) {
             Key: key,
         }));
 
-        return sendSuccess(res, "File or folder metadata retrieved successfully.", {
+        return sendSuccess(res, "File or folder metadata retrieved.", {
             key,
             size: metadata.ContentLength || 0,
             contentType: metadata.ContentType || inferContentType(key),
@@ -1068,7 +1068,7 @@ export async function renameObject(req, res) {
         auditStorageAction(req, "rename", [sourceKey, destinationKey]);
         emitStorageUpdated("rename");
         
-        return sendSuccess(res, "File or folder renamed successfully.", {
+        return sendSuccess(res, "File or folder renamed.", {
             newKey: destinationKey,
             cdnUrl: buildCdnUrl(destinationKey),
         });
@@ -1089,7 +1089,7 @@ export async function getStorageConfiguration(req, res) {
         const configuration = await getSafeStorageConfiguration();
         return sendSuccess(
             res,
-            "Storage configuration retrieved successfully.",
+            "Storage configuration retrieved.",
             configuration,
         );
     } catch (error) {
@@ -1123,7 +1123,7 @@ export async function getStorageAnalyticsSummary(req, res) {
         const forceRefresh = parseBooleanQuery(req.query?.refresh, "refresh");
         const snapshot = await getStorageAnalyticsSnapshot({ forceRefresh });
 
-        return sendSuccess(res, "Storage analytics summary retrieved successfully.", {
+        return sendSuccess(res, "Storage analytics summary retrieved.", {
             ...snapshot.summary,
             ...analyticsSnapshotMetadata(snapshot),
         });
@@ -1202,7 +1202,7 @@ export async function getStorageAnalyticsFiles(req, res) {
                 totalStorageSize,
             ));
 
-        return sendSuccess(res, "Storage file analytics retrieved successfully.", {
+        return sendSuccess(res, "Storage file analytics retrieved.", {
             files,
             nextCursor: endOffset < matchingFiles.length
                 ? encodeAnalyticsCursor(endOffset, signature)
@@ -1223,7 +1223,7 @@ export async function getStorageAnalyticsBreakdown(req, res) {
         const forceRefresh = parseBooleanQuery(req.query?.refresh, "refresh");
         const snapshot = await getStorageAnalyticsSnapshot({ forceRefresh });
 
-        return sendSuccess(res, "Storage breakdown retrieved successfully.", {
+        return sendSuccess(res, "Storage breakdown retrieved.", {
             ...snapshot.breakdown,
             ...analyticsSnapshotMetadata(snapshot),
         });

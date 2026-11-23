@@ -571,7 +571,7 @@ router.delete("/meet/:id", isAuthenticated, requireRole("faculty", "org_admin"),
              throw new Error("Failed to remove meeting from local database.");
         }
 
-        res.json({ message: "Meeting cancelled successfully" });
+        res.json({ message: "Meeting cancelled" });
 
     } catch (err) {
         console.error("Cancel zoom error:", err);

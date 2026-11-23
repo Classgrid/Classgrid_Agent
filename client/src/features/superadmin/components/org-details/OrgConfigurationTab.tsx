@@ -132,7 +132,7 @@ export function OrgConfigurationTab({ profile }: OrgConfigurationTabProps) {
     setIsDeleting(true);
     try {
       await organizationControlCenterApi.deleteOrganization(profile._id);
-      toast.success("Organization successfully deleted.");
+      toast.success("Organization deleted.");
       setTimeout(() => window.location.href = "/superadmin/orgs", 1500);
     } catch (err: any) {
       toast.error(err.response?.data?.message || "Failed to delete organization.");

@@ -265,7 +265,7 @@ export function TestFullScreenLoginPage({ preferredRole }: { preferredRole?: Aut
     try {
       const result = await resendDeviceOtp(email.trim());
       setOtpCooldownSeconds(60);
-      setFeedback({ message: result.message || "OTP sent successfully.", tone: "info" });
+      setFeedback({ message: result.message || "OTP sent.", tone: "info" });
     } catch (error: any) {
       setOtpCooldownSeconds(error?.retryAfterSeconds || 60);
       setFeedback({ message: error?.message || "Could not resend OTP.", tone: "error" });

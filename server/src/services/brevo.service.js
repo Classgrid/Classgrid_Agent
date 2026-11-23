@@ -211,7 +211,7 @@ export const sendEmail = async ({ to, subject, html, text, channel, fromName, fr
       });
     }
 
-    accessLogger.info(`Email sent successfully via ${channel || 'noreply'}`, {
+    accessLogger.info(`Email sent via ${channel || 'noreply'}`, {
       provider,
       channel: channel || 'noreply',
       to,

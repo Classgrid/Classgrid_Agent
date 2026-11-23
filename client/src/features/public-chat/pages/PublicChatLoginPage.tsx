@@ -1201,7 +1201,7 @@ function LoginContent() {
                      <Check className="h-8 w-8" strokeWidth={3} />
                    </div>
                    <div className="text-center space-y-1">
-                     <p className="text-[15px] font-semibold text-emerald-600 dark:text-emerald-500">OTP Verified Successfully</p>
+                     <p className="text-[15px] font-semibold text-emerald-600 dark:text-emerald-500">OTP Verified</p>
                      <p className="text-[13px] font-medium text-slate-500 dark:text-[#888888]">{email}</p>
                    </div>
                  </div>

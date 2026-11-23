@@ -38,7 +38,7 @@ export function ExtendUserGrantedCredits({ userId, currentExpiry }: { userId: st
     setIsLoading(true);
     try {
       await aiUsageApi.extendCredits(userId, selectedDate.toISOString());
-      toast.success("Granted credits expiration extended successfully.");
+      toast.success("Granted credits expiration extended.");
       queryClient.invalidateQueries({ queryKey: ["aiUsage", "user", userId] });
       queryClient.invalidateQueries({ queryKey: ["aiUsage"] });
       queryClient.invalidateQueries({ queryKey: ["ai-usage-user"] });

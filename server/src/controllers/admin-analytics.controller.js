@@ -929,7 +929,7 @@ export const verifySaasInvoicePayment = async (req, res) => {
                 return res.status(404).json({ success: false, message: "Invoice not found" });
             }
 
-            res.json({ success: true, message: "Payment verified successfully" });
+            res.json({ success: true, message: "Payment verified" });
         } else {
             res.status(400).json({ success: false, message: "Invalid signature" });
         }

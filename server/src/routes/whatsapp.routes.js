@@ -79,7 +79,7 @@ router.post("/connect", isAuthenticated, async (req, res) => {
         user.markModified('metadata');
         await user.save();
 
-        res.json({ success: true, message: "WhatsApp connected successfully!" });
+        res.json({ success: true, message: "WhatsApp connected!" });
 
     } catch (err) {
         console.error("WhatsApp Connect Error:", err);

@@ -1,5 +1,5 @@
 // What a connected app's step says in the chat, the way the launch video shows it: "Checked your calendar" with the
-// app's name in grey after it ("Google Calendar") and the app's icon, instead of "Successfully used Google Workspace
+// app's name in grey after it ("Google Calendar") and the app's icon, instead of "Used Google Workspace
 // to list events" (owner, 2026-11-12). One line per operation; an operation not listed here falls back to the
 // described step ("Found 2 events: …") or the plain "Used …" line.
 

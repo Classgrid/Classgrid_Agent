@@ -115,7 +115,7 @@ export const updateStudentCompliance = async (req, res) => {
 
         res.json({
             success: true,
-            message: updated ? "Compliance information updated successfully." : "No changes made or fields already filled.",
+            message: updated ? "Compliance information updated." : "No changes made or fields already filled.",
             user: {
                 abc_id: user.abc_id,
                 anti_ragging_undertaking_no: user.anti_ragging_undertaking_no,
@@ -214,7 +214,7 @@ export const bulkUpdateCompliance = async (req, res) => {
 
         res.json({
             success: true,
-            message: `Successfully updated ${successCount} student records.`,
+            message: `Updated ${successCount} student records.`,
             failed_updates: diffList
         });
 

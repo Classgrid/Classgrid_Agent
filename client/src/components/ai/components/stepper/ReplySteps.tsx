@@ -9,7 +9,7 @@ import { ThoughtStepView } from "./ThoughtStepView";
 import { TerminalToolView } from "./TerminalToolView";
 import { MasterWorkflowWrapper } from "./MasterWorkflowWrapper";
 import { ToolResultStep } from "./tool-results/ToolResultStep";
-import { describeStep } from "./tool-results/describeStep";
+import { describeStep, plainStep } from "./tool-results/describeStep";
 import { connectorWording, INVERT_IN_DARK } from "./tool-results/connectorWording";
 
 // A connected app's step line, like the launch video: the app's logo, what the step did, the app's name in grey
@@ -444,31 +444,15 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
           return;
         }
 
-        // Generic fallback
-        let dynamicText = `Successfully used ${step.tool.replace(/_/g, ' ')}`;
-        let loadingText = `Using ${step.tool.replace(/_/g, ' ')}...`;
-
-        if (step.tool === 'notion_connector' && step.args?.operation) {
-          if (step.args.operation === 'search' && step.args.query) {
-            dynamicText = `Searched Notion for "${step.args.query}"`;
-            loadingText = `Searching Notion for "${step.args.query}"...`;
-          } else {
-            dynamicText = `Successfully used Notion to ${step.args.operation.replace(/_/g, ' ')}`;
-            loadingText = `Using Notion to ${step.args.operation.replace(/_/g, ' ')}...`;
-          }
-        } else if (step.tool === 'google_workspace_connector' && step.args?.operation) {
-          dynamicText = `Successfully used Google Workspace to ${step.args.operation.replace(/_/g, ' ')}`;
-          loadingText = `Using Google Workspace to ${step.args.operation.replace(/_/g, ' ')}...`;
-        } else if (step.tool === 'zoom_connector' && step.args?.operation) {
-          dynamicText = `Successfully used Zoom to ${step.args.operation.replace(/_/g, ' ')}`;
-          loadingText = `Using Zoom to ${step.args.operation.replace(/_/g, ' ')}...`;
-        }
-
         // Say what the step actually did and found ("Found 5 classroom assignments: …")
         const described = describeStep(step.tool, step.args, step.result, step.status);
         // A connected app: its logo and name on the line (the words stay the described ones, "Found 2 events: …")
         const wording = connectorWording(step.tool, step.args, step.status);
-        const line = described ?? wording?.text ?? (step.status === 'success' ? dynamicText : loadingText);
+        // A step with no words of its own: its own name said plainly, the app's operation for a connected app
+        // ("Appending block children in Notion..."). Never one fixed line for every tool (owner, 2026-11-23).
+        const opApp = ({ notion_connector: 'Notion', google_workspace_connector: 'Google Workspace', zoom_connector: 'Zoom' } as Record<string, string>)[step.tool];
+        const plain = opApp && step.args?.operation ? plainStep(String(step.args.operation), step.status, ` in ${opApp}`) : plainStep(step.tool, step.status);
+        const line = described ?? wording?.text ?? plain;
         elements.push(
           <ToolResultStep
             key={step.id}

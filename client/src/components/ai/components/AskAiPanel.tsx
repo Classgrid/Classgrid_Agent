@@ -4738,7 +4738,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     // user is typing, their files and pasted text stay in the chat box for their own next message
     const hiddenSend = !!options?.hidden;
     const sentPasted = hiddenSend ? [] : pastedTexts;
-    // Only send files that successfully uploaded
+    // Only send files that uploaded
     const filesToUpload = (hiddenSend ? [] : attachedFiles)
       .filter(f => f.status === "done" && f.url)
       .map(f => ({

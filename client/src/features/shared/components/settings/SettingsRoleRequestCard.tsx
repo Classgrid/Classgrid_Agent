@@ -111,7 +111,7 @@ export function SettingsRoleRequestCard() {
       });
 
       if (res.data?.instant_approval) {
-        toast.success("Role added successfully!");
+        toast.success("Role added!");
         qc.invalidateQueries({ queryKey: ["current-user"] });
         qc.invalidateQueries({ queryKey: ["orgAdmin", "roles"] });
       } else {

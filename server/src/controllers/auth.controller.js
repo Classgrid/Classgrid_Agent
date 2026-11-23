@@ -968,7 +968,7 @@ export const activateAdmin = async (req, res) => {
             const dashboardTarget = `${protocol}${tenantDomain}/admin/dashboard`;
 
             return res.status(200).json({
-                message: "Onboarding successfully submitted. Pending dashboard entry.",
+                message: "Onboarding submitted. Pending dashboard entry.",
                 token: provisionalToken,
                 redirectTo: dashboardTarget,
                 provisional: true,
@@ -1166,7 +1166,7 @@ export const activateAdmin = async (req, res) => {
         }
 
         res.status(200).json({
-            message: "Account activated successfully",
+            message: "Account activated",
             token: jwtToken,
             redirectTo: dashboardTarget,
             user: {
@@ -1331,7 +1331,7 @@ export const finalizeOnboarding = async (req, res) => {
         setTokenCookie(res, jwtToken, req);
         
         return res.status(200).json({
-            message: "Onboarding finalized successfully",
+            message: "Onboarding finalized",
             token: jwtToken,
             user: {
                 id: newUser._id,
@@ -1997,7 +1997,7 @@ export const completeSignup = async (req, res) => {
         const needsOrgCode = ['faculty', 'teacher'].includes(user.role) && !user.organization_id;
 
         res.json({
-            message: "Account created successfully",
+            message: "Account created",
             token: jwtToken,
             firstLogin: true,
             needsOrgCode,
@@ -2396,7 +2396,7 @@ export const facultyActivate = async (req, res) => {
         }
 
         res.json({
-            message: "Faculty account activated successfully. You are now linked to your organization."
+            message: "Faculty account activated. You are now linked to your organization."
         });
 
     } catch (err) {
@@ -2439,7 +2439,7 @@ export const logout = async (req, res) => {
     const redirectPath = "/login";
 
     res.json({
-        message: "Logged out successfully",
+        message: "Logged out",
         redirect: redirectPath
     });
 };
@@ -2526,7 +2526,7 @@ export const setupOrgAdmin = async (req, res) => {
         setTokenCookie(res, token, req);
 
         res.status(200).json({
-            message: "Account activated successfully",
+            message: "Account activated",
             token,
             user: {
                 id: user._id,
@@ -2651,7 +2651,7 @@ export const forceResetPassword = async (req, res) => {
 
         await user.save();
 
-        res.json({ message: "Password updated successfully. You can now access your dashboard." });
+        res.json({ message: "Password updated. You can now access your dashboard." });
     } catch (err) {
         console.error("Force Reset Password Error:", err);
         res.status(500).json({ message: "Server error updating password." });
@@ -2725,7 +2725,7 @@ export const resendDeviceOtp = async (req, res) => {
             return res.status(500).json({ message: "Failed to send OTP email" });
         }
 
-        res.json({ message: "OTP sent successfully." });
+        res.json({ message: "OTP sent." });
     } catch (err) {
         console.error("Resend OTP Error:", err);
         res.status(500).json({ message: "Server error" });
@@ -2945,7 +2945,7 @@ export const changePassword = async (req, res) => {
         user.password = await bcrypt.hash(newPassword, salt);
         await user.save();
 
-        res.json({ message: "Password updated successfully." });
+        res.json({ message: "Password updated." });
     } catch (err) {
         console.error("Change Password Error:", err);
         res.status(500).json({ message: "Server error." });
@@ -3051,7 +3051,7 @@ export const deleteAccount = async (req, res) => {
         const isProdEnv = process.env.NODE_ENV === "production";
         res.clearCookie("token", { httpOnly: true, secure: isProdEnv, sameSite: isProdEnv ? "None" : "Lax", path: "/" });
         if (isProdEnv) res.clearCookie("token", { httpOnly: true, secure: true, sameSite: "None", path: "/", domain: ".classgrid.in" });
-        res.json({ message: "Account deleted successfully." });
+        res.json({ message: "Account deleted." });
     } catch (err) {
         console.error("Delete Account Error:", err);
         res.status(500).json({ message: "Server error." });
@@ -3129,7 +3129,7 @@ export const sendOnboardingOtp = async (req, res) => {
             // await sendSMS(target, message);
         }
 
-        res.json({ message: "OTP sent successfully." });
+        res.json({ message: "OTP sent." });
     } catch (err) {
         console.error("Send Onboarding OTP Error:", err);
         res.status(500).json({ message: "Failed to send OTP. Please try again." });
@@ -3162,7 +3162,7 @@ export const verifyOnboardingOtp = async (req, res) => {
 
         // Success - clean up
         await OnboardingOTP.deleteOne({ _id: record._id });
-        res.json({ message: "Verified successfully.", verified: true });
+        res.json({ message: "Verified.", verified: true });
     } catch (err) {
         console.error("Verify Onboarding OTP Error:", err);
         res.status(500).json({ message: "Failed to verify OTP. Please try again." });
@@ -3353,7 +3353,7 @@ export const chatSendEmailOtp = async (req, res) => {
             text: getChatOtpEmailPlainText(otp)
         });
 
-        console.log(`[chatSendEmailOtp] ✅ OTP email sent successfully to ${email.toLowerCase()}`);
+        console.log(`[chatSendEmailOtp] ✅ OTP email sent to ${email.toLowerCase()}`);
         res.json({ message: 'OTP sent to email' });
     } catch (e) {
         console.error('chatSendEmailOtp Error:', e.message, e.stack);
@@ -3799,7 +3799,7 @@ export const chatSendWhatsAppOtp = async (req, res) => {
             }
         });
 
-        res.status(200).json({ message: "WhatsApp OTP sent successfully!" });
+        res.status(200).json({ message: "WhatsApp OTP sent!" });
     } catch (error) {
         console.error("WhatsApp API Error:", error.response?.data || error.message);
         res.status(500).json({ 
@@ -3829,7 +3829,7 @@ export const chatVerifyWhatsAppOtp = async (req, res) => {
         verification.isUsed = true;
         await verification.save();
 
-        res.status(200).json({ message: "WhatsApp phone verified successfully!" });
+        res.status(200).json({ message: "WhatsApp phone verified!" });
     } catch (error) {
         res.status(500).json({ message: "Server error verifying OTP." });
     }

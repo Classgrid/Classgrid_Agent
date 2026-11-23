@@ -506,7 +506,7 @@ export function OrgBrandingCard() {
 
       await updateBranding.mutateAsync(payload);
       
-      toast.success(`${type} updated successfully!`, { id: loadingToast });
+      toast.success(`${type} updated!`, { id: loadingToast });
       setCropOpen(false);
     } catch (err) {
       toast.error(`Failed to upload ${type}`, { id: loadingToast });
@@ -516,7 +516,7 @@ export function OrgBrandingCard() {
   const handleDeleteAsset = async (key: string) => {
     try {
       await updateBranding.mutateAsync({ [key]: null });
-      toast.success("Asset deleted successfully!");
+      toast.success("Asset deleted!");
     } catch (err) {
       toast.error("Failed to delete asset");
     }
@@ -532,7 +532,7 @@ export function OrgBrandingCard() {
       social_links: { ...currentLinks, [selectedPlatform]: platformUrl.trim() }
     });
     setPlatformUrl("");
-    toast.success("Social link added successfully!");
+    toast.success("Social link added!");
   };
 
   const handleRemoveSocialLink = async (key: string) => {
@@ -547,12 +547,12 @@ export function OrgBrandingCard() {
     await updateBranding.mutateAsync({
       social_links: { ...currentLinks, [key]: url.trim() }
     });
-    toast.success("Social link updated successfully!");
+    toast.success("Social link updated!");
   };
 
   const handleSaveIdentity = async (updates: Partial<BrandingData>, onSuccess: () => void) => {
     await updateBranding.mutateAsync(updates);
-    toast.success("Identity updated successfully!");
+    toast.success("Identity updated!");
     onSuccess();
   };
 
@@ -566,7 +566,7 @@ export function OrgBrandingCard() {
       return;
     }
     await updateBranding.mutateAsync({ brand_colors: payload });
-    toast.success("Theme colors updated successfully!");
+    toast.success("Theme colors updated!");
   };
 
   // UI Components

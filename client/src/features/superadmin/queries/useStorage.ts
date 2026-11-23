@@ -101,7 +101,7 @@ export function useUploadFile() {
         queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
         queryClient.invalidateQueries({ queryKey: storageKeys.analytics() });
       }, 3000);
-      toast.success("File uploaded successfully.");
+      toast.success("File uploaded.");
     },
     onError: (error: unknown) => {
       toast.error(storageErrorMessage(error, "Failed to upload file."));
@@ -119,7 +119,7 @@ export function useCreateFolder() {
         queryClient.invalidateQueries({ queryKey: storageKeys.lists() });
         queryClient.invalidateQueries({ queryKey: storageKeys.analytics() });
       }, 3000);
-      toast.success("Folder created successfully.");
+      toast.success("Folder created.");
     },
     onError: (error: unknown) => {
       toast.error(storageErrorMessage(error, "Failed to create folder."));
@@ -137,7 +137,7 @@ export function useDeleteObject() {
         queryClient.invalidateQueries({ queryKey: storageKeys.analytics() });
       }, 3000);
       const isFolder = key.endsWith('/');
-      toast.success(isFolder ? "Folder deleted successfully." : "File deleted successfully.");
+      toast.success(isFolder ? "Folder deleted." : "File deleted.");
     },
     onError: (error: unknown, key) => {
       const isFolder = key.endsWith('/');
@@ -158,9 +158,9 @@ export function useDeleteObjects() {
       const hasFiles = keys.some(k => !k.endsWith('/'));
       const hasFolders = keys.some(k => k.endsWith('/'));
       const count = keys.length;
-      let msg = `${count} items deleted successfully.`;
-      if (hasFiles && !hasFolders) msg = `${count} file${count !== 1 ? 's' : ''} deleted successfully.`;
-      else if (!hasFiles && hasFolders) msg = `${count} folder${count !== 1 ? 's' : ''} deleted successfully.`;
+      let msg = `${count} items deleted.`;
+      if (hasFiles && !hasFolders) msg = `${count} file${count !== 1 ? 's' : ''} deleted.`;
+      else if (!hasFiles && hasFolders) msg = `${count} folder${count !== 1 ? 's' : ''} deleted.`;
       toast.success(msg);
     },
     onError: (error: unknown) => {
@@ -179,7 +179,7 @@ export function useRenameObject() {
         queryClient.invalidateQueries({ queryKey: storageKeys.analytics() });
       }, 3000);
       const isFolder = sourceKey.endsWith('/');
-      toast.success(isFolder ? "Folder renamed successfully." : "File renamed successfully.");
+      toast.success(isFolder ? "Folder renamed." : "File renamed.");
     },
     onError: (error: unknown, { sourceKey }) => {
       const isFolder = sourceKey.endsWith('/');

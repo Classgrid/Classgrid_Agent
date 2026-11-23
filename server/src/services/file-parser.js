@@ -79,7 +79,7 @@ const require = createRequire(import.meta.url);
 // causing an immediate crash (ReferenceError: DOMMatrix is not defined).
 // By lazy-loading inside the function, we avoid crashing at cold start.
 
-// Cache the module once loaded successfully
+// Cache the module once loaded
 let pdfModule = null;
 
 export async function parsePDF(buffer) {

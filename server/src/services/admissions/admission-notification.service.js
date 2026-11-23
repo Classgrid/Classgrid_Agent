@@ -151,7 +151,7 @@ const TEMPLATES = {
             <div style="font-family:'Inter',Arial,sans-serif;max-width:600px;margin:0 auto;background:#0a0a0a;color:#e5e5e5;border-radius:12px;overflow:hidden;">
                 <div style="padding:32px;">
                     <p>Dear <strong>${name}</strong>,</p>
-                    <p>Your application to <strong>${orgName}</strong> has been successfully received.</p>
+                    <p>Your application to <strong>${orgName}</strong> has been received.</p>
                     <p>Application ID: <code>${extra.appId}</code></p>
                     <div style="margin-top: 24px; text-align: center;">
                         <a href="${extra.track_url}" style="display:inline-block;padding:12px 24px;background-color:#6366f1;color:white;text-decoration:none;border-radius:6px;font-weight:bold;">Track Application Status</a>

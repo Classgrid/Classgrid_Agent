@@ -219,7 +219,7 @@ export function TeamPage() {
   const removeMutation = useMutation({
     mutationFn: (id: string) => teamApi.removeMember(id),
     onSuccess: () => {
-      toast.success("Team member removed successfully.");
+      toast.success("Team member removed.");
       qc.invalidateQueries({ queryKey: ["superadmin-platform-team"] });
     },
     onError: (err: any) => {
@@ -288,8 +288,8 @@ export function TeamPage() {
             })
         ));
         
-        toast.success("Invitations sent successfully! Welcome emails have been dispatched.");
-        setFormResult({ success: true, message: "Invitations sent successfully! Welcome emails have been dispatched." });
+        toast.success("Invitations sent! Welcome emails have been dispatched.");
+        setFormResult({ success: true, message: "Invitations sent! Welcome emails have been dispatched." });
         setForms([EMPTY_FORM]);
         setActiveTab("pending-invitations");
         qc.invalidateQueries({ queryKey: ["superadmin-platform-team"] });

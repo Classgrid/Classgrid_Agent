@@ -81,7 +81,7 @@ export function RequiredPasswordResetPage() {
     },
     onSuccess: async (data) => {
       await queryClient.invalidateQueries({ queryKey: ["current-user"] });
-      toast.success(data.message || "Password updated successfully.");
+      toast.success(data.message || "Password updated.");
       const needsOrganization = ["faculty", "teacher"].includes(user?.role || "") && !user?.organization && !user?.organization_id;
       navigate(needsOrganization ? "/enter-org-code" : getRedirectPath(user?.role), { replace: true });
     },

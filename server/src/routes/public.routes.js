@@ -394,7 +394,7 @@ router.post("/request-demo", async (req, res) => {
       success: true,
       id: demoRequest._id.toString(),
       requestId: demoRequest._id.toString(),
-      message: "Demo request received successfully.",
+      message: "Demo request received.",
     });
   } catch (error) {
     console.error("[Public] Demo request error:", error);

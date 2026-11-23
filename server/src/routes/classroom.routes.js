@@ -259,7 +259,7 @@ router.post("/", isAuthenticated, requireRole("teacher", "faculty", "org_admin",
         const classroom = await Classroom.create(classroomData);
 
         res.status(201).json({
-            message: "Classroom created successfully",
+            message: "Classroom created",
             classroom,
         });
     } catch (err) {
@@ -296,7 +296,7 @@ router.put("/:id/cover", isAuthenticated, requireClassroomOwner, upload.single("
         classroom.coverImage = publicUrl;
         await classroom.save();
 
-        res.json({ message: "Banner updated successfully", coverImage: publicUrl });
+        res.json({ message: "Banner updated", coverImage: publicUrl });
     } catch (err) {
         console.error("Cover upload error:", err);
         res.status(500).json({ message: "Server error uploading banner" });
@@ -717,7 +717,7 @@ router.post("/join-by-code", isAuthenticated, joinClassroomLimiter, enforceClass
             await Classroom.findByIdAndUpdate(classroom._id, { $inc: { memberCount: 1 } });
 
             return res.json({
-                message: "Joined classroom successfully!",
+                message: "Joined classroom!",
                 classroomName: classroom.name
             });
         }
@@ -761,7 +761,7 @@ router.post("/join-by-code", isAuthenticated, joinClassroomLimiter, enforceClass
             }]);
 
         res.status(201).json({
-            message: "Joined classroom successfully!",
+            message: "Joined classroom!",
             membership: newMem,
             classroomName: classroom.name,
         });
@@ -895,7 +895,7 @@ router.post("/:id/join", isAuthenticated, joinClassroomLimiter, enforceClassroom
             recipient_id: myId,
             type: "system",
             title: "Request Sent",
-            message: `Your request to join "${classroom.name}" has been sent successfully.`,
+            message: `Your request to join "${classroom.name}" has been sent.`,
             related_id: classroom._id.toString()
         }]);
 
@@ -1009,7 +1009,7 @@ router.put("/:id/requests/:requestId", isAuthenticated, requireClassroomOwner, a
                 .catch(err => console.error('[EmailNotification] join approved email error:', err.message));
         }
 
-        res.json({ message: `Request ${action}d successfully` });
+        res.json({ message: `Request ${action}d` });
     } catch (err) {
         console.error("Approve/reject error:", err);
         res.status(500).json({ message: "Server error" });
@@ -1223,7 +1223,7 @@ router.delete("/:id", isAuthenticated, requireClassroomOwner, async (req, res) =
             Classroom.findByIdAndDelete(req.params.id),
         ]);
 
-        res.json({ message: "Classroom deleted successfully" });
+        res.json({ message: "Classroom deleted" });
     } catch (err) {
         console.error("Delete classroom error:", err);
         res.status(500).json({ message: "Server error" });
@@ -1512,7 +1512,7 @@ router.post("/:id/content/:type", isAuthenticated, requireClassroomOwner, async 
         }
 
         res.status(201).json({
-            message: `${insertedItems.length} item(s) uploaded successfully`,
+            message: `${insertedItems.length} item(s) uploaded`,
             items: insertedItems,
             item: insertedItems[0],
             emailJobsCreated: 0 // Will be overridden if available
@@ -1785,7 +1785,7 @@ router.put("/:id/content/materials/:contentId/replace", isAuthenticated, require
         // Clear old summary cache since the file changed completely
         await classroomClient.from("material_summaries").delete().eq("material_id", contentId);
 
-        res.json({ message: "Material file replaced successfully", item: data });
+        res.json({ message: "Material file replaced", item: data });
     } catch (err) {
         console.error("Replace material error:", err);
         res.status(500).json({ message: "Server error replacing material file" });
@@ -1809,7 +1809,7 @@ router.delete("/:id/content/:type/:contentId", isAuthenticated, requireClassroom
 
         if (error) throw error;
 
-        res.json({ message: "Content deleted successfully" });
+        res.json({ message: "Content deleted" });
     } catch (err) {
         console.error(`Delete ${req.params.type} error:`, err);
         res.status(500).json({ message: "Server error deleting content" });

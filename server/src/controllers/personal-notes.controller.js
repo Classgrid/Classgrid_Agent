@@ -242,7 +242,7 @@ export const deleteNote = async (req, res) => {
 
         res.json({
             success: true,
-            message: "Note deleted successfully."
+            message: "Note deleted."
         });
     } catch (error) {
         console.error("Error deleting note:", error);

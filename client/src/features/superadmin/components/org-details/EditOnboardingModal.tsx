@@ -79,7 +79,7 @@ export function EditOnboardingModal({ isOpen, onClose, orgId, currentOnboarding 
     setIsSaving(true);
     try {
       await orgDetailApi.updateOrganizationOnboarding(orgId, formData);
-      toast.success("Onboarding progress updated successfully!");
+      toast.success("Onboarding progress updated!");
       // Invalidate query to refresh the OrgConfigurationTab
       queryClient.invalidateQueries({ queryKey: ["orgDetail", orgId] });
       onClose();

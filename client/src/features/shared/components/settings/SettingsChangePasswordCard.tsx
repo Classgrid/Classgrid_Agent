@@ -76,7 +76,7 @@ export function SettingsChangePasswordCard() {
       return response.data;
     },
     onSuccess: () => {
-      toast.success("Password changed successfully.");
+      toast.success("Password changed.");
       setOpen(false);
       setOldPassword("");
       setNewPassword("");

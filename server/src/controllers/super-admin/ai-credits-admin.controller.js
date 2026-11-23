@@ -448,7 +448,7 @@ export const updateOrgAiLimits = async (req, res) => {
             if (typeof userId !== "undefined" && userId) io.to(userId.toString()).emit("ai_token_update");
             if (typeof orgId !== "undefined" && orgId) io.to(`org:${orgId}`).emit("ai_token_update");
 
-            return res.status(200).json({ success: true, message: "Global AI limits updated successfully." });
+            return res.status(200).json({ success: true, message: "Global AI limits updated." });
         }
 
         if (!mongoose.Types.ObjectId.isValid(orgId)) {
@@ -488,7 +488,7 @@ export const updateOrgAiLimits = async (req, res) => {
             if (typeof userId !== "undefined" && userId) io.to(userId.toString()).emit("ai_token_update");
             if (typeof orgId !== "undefined" && orgId) io.to(`org:${orgId}`).emit("ai_token_update");
         }
-        res.status(200).json({ success: true, message: "Organization AI limits updated successfully." });
+        res.status(200).json({ success: true, message: "Organization AI limits updated." });
     } catch (error) {
         console.error("Update Org AI Limits Error:", error);
         res.status(500).json({ success: false, error: "Failed to update org AI limits" });
@@ -555,7 +555,7 @@ export const requestSecurityCode = async (req, res) => {
             if (typeof userId !== "undefined" && userId) io.to(userId.toString()).emit("ai_token_update");
             if (typeof orgId !== "undefined" && orgId) io.to(`org:${orgId}`).emit("ai_token_update");
         }
-        res.status(200).json({ success: true, message: "Security code sent successfully" });
+        res.status(200).json({ success: true, message: "Security code sent" });
     } catch (error) {
         console.error("Error in requestSecurityCode:", error);
         res.status(500).json({ success: false, error: "Internal server error" });
@@ -680,7 +680,7 @@ export const verifySecurityCode = async (req, res) => {
             if (typeof userId !== "undefined" && userId) io.to(userId.toString()).emit("ai_token_update");
             if (typeof orgId !== "undefined" && orgId) io.to(`org:${orgId}`).emit("ai_token_update");
         }
-        res.status(200).json({ success: true, message: "Security code verified successfully" });
+        res.status(200).json({ success: true, message: "Security code verified" });
     } catch (error) {
         console.error("Error in verifySecurityCode:", error);
         res.status(500).json({ success: false, error: "Internal server error" });
@@ -751,7 +751,7 @@ export const removeGrantedCredits = async (req, res) => {
             io.to("superadmin:ai_usage").emit("ai_usage_updated");
             if (typeof userId !== "undefined" && userId) io.to(userId.toString()).emit("ai_token_update");
         }
-        res.status(200).json({ success: true, message: "Granted credits revoked successfully" });
+        res.status(200).json({ success: true, message: "Granted credits revoked" });
     } catch (error) {
         console.error("Remove Granted Credits Error:", error);
         res.status(500).json({ success: false, error: "Internal server error" });
@@ -848,7 +848,7 @@ export const pauseGrantedCredits = async (req, res) => {
             io.to("superadmin:ai_usage").emit("ai_usage_updated");
             if (typeof userId !== "undefined" && userId) io.to(userId.toString()).emit("ai_token_update");
         }
-        res.status(200).json({ success: true, message: `Granted credits ${isPaused ? "paused" : "unpaused"} successfully` });
+        res.status(200).json({ success: true, message: `Granted credits ${isPaused ? "paused" : "unpaused"}` });
     } catch (error) {
         console.error("Pause Granted Credits Error:", error);
         res.status(500).json({ success: false, error: "Internal server error" });
@@ -937,7 +937,7 @@ export const extendGrantedCredits = async (req, res) => {
             io.to("superadmin:ai_usage").emit("ai_usage_updated");
             if (typeof userId !== "undefined" && userId) io.to(userId.toString()).emit("ai_token_update");
         }
-        res.status(200).json({ success: true, message: "Granted credits extended successfully" });
+        res.status(200).json({ success: true, message: "Granted credits extended" });
     } catch (error) {
         console.error("Extend Granted Credits Error:", error);
         res.status(500).json({ success: false, error: "Internal server error" });

@@ -252,7 +252,7 @@ Organization: <strong style="color:#111111;">${orgName}</strong>
 
 <p>Hi <strong>${userName}</strong>,</p>
 
-<p>Your faculty account has been successfully created. You're now ready to manage classrooms, deliver structured academic content, and engage students professionally.</p>
+<p>Your faculty account has been created. You're now ready to manage classrooms, deliver structured academic content, and engage students professionally.</p>
 
 <h3 style="color:#111111;">Structured Content Delivery</h3>
 <ul style="padding-left:20px;">
@@ -329,7 +329,7 @@ Ready to start your academic journey
 
 <p>Hi <strong>${userName}</strong>,</p>
 
-<p>Your account has been successfully created. You're now ready to begin your academic journey with Classgrid.</p>
+<p>Your account has been created. You're now ready to begin your academic journey with Classgrid.</p>
 
 <h3 style="color:#111111;">How to Join Your Organization</h3>
 <ul style="padding-left:20px;">
@@ -455,7 +455,7 @@ export const getOrgApprovalEmailHtml = (orgName, ownerName, organizationCode, ho
     
     <p>Hi ${ownerName || "Admin"},</p>
     
-    <p>Congratulations â€” your organization has been successfully reviewed and approved. You can now begin onboarding your faculty and students to your official Classgrid workspace.</p>
+    <p>Congratulations â€” your organization has been reviewed and approved. You can now begin onboarding your faculty and students to your official Classgrid workspace.</p>
 
     <div class="box" style="margin-bottom: 24px;">
       <p style="margin-bottom: 12px; font-weight: 600; color: #111111;">?? Admin Account Activation</p>
@@ -522,7 +522,7 @@ export const getOrgApprovalEmailHtml = (orgName, ownerName, organizationCode, ho
 
     <div class="box" style="margin-bottom: 24px; border-left: 3px solid #3b82f6;">
       <p style="margin-bottom: 12px; font-weight: 600; color: #111111;">?? Quick Access Tip</p>
-      <p style="margin-bottom: 16px;">Once your admin account is activated and you log in successfully, we recommend bookmarking your Admin Dashboard link in your browser for faster access.</p>
+      <p style="margin-bottom: 16px;">Once your admin account is activated and you log in, we recommend bookmarking your Admin Dashboard link in your browser for faster access.</p>
       <p style="margin-bottom: 12px;">Your Admin Dashboard allows you to manage:</p>
       
       <table width="100%" cellpadding="0" cellspacing="0" style="font-size: 13px; color: #6b7280; margin-bottom: 16px;">
@@ -669,7 +669,7 @@ export const getOrgApplicationConfirmationHtml = (ownerName, instituteName, plan
   const content = `
     <p>Hello ${ownerName},</p>
     <p>Thank you for registering <strong>${instituteName}</strong> on Classgrid${plan === "PRO" ? ' with the <strong>Pro Plan</strong>' : ''}.</p>
-    <p>We have successfully received your application. ${plan === "PRO" ? 'Complete your payment to instantly activate your organization.' : 'It is now under review by our platform administration team.'}</p>
+    <p>We have received your application. ${plan === "PRO" ? 'Complete your payment to instantly activate your organization.' : 'It is now under review by our platform administration team.'}</p>
 
     ${proPaymentBlock}
 
@@ -831,7 +831,7 @@ Dear <strong>${userName}</strong>,
 </p>
 
 <p style="font-size:14px;color:#bdbdbd;line-height:1.7;margin:0 0 25px;">
-Great news! Your payment has been <strong style="color:#34d399;">successfully verified</strong> and your 
+Great news! Your payment has been <strong style="color:#34d399;">verified</strong> and your 
 <strong style="color:#111111;">Classgrid ${planName} Plan</strong> is now active.
 All premium features have been unlocked for your organization.
 </p>
@@ -991,7 +991,7 @@ Payment confirmed â€” premium features unlocked
 
 Dear ${userName},
 
-Great news! Your payment has been successfully verified and your Classgrid ${planName} Plan is now active. All premium features have been unlocked for your organization.
+Great news! Your payment has been verified and your Classgrid ${planName} Plan is now active. All premium features have been unlocked for your organization.
 
 --- SUBSCRIPTION DETAILS ---
 Plan Name: ${planName}
@@ -1035,7 +1035,7 @@ Organization: ${orgName}
 
 Hi ${userName},
 
-Your faculty account has been successfully created. You're now ready to manage classrooms, deliver structured academic content, and engage students professionally.
+Your faculty account has been created. You're now ready to manage classrooms, deliver structured academic content, and engage students professionally.
 
 --- Structured Content Delivery ---
 - Upload PDFs, documents, and study material to specific classrooms
@@ -1067,7 +1067,7 @@ Ready to start your academic journey
 
 Hi ${userName},
 
-Your account has been successfully created. You're now ready to begin your academic journey with Classgrid.
+Your account has been created. You're now ready to begin your academic journey with Classgrid.
 
 --- How to Join Your Organization ---
 - Enter your Honor Code to join your institution directly.
@@ -1162,7 +1162,7 @@ export const getOrgApprovalEmailPlainText = (orgName, ownerName, organizationCod
 
 Hi ${ownerName || "Admin"},
 
-Congratulations â€” your organization has been successfully reviewed and approved. You can now begin onboarding your faculty and students to your official Classgrid workspace.
+Congratulations â€” your organization has been reviewed and approved. You can now begin onboarding your faculty and students to your official Classgrid workspace.
 
 ?? Admin Account Activation
 
@@ -1217,7 +1217,7 @@ Students can join your organization in two ways:
 â€¢ Students ? Redirected to Student Dashboard
 
 ?? Quick Access Tip
-Once your admin account is activated and you log in successfully, we recommend bookmarking your Admin Dashboard link in your browser for faster access.
+Once your admin account is activated and you log in, we recommend bookmarking your Admin Dashboard link in your browser for faster access.
 
 Your Admin Dashboard allows you to manage:
 
@@ -1306,7 +1306,7 @@ Hello ${ownerName},
 
 Thank you for registering ${instituteName} on Classgrid${plan === "PRO" ? ' with the Pro Plan' : ''}.
 
-We have successfully received your application. ${plan === "PRO" ? 'Complete your payment to instantly activate your organization.' : 'It is now under review by our platform administration team.'}
+We have received your application. ${plan === "PRO" ? 'Complete your payment to instantly activate your organization.' : 'It is now under review by our platform administration team.'}
 ${proBlock}
 ${plan === "FREE" ? `What happens next?
   - Our team will verify your institution details.
@@ -2183,7 +2183,7 @@ export const getAdmissionFeeReceiptHtml = (data = {}) => {
   });
   const content = `
     <p>Dear <strong>${data.candidate_name || "Student"}</strong>,</p>
-    <p>We are pleased to confirm that your admission fee for <strong>${data.organization_name || "your institution"}</strong> has been successfully received.</p>
+    <p>We are pleased to confirm that your admission fee for <strong>${data.organization_name || "your institution"}</strong> has been received.</p>
 
     <div class="box">
       <div class="meta">Receipt Details</div>
@@ -2216,7 +2216,7 @@ export const getAdmissionFeeReceiptPlainText = (data = {}) => {
 
 Dear ${data.candidate_name || "Student"},
 
-We are pleased to confirm that your admission fee for ${data.organization_name || "your institution"} has been successfully received.
+We are pleased to confirm that your admission fee for ${data.organization_name || "your institution"} has been received.
 
 Receipt No: ${data.receipt_no || "N/A"}
 Amount Paid: INR ${amount}
@@ -2636,7 +2636,7 @@ export const getErpRoleApprovedHtml = (recipientName, roleTitle, orgName, dashbo
 export const getErpRoleInstantlyGrantedHtml = (recipientName, roleTitle, orgName, updatedBy, updateDate, dashboardLink) => {
   const content = `<h2>Security Notice: Administrative Privileges Updated</h2>
   <p>Dear ${recipientName},</p>
-  <p>This is an automated security notice confirming that <strong>${roleTitle}</strong> administrative privileges have been successfully added to your profile for <strong>${orgName}</strong>.</p>
+  <p>This is an automated security notice confirming that <strong>${roleTitle}</strong> administrative privileges have been added to your profile for <strong>${orgName}</strong>.</p>
   <ul>
     <li><strong>Updated Role:</strong> ${roleTitle}</li>
     <li><strong>Updated By:</strong> ${updatedBy}</li>
@@ -2909,7 +2909,7 @@ export const getFailedPaymentEmailHtml = (amountInr, errorDescription, paymentId
 export const getAiCreditUserReceiptHtml = (payerName, amountFormatted, creditsReceived, paymentId, paidAt) => {
   const content = `
     <p>Hello ${payerName},</p>
-    <p>Your purchase of AI Credits was completed successfully. The credits have been instantly added to your account.</p>
+    <p>Your purchase of AI Credits was completed. The credits have been instantly added to your account.</p>
     <table style="border-collapse:collapse;width:100%;max-width:420px;margin:16px 0;">
       <tr><td style="padding:6px 12px;font-weight:600;color:#374151;">Amount Paid</td><td style="padding:6px 12px;color:#059669;font-weight:700;">${amountFormatted}</td></tr>
       <tr style="background:#f9fafb;"><td style="padding:6px 12px;font-weight:600;color:#374151;">Credits Received</td><td style="padding:6px 12px;font-weight:700;">${creditsReceived} Credits</td></tr>
@@ -2932,7 +2932,7 @@ export const getAiCreditAdminNotificationHtml = (payerName, payerEmail, amountFo
         <p style="margin:0;font-size:18px;font-weight:700;color:#1d4ed8;">New AI Credit Purchase!</p>
     </div>
     <p>Hello Nikhil,</p>
-    <p>A user has just successfully purchased AI Credits. Here are the details:</p>
+    <p>A user has just purchased AI Credits. Here are the details:</p>
     <table style="border-collapse:collapse;width:100%;max-width:420px;margin:16px 0;">
       <tr style="background:#f9fafb;"><td style="padding:6px 12px;font-weight:600;color:#374151;">Amount</td><td style="padding:6px 12px;color:#059669;font-weight:700;">${amountFormatted}</td></tr>
       <tr><td style="padding:6px 12px;font-weight:600;color:#374151;">Credits Purchased</td><td style="padding:6px 12px;font-weight:700;">${creditsPurchased} Credits</td></tr>
@@ -2962,7 +2962,7 @@ export const getAiCreditGrantedHtml = (userName, creditsAdded, totalBalance, exp
     const url = dashboardUrl || USAGE_URL;
     const content = `
         <p>Hi ${userName},</p>
-        <p>Good news! We have successfully added <strong>${creditsAdded} AI credits</strong> to your account.</p>
+        <p>Good news! We have added <strong>${creditsAdded} AI credits</strong> to your account.</p>
         
         <ul style="color: #374151; padding-left: 20px; line-height: 1.6; margin: 16px 0;">
             <li><strong>Credits Added:</strong> ${creditsAdded} AI Credits</li>
@@ -2990,7 +2990,7 @@ export const getAiCreditGrantedPlainText = (userName, creditsAdded, totalBalance
     const url = dashboardUrl || USAGE_URL;
     return `Hi ${userName},
 
-Good news! We have successfully added ${creditsAdded} AI credits to your account.
+Good news! We have added ${creditsAdded} AI credits to your account.
 
 • Credits Added: ${creditsAdded} AI Credits
 • New Total Balance: ${totalBalance} Credits

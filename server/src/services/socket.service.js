@@ -629,7 +629,7 @@ export const flushChatStream = async (orgId) => {
             
             // Adaptive Worker Phase 3: emit 'message_saved'
             if (io) {
-                // Emit to the organization that the batch was successfully persisted
+                // Emit to the organization that the batch was persisted
                 // Useful for UI updates or read receipts marking
                 io.to(orgId).emit('message_saved', { orgId, count: bulkOps.length });
                 console.log(`[Socket Adaptive Worker] Flushed & ACKed ${bulkOps.length} messages for org ${orgId}`);

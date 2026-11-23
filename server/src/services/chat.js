@@ -562,7 +562,7 @@ export async function getVisionReply(message, base64Image, mimeType) {
     return replyText;
   } catch (error) {
     console.error("Vision API Error:", error);
-    return "I successfully received your image but encountered an error analyzing it. Please try uploading a clearer image or try again later.";
+    return "I received your image but encountered an error analyzing it. Please try uploading a clearer image or try again later.";
   }
 }
 // Optional utility functions

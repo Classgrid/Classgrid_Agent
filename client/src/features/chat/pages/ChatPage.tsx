@@ -553,7 +553,7 @@ function ChatPageInner() {
           : null;
         await sendMessage(activeThread.id, text, files, replyData, options);
         setReplyTo(null);
-        toast.success("Message scheduled successfully!");
+        toast.success("Message scheduled!");
       } catch (err: any) {
         toast.error(err.response?.data?.error || "Failed to schedule message");
       } finally {
@@ -707,7 +707,7 @@ function ChatPageInner() {
         setActiveThread(newGroupThread);
       }
       setIsGroupModalOpen(false);
-      toast.success("Group created successfully!");
+      toast.success("Group created!");
     } catch (err: any) {
       console.error('Group creation failed:', err);
       const serverMsg = err?.error || err?.message || err?.response?.data?.error || err?.response?.data?.message;

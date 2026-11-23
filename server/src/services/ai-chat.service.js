@@ -425,7 +425,7 @@ export async function triggerMemoryAgent(sessionId, { force = false } = {}) {
             console.error("[Memory Agent] Error saving to DB:", updateErr);
             return false;
         }
-        console.log(`[Memory Agent] Successfully saved condensed memory for session ${sessionId} (1-${total}, ${usedModel})`);
+        console.log(`[Memory Agent] saved condensed memory for session ${sessionId} (1-${total}, ${usedModel})`);
         return true;
     } catch (error) {
         console.error("[Memory Agent] Failed:", error);

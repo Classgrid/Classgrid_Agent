@@ -476,7 +476,7 @@ router.post("/public/tickets", enforceStrictSession, multipleUploads("files", 5)
 
         res.status(201).json({
             success: true,
-            message: "Ticket created successfully",
+            message: "Ticket created",
             ticket: {
                 _id: ticket._id,
                 subject: ticket.subject,
@@ -1582,7 +1582,7 @@ router.patch("/admin/tickets/:id/reply/:replyId", isAuthenticated, requireRole("
 
         await ticket.save();
 
-        res.json({ success: true, message: "Reply updated successfully", ticket: serializeTicket(ticket.toObject()) });
+        res.json({ success: true, message: "Reply updated", ticket: serializeTicket(ticket.toObject()) });
     } catch (err) {
         console.error("[Support] Edit reply error:", err.message);
         res.status(500).json({ success: false, message: "Server error" });

@@ -155,7 +155,7 @@ export const updateGlobalAiConfig = async (req, res) => {
             io.emit("ai_token_update");
         }
 
-        res.status(200).json({ success: true, message: "Global AI Limits updated successfully.", config, resetPeriods: effectiveGlobalPeriods(config) });
+        res.status(200).json({ success: true, message: "Global AI Limits updated.", config, resetPeriods: effectiveGlobalPeriods(config) });
     } catch (error) {
         console.error("[updateGlobalAiConfig] Error:", error);
         res.status(500).json({ success: false, message: "Server error updating global config." });

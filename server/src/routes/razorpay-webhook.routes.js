@@ -211,7 +211,7 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
             switch (event) {
 
             // ═══════════════════════════════════════════
-            // PAYMENT CAPTURED — Money received successfully
+            // PAYMENT CAPTURED — Money received
             // ═══════════════════════════════════════════
             case "payment.captured":
             case "payment.authorized": {

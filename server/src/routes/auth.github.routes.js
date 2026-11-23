@@ -221,7 +221,7 @@ router.delete("/disconnect", isAuthenticated, async (req, res) => {
         user.github_email = null;
         await user.save();
 
-        res.json({ message: "GitHub disconnected successfully" });
+        res.json({ message: "GitHub disconnected" });
     } catch (error) {
         res.status(500).json({ message: "Error disconnecting GitHub", error: error.message });
     }

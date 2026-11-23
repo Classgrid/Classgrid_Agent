@@ -100,7 +100,7 @@ export const buildWorker = new Worker('build-steps', async (job) => {
       { $set: { "plan.$.status": "done" } }
     );
 
-    console.log(`[Worker] Job for ${stepId} completed successfully.`);
+    console.log(`[Worker] Job for ${stepId} completed.`);
     return { ok: true, stepId };
 
   } catch (error) {

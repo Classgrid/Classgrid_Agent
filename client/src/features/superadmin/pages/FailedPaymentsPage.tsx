@@ -268,7 +268,7 @@ export function FailedPaymentsPage() {
             pageSize={50}
             emptyIcon={<Clock size={32} />}
             emptyTitle="No failed payments"
-            emptyDescription="All platform payments have been successfully processed."
+            emptyDescription="All platform payments have been processed."
             emptyMessage="No failures found."
           />
         </SectionPanel>

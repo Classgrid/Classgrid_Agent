@@ -65,7 +65,7 @@ export function AiImagesGallery({ backendUrl }: AiImagesGalleryProps) {
         credentials: "include",
       });
       if (!isAutoDelete) {
-        toast.success("Image deleted successfully");
+        toast.success("Image deleted");
       }
     } catch (err) {
       console.error("Failed to delete image:", err);

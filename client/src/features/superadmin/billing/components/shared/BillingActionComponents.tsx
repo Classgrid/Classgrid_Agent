@@ -110,7 +110,7 @@ export const BillingExportMenu: React.FC<{
   const handleExport = async (format: 'csv' | 'pdf' | 'excel') => {
     toast.promise(onExport(format), {
       loading: 'Generating export...',
-      success: `Exported successfully as ${format.toUpperCase()}`,
+      success: `Exported as ${format.toUpperCase()}`,
       error: 'Failed to generate export',
     });
   };

@@ -238,7 +238,7 @@ export function LeadDetailsPage() {
       provider: "google_meet"
     }, {
       onSuccess: () => {
-        toast.success("Meeting rescheduled successfully!", { id: "schedule-meet" });
+        toast.success("Meeting rescheduled!", { id: "schedule-meet" });
         setIsEditingMeeting(false);
       },
       onError: (err: any) => toast.error(err?.message || "Failed to update meeting", { id: "schedule-meet" })

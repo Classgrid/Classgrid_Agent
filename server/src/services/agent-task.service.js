@@ -47,6 +47,7 @@ import {
     sendWhatsappText, markWhatsappRead, findCaller, numberInUse, runAgentTask, openProject, keepProjectOpen,
 } from "./whatsapp-call.service.js";
 import * as record from "./call-record.service.js";
+import { sleepWords } from "../utils/stop-answer.js";
 import { cfAiFetch, isCfNeuronCapError } from "./cf-neuron-cap.service.js";
 
 const MAX_WORK_MS = 48 * 60 * 60 * 1000;
@@ -351,7 +352,7 @@ async function closingMessage(user, task, { closed = false } = {}) {
 
 // ─── The sleep tool ───────────────────────────────────────────
 
-export async function sleepFromTool({ user, sessionId, projectId, origin, question, args }) {
+export async function sleepFromTool({ user, sessionId, projectId, origin, question, args, said = "" }) {
     if (!sessionId) return "ERROR: this chat is not saved (incognito), so you can't sleep and be woken later. Finish now, or tell the user.";
     const phone = normalizeWhatsappNumber(user?.metadata?.whatsappPhone) || null;
     const onReply = args?.wake_on_whatsapp_reply === true;
@@ -371,13 +372,17 @@ export async function sleepFromTool({ user, sessionId, projectId, origin, questi
         return "ERROR: this task has used its 48 hours of work time, so you can't sleep again. Finish now with what you have and tell the user what is not done.";
     }
     const message = String(args?.message || "").trim().slice(0, 3000);
+    // What this answer says is the AI's own words: with none yet, the sleep is not set and it is asked for them
+    // (utils/stop-answer.js sleepWords). No sentence is written for it any more.
+    const words = sleepWords({ message, chatLine: String(args?.chat_line || "").slice(0, 1000), said, origin });
+    if (words.refuse) return words.refuse;
     await AgentTask.findOneAndUpdate({ session_id: sessionId }, {
         $set: {
             // heartbeat_at: null: a new sleep is never held back by an older run's "busy" mark. On 2026-11-22 a woken run
             // stuck when the owner's network dropped (its command's answer never came back) and kept the mark fresh, so
             // a sleep set from the chat at 12:15 for 12:18 woke only at 12:20, when the mark was 5 minutes old.
             status: "sleeping", heartbeat_at: null, wake_at: wakeAt, wake_on_reply: onReply, note: String(args?.note || "").slice(0, 3000),
-            sleep_message: message, slept_at: now, phone, ...(projectId ? { project_id: String(projectId) } : {}),
+            sleep_message: message, sleep_quiet: words.quiet, slept_at: now, phone, ...(projectId ? { project_id: String(projectId) } : {}),
             ...(newWork ? { work_started_at: now, no_progress: 0 } : {}),
             ...(origin === "whatsapp" ? { origin: "whatsapp" } : {}),
         },
@@ -389,12 +394,11 @@ export async function sleepFromTool({ user, sessionId, projectId, origin, questi
 
     const until = [onReply ? "your reply on WhatsApp" : "", wakeAt ? india(wakeAt) : ""].filter(Boolean).join(" or ");
     // The answer ends with the AI's own words: its message here, and what it wrote before the call (the stream adds
-    // that: utils/stop-answer.js). The fixed "Waiting for…" line is no longer added under them (owner, 2026-11-22:
-    // "that line is to remove, hardcoded"); it is the answer only when the AI said nothing at all, since an answer
-    // can't be empty.
+    // that: utils/stop-answer.js stopAnswerText). There is no fixed "💤 Waiting for…" line any more, not even when the
+    // AI said nothing: then the sleep is not set at all (sleepWords above; owner, 2026-11-22 and 2026-11-23).
     return {
         text: `SLEEPING: your run ends now. You will be woken by ${until}; this chat then continues.`,
-        ...(message ? { stopAnswer: message } : { stopAnswer: `💤 Waiting for ${until}. I'll continue then.`, stopAnswerOnlyIfSilent: true }),
+        stopAnswer: words.stopAnswer,
     };
 }
 
@@ -526,8 +530,10 @@ async function afterRunDecide({ user, phone, sessionId, projectId, projectName, 
     if (task.status === "sleeping" && task.slept_at && task.slept_at >= started) {
         await task.save();
         // Its message or the question it wrote before sleeping goes to the user (not only the "waiting" line)
+        // (sleep_quiet: the answer is only the chat's own line, chat_line, which is never sent on WhatsApp. The
+        // "💤 Waiting for" line is the fixed sentence answers had until 2026-11-23, still in older ones.)
         const wrote = String(result.answer || "").replace(/💤 Waiting for[^\n]*$/, "").trim();
-        if (task.sleep_message || wrote) await say(result.answer);
+        if (task.sleep_message || (wrote && !task.sleep_quiet)) await say(result.answer);
         await wakeIfUnread(task._id);
         return task._id;
     }

@@ -180,7 +180,7 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
         body: JSON.stringify({ name: newSkillName, instructions: newSkillInstructions })
       });
       if (res.ok) {
-        toast.success("Skill created successfully!");
+        toast.success("Skill created!");
         setNewSkillName("");
         setNewSkillInstructions("");
         setShowAddForm(false);
@@ -225,7 +225,7 @@ export function AiSkillsPanel({ backendUrl }: { backendUrl: string }) {
         body: JSON.stringify({ name: editSkillName, instructions: editSkillInstructions })
       });
       if (res.ok) {
-        toast.success("Skill updated successfully!");
+        toast.success("Skill updated!");
         setEditSkillId(null);
         fetchSkills();
       } else {

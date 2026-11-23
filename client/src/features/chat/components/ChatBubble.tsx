@@ -213,7 +213,7 @@ export function ChatBubble({
       try {
         await onEdit(message.id, newContent.trim());
         setIsEditing(false);
-        toast.success("Message edited successfully");
+        toast.success("Message edited");
       } catch (error) {
         toast.error("Failed to edit message");
       }

@@ -105,7 +105,7 @@ export function PublicChatProfileView({ profileData, isReadOnly }: { profileData
     setIsVerifyingOtp(true);
     try {
       await apiClient.post("/api/user/verify-whatsapp-otp", { otp: otpValue });
-      toast.success("WhatsApp number verified successfully!");
+      toast.success("WhatsApp number verified!");
       setOtpSent(false);
       setOtpValue("");
       queryClient.invalidateQueries({ queryKey: ["global-profile"] });
@@ -150,7 +150,7 @@ export function PublicChatProfileView({ profileData, isReadOnly }: { profileData
       });
       queryClient.invalidateQueries({ queryKey: ["global-profile"] });
       queryClient.invalidateQueries({ queryKey: ["current-user"] });
-      toast.success("Profile updated successfully");
+      toast.success("Profile updated");
       setIsEditing(false);
     } catch (error: any) {
       toast.error(error?.message || error?.response?.data?.message || "Failed to save profile");

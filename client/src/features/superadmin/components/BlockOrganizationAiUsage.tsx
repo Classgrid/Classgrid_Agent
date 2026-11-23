@@ -39,7 +39,7 @@ export function BlockOrganizationAiUsage({ orgId, orgName, isBlocked }: BlockOrg
 
       blockMutation.mutate({ orgId, isBlocked: !isBlocked }, {
         onSuccess: () => {
-          toast.success(`Organization AI access has been ${!isBlocked ? 'blocked' : 'unblocked'} successfully.`);
+          toast.success(`Organization AI access has been ${!isBlocked ? 'blocked' : 'unblocked'}.`);
           setOpen(false);
           setSecurityCode("");
         }

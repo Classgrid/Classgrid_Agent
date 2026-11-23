@@ -83,7 +83,7 @@ export const useCreateNotificationTemplate = () => {
         mutationFn: (data: Partial<NotificationTemplate>) => superAdminNotificationApi.createTemplate(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['notification-templates'] });
-            toast.success("Template created successfully");
+            toast.success("Template created");
         },
         onError: (error: any) => {
             toast.error(error?.response?.data?.message || "Failed to create template");
@@ -98,7 +98,7 @@ export const useUpdateNotificationTemplate = () => {
         onSuccess: (_, variables) => {
             queryClient.invalidateQueries({ queryKey: ['notification-templates'] });
             queryClient.invalidateQueries({ queryKey: ['notification-template', variables.id] });
-            toast.success("Template updated successfully");
+            toast.success("Template updated");
         },
         onError: (error: any) => {
             toast.error(error?.response?.data?.message || "Failed to update template");

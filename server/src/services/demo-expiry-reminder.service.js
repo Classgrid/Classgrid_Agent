@@ -204,7 +204,7 @@ export async function processDemoExpiryReminders(now = new Date()) {
                     <tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Reminder Type</td><td style="padding:8px;border:1px solid #ddd;">${reminder.label}</td></tr>
                     <tr><td style="padding:8px;border:1px solid #ddd;font-weight:bold;">Admin Email</td><td style="padding:8px;border:1px solid #ddd;">${ownerEmail}</td></tr>
                     </table>
-                    <p style="color:#666;margin-top:16px;">Org admin reminder has been queued successfully.</p>`,
+                    <p style="color:#666;margin-top:16px;">Org admin reminder has been queued.</p>`,
                 text: `Demo reminder queued for ${organization.name} (${planName}) - ${reminder.label}. Admin: ${ownerEmail}.`,
                 type: "demo_expiry_reminder_internal",
                 organizationId: subscription.organization_id,

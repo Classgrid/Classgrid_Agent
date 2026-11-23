@@ -172,7 +172,7 @@ function FileUploadField({ field, value, onChange, disabled }: { field: any, val
       });
 
       onChange(publicUrl);
-      toast.success(`${field.label} uploaded successfully`, { id: loadingToast });
+      toast.success(`${field.label} uploaded`, { id: loadingToast });
     } catch (error) {
       console.error("Upload error:", error);
       toast.error("Failed to upload document", { id: loadingToast });
@@ -364,7 +364,7 @@ export function ContextualProfile({
         }
       }
       await apiClient.put("/api/user/update", { metadata: metadataPayload });
-      toast.success("Profile details updated successfully");
+      toast.success("Profile details updated");
       setIsEditing(false);
     } catch (error: any) {
       console.error(error);

@@ -370,7 +370,7 @@ export async function notifyExternalDomainChange({
         case "verified":
             copy = {
                 title: `Custom domain verified and active: ${newDomain}`,
-                summary: `Your custom domain has been successfully verified and is now active.`,
+                summary: `Your custom domain has been verified and is now active.`,
                 extraSummary: `Classgrid confirmed ownership of the domain, validated the required DNS records, provisioned a secure HTTPS certificate, and enabled the domain for your organization.`,
                 actionBtn: `Manage Domain`,
                 actionBtn2: `Open ERP Portal`,

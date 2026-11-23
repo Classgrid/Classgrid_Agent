@@ -42,7 +42,7 @@ export function SettingsWhatsappCard() {
     setBusy(true);
     try {
       await apiClient.post("/api/user/verify-whatsapp-otp", { otp: otp.trim() });
-      toast.success("WhatsApp number verified successfully!");
+      toast.success("WhatsApp number verified!");
       setOtpSent(false);
       setOtp("");
       queryClient.invalidateQueries({ queryKey: ["global-profile"] });

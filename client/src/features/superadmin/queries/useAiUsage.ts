@@ -132,7 +132,7 @@ export const useBlockAiUser = () => {
   return useMutation({
     mutationFn: ({ userId, isBlocked }: { userId: string, isBlocked: boolean }) => aiUsageApi.blockUser(userId, isBlocked),
     onSuccess: (_, { userId }) => {
-      toast.success("Action completed successfully.");
+      toast.success("Action completed.");
       queryClient.invalidateQueries({ queryKey: ["ai-usage-user", userId] });
       queryClient.invalidateQueries({ queryKey: ["ai-usage-org-users"] });
     },
@@ -145,7 +145,7 @@ export const useBlockAiOrg = () => {
   return useMutation({
     mutationFn: ({ orgId, isBlocked }: { orgId: string, isBlocked: boolean }) => aiUsageApi.blockOrg(orgId, isBlocked),
     onSuccess: (_, { orgId }) => {
-      toast.success("Action completed successfully.");
+      toast.success("Action completed.");
       queryClient.invalidateQueries({ queryKey: ["ai-usage-org", orgId] });
       queryClient.invalidateQueries({ queryKey: ["ai-usage-orgs"] });
     },
@@ -158,7 +158,7 @@ export const useGrantAiCredits = () => {
   return useMutation({
     mutationFn: ({ userId, amount, options }: { userId: string, amount: number, options?: { sendEmail?: boolean; startDate?: string; endDate?: string } }) => aiUsageApi.grantCredits(userId, amount, options),
     onSuccess: (_, { userId }) => {
-      toast.success("Action completed successfully.");
+      toast.success("Action completed.");
       queryClient.invalidateQueries({ queryKey: ["ai-usage-user", userId] });
     },
     onError: (error) => toast.error("Action failed. " + error.message),
@@ -170,7 +170,7 @@ export const useGrantOrgAiCredits = () => {
   return useMutation({
     mutationFn: ({ orgId, amount, options }: { orgId: string, amount: number, options?: { sendEmail?: boolean; startDate?: string; endDate?: string } }) => aiUsageApi.grantOrgCredits(orgId, amount, options),
     onSuccess: (_, { orgId }) => {
-      toast.success("Action completed successfully.");
+      toast.success("Action completed.");
       queryClient.invalidateQueries({ queryKey: ["ai-usage-orgs"] });
       queryClient.invalidateQueries({ queryKey: ["ai-usage-org", orgId] });
     },
@@ -222,7 +222,7 @@ export const useUpdateOrgAiLimits = () => {
   return useMutation({
     mutationFn: ({ orgId, data }: { orgId: string, data: OrgAiLimitsPayload }) => aiUsageApi.updateOrgLimits(orgId, data),
     onSuccess: (_, { orgId }) => {
-      toast.success("Organization AI limits updated successfully.");
+      toast.success("Organization AI limits updated.");
       queryClient.invalidateQueries({ queryKey: ["ai-usage-org", orgId] });
       queryClient.invalidateQueries({ queryKey: ["ai-usage-orgs"] });
     },

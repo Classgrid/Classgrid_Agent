@@ -196,7 +196,7 @@ export function ConfigPage() {
     setCleaningLogs(true);
     try {
       await apiClient.post("/api/super-admin/clean-logs");
-      toast.success("Logs cleaned successfully!");
+      toast.success("Logs cleaned!");
       // Force refresh disk usage metrics
       queryClient.invalidateQueries({ queryKey: ["super-admin", "health"] });
     } catch (err) {

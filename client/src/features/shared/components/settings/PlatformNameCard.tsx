@@ -84,7 +84,7 @@ export function PlatformNameCard() {
       queryClient.invalidateQueries({ queryKey: ["global-profile"] });
       queryClient.invalidateQueries({ queryKey: ["current-user"] });
       setIsEditing(false);
-      toast.success("Platform Sidebar Name updated successfully!");
+      toast.success("Platform Sidebar Name updated!");
     },
     onError: () => {
       toast.error("Failed to update name.");

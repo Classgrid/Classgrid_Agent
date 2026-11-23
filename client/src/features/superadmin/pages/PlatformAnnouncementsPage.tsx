@@ -101,7 +101,7 @@ export function PlatformAnnouncementsPage() {
     mutationFn: (payload: { title: string; body: string; target: string }) =>
       announcementsApi.broadcastGlobal(payload),
     onSuccess: (res) => {
-      toast.success(res.message || `Broadcast sent successfully (${res.sent} devices).`);
+      toast.success(res.message || `Broadcast sent (${res.sent} devices).`);
       queryClient.invalidateQueries({ queryKey: ["superadmin-announcements"] });
       setIsModalOpen(false);
       setTitle("");

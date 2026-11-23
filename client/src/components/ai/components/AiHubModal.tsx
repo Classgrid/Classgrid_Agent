@@ -279,12 +279,12 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                 clearInterval(pollInterval);
                 setConnectedPlugins(statusData.connected);
                 setIsConnecting(false);
-                toast.success(`${name} connected successfully!`);
+                toast.success(`${name} connected!`);
                 if (popup && !popup.closed) popup.close();
                 
                 // Wake up the AI automatically!
                 if (onSendPrompt) {
-                  onSendPrompt(`[SYSTEM: I have successfully connected ${name}! Please proceed with executing the original task I requested.]`);
+                  onSendPrompt(`[SYSTEM: I have connected ${name}! Please proceed with executing the original task I requested.]`);
                 }
               }
             }
@@ -306,7 +306,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                   const finalData = await finalRes.json();
                   if (finalData.connected && finalData.connected.includes(id)) {
                     setConnectedPlugins(finalData.connected);
-                    toast.success(`${name} connected successfully!`);
+                    toast.success(`${name} connected!`);
                   }
                 }
               } catch (e) { /* ignore */ }
@@ -324,7 +324,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
 
       } else if (data.success) {
         // Direct connection (no OAuth popup needed, e.g. MCP plugins)
-        toast.success(`${name} connected successfully!`);
+        toast.success(`${name} connected!`);
         await fetchStatus(); // Refresh from backend
         setIsConnecting(false);
       } else {
@@ -377,7 +377,7 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
         // Shown as disconnected at once; the server is told behind (put back if it says no)
         const before = connectedPlugins;
         setConnectedPlugins((list) => list.filter((x) => x !== id));
-        toast.success(`${name} disconnected successfully`);
+        toast.success(`${name} disconnected`);
         const method = (id === 'slack' || id === 'github' || id === 'canva' || id === 'spotify') ? 'DELETE' : 'POST';
         const res = await fetchWithRescue(backendUrl + endpoint, { method, credentials: 'include' });
         if (res.ok) {

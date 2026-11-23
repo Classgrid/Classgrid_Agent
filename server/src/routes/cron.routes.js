@@ -552,7 +552,7 @@ router.get("/sync-group-members", async (req, res) => {
         }
 
         res.json({
-            message: "Group members synced successfully",
+            message: "Group members synced",
             stats: {
                 totalGroupsProcessed: autoGroups.length,
                 totalAdded,

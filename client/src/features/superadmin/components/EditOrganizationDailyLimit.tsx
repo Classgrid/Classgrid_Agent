@@ -45,7 +45,7 @@ export function EditOrganizationDailyLimit({ orgId, orgName, currentPoolLimit, c
       data: { pro_pool_limit: newLimit, free_weekly_limit_per_user: userWeeklyLimit } 
     }, {
       onSuccess: () => {
-        toast.success(`Limits for ${orgName} updated successfully.`);
+        toast.success(`Limits for ${orgName} updated.`);
         setOpen(false);
       }
     });

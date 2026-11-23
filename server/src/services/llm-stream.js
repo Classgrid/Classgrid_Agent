@@ -754,7 +754,9 @@ export async function streamChat({
                             roundImages.push(nativeImage);
                             toolResult = `The image is shown to you below; look at it yourself to answer: ${String(args?.question || "describe it").slice(0, 500)}`;
                         } else {
-                            toolResult = await handler(args);
+                            // (sleep_until is told what the AI wrote in this answer before the call: with nothing
+                            // written and no message it does not sleep, it asks for the AI's own words)
+                            toolResult = await handler(args, toolName === "sleep_until" ? { said: String(round.text || "").trim() } : undefined);
                         }
                     } catch (e) {
                         toolResult = `Tool error: ${e instanceof Error ? e.message : String(e)}`;
