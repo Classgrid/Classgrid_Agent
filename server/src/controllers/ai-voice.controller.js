@@ -79,7 +79,7 @@ import { hasEnoughTokens, deductTokens, chargeClaudeOnPlan, creditsAvailable } f
 import { chargeableTokens } from "../services/ai-token-pricing.js";
 import { planOf } from "../services/plan-limits.service.js";
 import { textToSpeech, elevenLabsEnabled, TTS_MODEL } from "../services/elevenlabs.service.js";
-import { voiceIdFor } from "../services/voice-choices.js";
+import { voiceIdFor, speakerGenderNote } from "../services/voice-choices.js";
 import { isWebsite } from "../utils/client-app.js";
 import { spokenText, voiceReplyGate, countVoiceReply, chargeSpeech } from "./ai-speak.controller.js";
 import { generateSessionTitle, touchChat, TITLE_REFRESH_EVERY, CF_PICKER_MODELS, MODEL_DISPLAY_NAMES } from "./ai-chat.controller.js";
@@ -139,7 +139,7 @@ function languageName(code) {
 }
 
 // The call's short spoken prompt (whatsapp-call.service.js systemPrompt), for the phone's voice mode
-function voiceSystemPrompt(user, { language = "", memory = "", voiceOn = true } = {}) {
+function voiceSystemPrompt(user, { language = "", memory = "", voiceOn = true, voice = "" } = {}) {
     const now = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "full", timeStyle: "short" });
     const spoken = languageName(language);
     return [
@@ -149,6 +149,8 @@ function voiceSystemPrompt(user, { language = "", memory = "", voiceOn = true } 
             ? "What you say is read out by a text-to-speech voice, sentence by sentence, while you are still writing. Answer like a person on a call: short, natural spoken sentences (usually one to three), no markdown, no lists, no code, no emojis, no links. Ask at most one question at a time."
             : "The user is speaking to you and reads your answer on the screen (the voice is switched off). Answer like a person on a call: short, natural sentences (usually one to three), no markdown, no lists, no code, no emojis, no links. Ask at most one question at a time.",
         `${spoken ? `The phone is listening for ${spoken}. ` : ""}Reply in the language the user spoke last; a mix with English is fine. Write Hindi and Marathi in Devanagari script, as plain spoken words.`,
+        // (the picked voice is a man's or a woman's: the AI speaks of itself in that gender, services/voice-choices.js)
+        voiceOn ? speakerGenderNote(voice) : "",
         "What you get is what the phone's speech recogniser heard, so a word can be wrong: go by what the user most likely meant, and ask when it is unclear.",
         "Answer from what you know whenever you can: that is the fastest. For anything in the user's account or on the web (their chats, files, schedules, email and other connected apps, a search, a picture) use ask_classgrid. Before you call a tool, say one short sentence first (like \"Let me check that.\"), so the user is not left in silence.",
         "If something needs a long or visual answer (code, a table, a document), say so in a sentence and offer to put it in the chat.",
@@ -433,7 +435,7 @@ export const voiceTurn = async (req, res) => {
     // 2026-11-15: "I said pick the model, not fallback. The user decides, as per their plan"). There is no backup
     // model and no switch: if it fails, the turn ends with model_failed and the user says it again or picks another.
     // Nothing sent, "auto" or a model turned off: Auto's voice model (GLM 5.3), alone too. ──
-    const system = voiceSystemPrompt(user, { language: body.language, memory: session?.long_term_memory ? memoryText(session.long_term_memory).slice(0, 6000) : "", voiceOn });
+    const system = voiceSystemPrompt(user, { language: body.language, memory: session?.long_term_memory ? memoryText(session.long_term_memory).slice(0, 6000) : "", voiceOn, voice: String(body.voice || "") });
     const messages = toVoiceMessages(trimHistory(history), said);
     let answerModel = picked || VOICE_MODEL;
     // (the stand-in is never a Claude model the super admin switched off: the Claude feature flag and the Model
@@ -553,7 +555,7 @@ export const voiceTurn = async (req, res) => {
             const stopWithTurn = () => stop.abort();
             if (abort.signal.aborted) stop.abort(); else abort.signal.addEventListener("abort", stopWithTurn, { once: true });
             // (the Agent's lookups and actions run on the model the user picked, or Auto when none was picked)
-            const work = runAgentTask(user, question, null, null, sessionId, null, { ...PHONE_BODY, selectedModel: picked || "auto", voice: true }, stop.signal).catch((e) => ({ answer: "", error: e.message }));
+            const work = runAgentTask(user, question, null, null, sessionId, null, { ...PHONE_BODY, selectedModel: picked || "auto", voice: true, ...(voiceOn ? { voiceKey: String(body.voice || "") } : {}) }, stop.signal).catch((e) => ({ answer: "", error: e.message }));
             let waitTimer = null;
             const result = await Promise.race([work, new Promise((resolve) => { waitTimer = setTimeout(() => resolve(null), LIVE_WAIT_MS); })]);
             clearTimeout(waitTimer);

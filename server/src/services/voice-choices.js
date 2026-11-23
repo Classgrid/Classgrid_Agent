@@ -27,5 +27,21 @@ export const VOICE_CHOICES = [
 /** The ElevenLabs voice id for a choice key (Classgrid's voice for an unknown key) */
 export const voiceIdFor = (key) => VOICE_CHOICES.find((v) => v.key === key)?.id || classgridVoiceId();
 
+/**
+ * For the AI's prompt in voice mode: whether the voice reading its words is a man's or a woman's, so it speaks of
+ * itself in that gender (owner, 2026-11-23: in Marathi a male voice said "करते" where a man says "करतो"; the AI has
+ * no gender, but Hindi, Marathi and other languages change the verb with the speaker's). An unknown key reads in
+ * Classgrid's voice, so it gets that voice's note.
+ */
+export function speakerGenderNote(key) {
+    const voice = VOICE_CHOICES.find((v) => v.key === key) || VOICE_CHOICES[0];
+    const man = voice.gender === "male";
+    return `The voice that reads your words out is a ${man ? "man's" : "woman's"} voice (${voice.name}). In a language whose words change with the speaker's gender (Hindi, Marathi, Gujarati, Punjabi, Urdu and others), always speak of yourself as a ${man ? "man" : "woman"}: `
+        + (man
+            ? "in Marathi \"मी करतो\", \"मी सांगतो\", never \"मी करते\"; in Hindi \"मैं करता हूँ\", \"मैं बताता हूँ\", never \"मैं करती हूँ\"."
+            : "in Marathi \"मी करते\", \"मी सांगते\", never \"मी करतो\"; in Hindi \"मैं करती हूँ\", \"मैं बताती हूँ\", never \"मैं करता हूँ\".")
+        + " This is only about how you speak of yourself: the user's own gender is not known from it.";
+}
+
 /** The list the app shows (no ElevenLabs ids) */
 export const publicVoiceChoices = () => VOICE_CHOICES.map(({ key, name, accent, gender, description }) => ({ key, name, accent, gender, description }));
