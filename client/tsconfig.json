@@ -12,9 +12,8 @@
     "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["src/*"],
+      "@/*": ["./src/*"],
       "@shared-types": ["../packages/types/src/index.ts"]
     },
     "types": ["vite/client"]
