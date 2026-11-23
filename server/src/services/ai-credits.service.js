@@ -156,6 +156,15 @@ export async function weekCounters(userId, tokens, nowMs = Date.now()) {
     await User.updateOne({ _id: userId }, { $set: { "ai_tokens.week_used": 0, "ai_tokens.claude_week_used": 0, "ai_tokens.fable_week_used": 0, "ai_tokens.week_start": new Date(nowMs) } }).catch(() => {});
     return { week_used: 0, claude_week_used: 0, fable_week_used: 0, weekEnd: new Date(nowMs + WEEK_MS) };
 }
+// What a super admin's "Reset Limit" sets back to 0: the session window and the plan's weekly counters (all models,
+// Claude, the Fable share). The week keeps its end date. (Before 2026-11-23 only the session window was reset, so the
+// person's Weekly, Claude and Fable bars stayed full after a reset.)
+export const ADMIN_USAGE_RESET = {
+    "ai_tokens.used_this_week": 0,
+    "ai_tokens.week_used": 0,
+    "ai_tokens.claude_week_used": 0,
+    "ai_tokens.fable_week_used": 0,
+};
 const weekUsed = async (userId, tokens, nowMs = Date.now()) => (await weekCounters(userId, tokens, nowMs)).week_used;
 
 // Which limit a person used up and when it comes back, by the same rule as hasEnoughTokens' resetAt: the plan's weekly

@@ -31,6 +31,7 @@
 import User from "../../models/User.js";
 import Organization from "../../models/Organization.js";
 import GlobalAiConfig from "../../models/GlobalAiConfig.js";
+import { ADMIN_USAGE_RESET } from "../../services/ai-credits.service.js";
 
 // GET /api/super-admin/ai/usage
 export const getAiUsageStats = async (req, res) => {
@@ -103,7 +104,7 @@ export const resetCredits = async (req, res) => {
         const { targetId, targetType, newLimit } = req.body;
         
         if (targetType === "user") {
-            const updateObj = { "ai_tokens.used_this_week": 0 };
+            const updateObj = { ...ADMIN_USAGE_RESET };
             if (newLimit) updateObj["ai_tokens.free_weekly_limit"] = Number(newLimit);
             
             await User.findByIdAndUpdate(targetId, { $set: updateObj });
@@ -116,7 +117,7 @@ export const resetCredits = async (req, res) => {
             // Also reset all users in this org
             await User.updateMany(
                 { organization_id: targetId },
-                { $set: { "ai_tokens.used_this_week": 0 } }
+                { $set: { ...ADMIN_USAGE_RESET } }
             );
         } else {
             return res.status(400).json({ success: false, message: "Invalid targetType" });
