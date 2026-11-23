@@ -56,6 +56,8 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
   const fromApp = appAction(tool, args);
   // The JavaScript the agent runs in the page, shown under its step like a command (browser_run_js)
   const code = tool === 'browser_run_js' && typeof args?.code === 'string' && args.code.trim() ? args.code.trim() : null;
+  // The message this AI sent to another Classgrid session, shown whole under its step (the person reads what was sent)
+  const sentMessage = tool === 'message_classgrid_session' && typeof args?.text === 'string' && args.text.trim() ? args.text.trim() : null;
 
   const body = useMemo(() => {
     if (!detailOpen) return null;
@@ -93,6 +95,10 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
       {/* Studio browser: its screenshots are in the Screenshots tab, not under each step; code it runs is shown here */}
       {code && (
         <pre className="ml-10 mr-2 mb-2 mt-0.5 max-w-[640px] max-h-[220px] overflow-auto rounded-lg border border-slate-200 dark:border-[#2a2a2a] bg-[#f6f6f4] dark:bg-[#1b1b1b] px-3 py-2 font-mono text-[12.5px] leading-[1.5] text-slate-800 dark:text-[#dcdcdc] whitespace-pre [scrollbar-width:thin]">{code}</pre>
+      )}
+
+      {sentMessage && (
+        <div className="ml-10 mr-2 mb-2 mt-0.5 max-w-[640px] max-h-[360px] overflow-y-auto rounded-lg bg-[#f1f1ef] dark:bg-[#222222] px-3 py-2.5 text-[14px] leading-[1.55] text-slate-700 dark:text-[#d6d6d6] whitespace-pre-wrap break-words [scrollbar-width:thin]">{sentMessage}</div>
       )}
 
       {cardOpen && canOpen && (

@@ -23,6 +23,7 @@ function AppStepLine({ icon, app, invert, children }: { icon?: string; app: stri
   );
 }
 import { specialStepTitle, emailTitle } from "./tool-results/stepTitles";
+import { parsePeerContent, peerNoticeText } from "@/lib/peerSessions";
 import { StepWorkingContext, StepShineContext } from "./ShimmerText";
 import { ImageReadStep } from "./tool-results/ImageReadStep";
 import { AudioTranscribeStep } from "./tool-results/AudioTranscribeStep";
@@ -39,7 +40,7 @@ import { DocumentGenerationView } from "./DocumentGenerationView";
 import { KnowledgeBaseSearchView } from "./KnowledgeBaseSearchView";
 import { CdnUploadView } from "./CdnUploadView";
 import { PublishedPageStep } from "./PublishedPageStep";
-import { PROJECT_EXPLORE_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_BACKGROUND_TOOLS, ProjectExploreGroup, ProjectEditStep, ProjectPushStep, ProjectHelpersStep, CheckHelpersStep, checkHelpersReports, ComputerStep, TerminalStep, ProjectRunChanges } from "./ProjectToolSteps";
+import { PeerMessageLine, PROJECT_EXPLORE_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_BACKGROUND_TOOLS, ProjectExploreGroup, ProjectEditStep, ProjectPushStep, ProjectHelpersStep, CheckHelpersStep, checkHelpersReports, ComputerStep, TerminalStep, ProjectRunChanges } from "./ProjectToolSteps";
 import type { AgentStep } from "../AskAiPanel";
 
 // Some models draft whole code blocks (e.g. widget cards) in their thinking. The thinking panel shows one
@@ -141,7 +142,20 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
       }
     };
 
-    shownSteps.forEach((step) => {
+    // Messages from other Classgrid sessions that this AI read after one of its steps (the app adds them to the
+    // step's answer while a turn is running): each is shown under that step as a message, whole. Without this the
+    // person saw only "1 message waiting" and never the message.
+    const peerRowsAfter = (step: any) => {
+      if (step.type !== 'tool' || typeof step.result !== 'string' || !/\n\n\[(Peer message|Session notice) from @/.test(step.result)) return;
+      const blocks = step.result.split(/\n\n(?=\[(?:Peer message|Session notice) from @)/).slice(1);
+      const rows = blocks.map((b: string) => parsePeerContent(b)).filter(Boolean) as NonNullable<ReturnType<typeof parsePeerContent>>[];
+      if (!rows.length) return;
+      flushThoughts();
+      rows.forEach((p, i) => elements.push(p.notice
+        ? <div key={`peer-${step.id}-${i}`} className="mb-3 pl-10 py-1 text-[13px] text-slate-500 dark:text-[#8a8a8a]">{peerNoticeText({ kind: p.notice, from: { name: p.name } })}</div>
+        : <PeerMessageLine key={`peer-${step.id}-${i}`} name={p.name} text={p.text} />));
+    };
+    const drawStep = (step: any) => {
       if (step.type === 'thought') {
         thoughtGroup.push(step);
       } else if (step.type === 'tool') {
@@ -464,7 +478,8 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
           />
         );
       }
-    });
+    };
+    shownSteps.forEach((step) => { drawStep(step); peerRowsAfter(step); });
 
     flushThoughts();
     return elements.map((el, i) => React.isValidElement(el)

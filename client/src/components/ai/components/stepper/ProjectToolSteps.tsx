@@ -597,12 +597,13 @@ export function helperReportsOf(content: unknown): HelperReport[] | null {
 
 // The one collapsed line + expandable body that every "Message from ..." row uses: a helper's report, a message from
 // another Classgrid session (PeerMessageLine below) and the receipt of a message sent to one (tool-results/renderers.tsx)
-export function ReportRow({ label, body }: { label: string; body: string }) {
-  const [open, setOpen] = useState(false);
+export function ReportRow({ label, body, defaultOpen = false }: { label: string; body: string; defaultOpen?: boolean }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 py-1 pl-10 text-left text-[14px] italic text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
-        <span className="min-w-0 truncate">{label}: {body.replace(/\s+/g, ' ').trim()}</span>
+        {/* (open: the whole text is right under it, so the line is only who it is from) */}
+        <span className="min-w-0 truncate">{open ? label : `${label}: ${body.replace(/\s+/g, ' ').trim()}`}</span>
         {open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
       </button>
       {open && (
@@ -622,8 +623,10 @@ function HelperReportLine({ r }: { r: HelperReport }) {
 }
 
 // A message from another Classgrid session (hidden turn started by lib/peerSessions.ts): "Message from @name: text"
-export function PeerMessageLine({ name, text }: { name: string; text: string }) {
-  return <div className="mb-3 flex flex-col"><ReportRow label={`Message from @${name}`} body={text} /></div>;
+// Shown open: the person reads the whole message as it came, not one cut line (owner, 2026-11-23: "I can never see
+// what it is messaging"). `to`: a message this session's AI sent, "Message to @name".
+export function PeerMessageLine({ name, text, to = false }: { name: string; text: string; to?: boolean }) {
+  return <div className="mb-3 flex flex-col"><ReportRow label={`Message ${to ? 'to' : 'from'} @${name}`} body={text} defaultOpen /></div>;
 }
 
 export function HelperReportLines({ reports }: { reports: HelperReport[] }) {
