@@ -177,6 +177,21 @@ function withWakeNote(reply) {
     return text === reply.text ? reply : { ...reply, text };
 }
 
+// Two Classgrid sessions working on the same file (owner, 2026-11-23: "if both are used at the same time, does one
+// stop and message the other?"). The app already refuses an edit of a file that was changed on disk after the AI last
+// read it (desktop/runner.js changedSinceSeen), for every model, so nothing is written over unseen work. But its
+// answer says only "the user or another program edited it": the AI read the file again and edited on, and two
+// sessions took turns on one file without a word to each other. The answer now also tells the AI to look for another
+// session and message it first. Added here, on the way back from the app, so it reaches every model at the moment
+// the edit is refused and needs no app release. The server cannot see which sessions are open on the computer, so
+// the AI lists them itself. Not for a helper's step: a helper has no session tools.
+const CHANGED_ON_DISK = /was changed on disk after you last read it/;
+export const OTHER_SESSION_NOTE = "\n\nAnother Classgrid session on this computer may be the one that changed it. Before you edit this file again, call list_classgrid_sessions. If another session is open on this folder, message it with message_classgrid_session: say which file you are changing and what you are changing in it, and agree which of you edits it, so you do not undo each other's work. If no other session is running, the person changed it: read it again and go on.";
+function withOtherSessionNote(reply) {
+    if (typeof reply?.text !== "string" || !CHANGED_ON_DISK.test(reply.text) || reply.text.includes(OTHER_SESSION_NOTE) || inHelper()) return reply;
+    return { ...reply, text: reply.text + OTHER_SESSION_NOTE };
+}
+
 // An answer with no app on its stream that works in a folder on the computer (a message sent from the phone into a
 // Remote PC chat, owner 2026-11-18) still has its checkpoint: every step it sends over the socket carries it, so the
 // app keeps the answer's before-copies and its Review lists it (on the phone and in the app). sessionId -> checkpoint
@@ -202,9 +217,9 @@ async function askRunner(userId, tool, payload) {
         // A background job is kept by the app that started it: when the chatting app doesn't have it, the person's other
         // Classgrid apps are asked too, and its own answer stands only when none of them has the job either
         if (reply && noSuchJobHere(tool, reply)) return withWakeNote(betterJobReply(tool, reply, await viaSocket().catch(() => null)));
-        if (reply) return withWakeNote(reply);
+        if (reply) return withOtherSessionNote(withWakeNote(reply));
     }
-    return withWakeNote(await viaSocket());
+    return withOtherSessionNote(withWakeNote(await viaSocket()));
 }
 // Windows PowerShell draws a progress bar for every piece of a download (Invoke-WebRequest, Expand-Archive...), even in a
 // hidden window, which makes them many times slower: it is switched off for the AI's PowerShell commands

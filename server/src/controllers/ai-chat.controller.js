@@ -1507,7 +1507,7 @@ const SESSION_TOOLS = [
         type: "function",
         function: {
             name: "list_classgrid_sessions",
-            description: "List the other Classgrid AI sessions running on this computer right now (the desktop app, Classgrid Code, and the Classgrid extension in VS Code, Cursor or Antigravity), each with its name, kind, folder and whether it is busy or idle. A closed session is not listed.",
+            description: "List the other Classgrid AI sessions running on this computer right now (the desktop app, Classgrid Code, and the Classgrid extension in VS Code, Cursor or Antigravity), each with its name, kind, folder and whether it is busy or idle. A closed session is not listed. Also call it when an edit is refused because the file was changed on disk after you read it: another session may be working on the same file, and you message it before you edit that file again.",
             parameters: { type: "object", properties: {} }
         }
     },
