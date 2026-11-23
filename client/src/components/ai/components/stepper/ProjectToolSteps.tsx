@@ -625,9 +625,17 @@ function HelperReportLine({ r }: { r: HelperReport }) {
 // A message from another Classgrid session (hidden turn started by lib/peerSessions.ts): "Message from @name: text"
 // Shown open: the person reads the whole message as it came, not one cut line (owner, 2026-11-23: "I can never see
 // what it is messaging"). `to`: a message this session's AI sent, "Message to @name".
-export function PeerMessageLine({ name, text, to = false }: { name: string; text: string; to?: boolean }) {
+// `receipt`: what the other session's inbox answered when a message was sent, in the tool's own words ("Delivered to
+// @name's inbox (message id ..., not read yet). It is busy; it will read it at its next step."), shown under the sent
+// message (owner, 2026-11-23, about this line in Claude Code: "this is the best thing", "the most important line").
+export function PeerMessageLine({ name, text, to = false, receipt }: { name: string; text: string; to?: boolean; receipt?: string }) {
   const label = to ? (name ? `Message to @${name}` : 'Message to another session') : `Message from @${name}`;
-  return <div className="mb-3 flex flex-col"><ReportRow label={label} body={text} defaultOpen /></div>;
+  return (
+    <div className="mb-3 flex flex-col">
+      <ReportRow label={label} body={text} defaultOpen />
+      {receipt && <div className="pl-10 pr-2 pt-0.5 text-[13px] text-slate-500 dark:text-[#8a8a8a] break-words">{receipt}</div>}
+    </div>
+  );
 }
 
 export function HelperReportLines({ reports }: { reports: HelperReport[] }) {

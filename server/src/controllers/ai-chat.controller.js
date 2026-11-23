@@ -1519,7 +1519,7 @@ const SESSION_TOOLS = [
             parameters: {
                 type: "object",
                 properties: {
-                    target: { type: "string", description: "The session's name, session id or pid, from list_classgrid_sessions" },
+                    target: { type: "string", description: "The session's name (best: it stays the same), session id or pid, from list_classgrid_sessions. Words work too when only one session fits them: \"the other VS Code session\", \"the desktop app\", \"the other session\"." },
                     text: { type: "string", description: "The message" },
                     notify_when_idle: { type: "boolean", description: "Get one notice when that session finishes its turn (or closes)" }
                 },

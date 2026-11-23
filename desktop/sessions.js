@@ -183,6 +183,8 @@ async function list({ excludeSelf = false } = {}) {
 
 // ── send ─────────────────────────────────────────────────────────────────────────────────────────────────
 
+// Words in a target that name nothing ("the other VS Code session" -> "vs", "code")
+const TARGET_FILLER = new Set(["the", "a", "an", "other", "another", "second", "session", "sessions", "classgrid", "window", "app", "one", "my", "your", "that", "this", "in", "on", "of", "to", "ai", "agent", "editor", "chat"]);
 function pickTarget(sessions, target) {
   const t = String(target ?? "").trim().replace(/^@/, "");
   if (!t) throw new Error("No target given: say a session's name, id or pid (list the sessions first).");
@@ -190,6 +192,16 @@ function pickTarget(sessions, target) {
   let hits = sessions.filter((s) => s.sessionId.toLowerCase() === low || String(s.pid) === low);
   if (!hits.length) hits = sessions.filter((s) => String(s.name).toLowerCase() === low);
   if (!hits.length && low.length >= 4) hits = sessions.filter((s) => s.sessionId.toLowerCase().startsWith(low) || String(s.name).toLowerCase().includes(low));
+  // Said in words, as the person says it ("the other VS Code session", "the desktop app", "the other session"): the
+  // words that name something must all be in one session's name or kind. With no such word left ("the other
+  // session"), it is the other session when there is exactly one. An id or a pid is never guessed this way: one
+  // that matches nothing is a closed session, and the error says so. (Owner, 2026-11-23: "the first try always
+  // fails". The AI named the session in words, or by an id from before its window was reloaded.)
+  if (!hits.length && !/^[0-9a-f-]{8,}$/i.test(low) && !/^\d+$/.test(low)) {
+    const words = low.split(/[^a-z0-9_.]+/).filter((w) => w && !TARGET_FILLER.has(w));
+    const said = (s) => `${String(s.name)} ${String(s.kind || "")}`.toLowerCase().replace(/[^a-z0-9_.]+/g, " ");
+    hits = words.length ? sessions.filter((s) => { const text = ` ${said(s)} `; const joined = said(s).replace(/ /g, ""); return words.every((w) => text.includes(` ${w} `) || joined.includes(w)); }) : (sessions.length === 1 ? sessions.slice() : []);
+  }
   if (!hits.length) throw new Error(`No running Classgrid session matches "${t}". ${sessions.length ? `Running now: ${sessions.map((s) => `@${s.name} (pid ${s.pid})`).join(", ")}.` : "No other session is running."} A closed session is not listed.`);
   if (hits.length > 1) throw new Error(`"${t}" matches ${hits.length} sessions (${hits.map((s) => `@${s.name} pid ${s.pid}`).join(", ")}). Use the pid or session id.`);
   return hits[0];
@@ -217,11 +229,21 @@ async function send({ target, text, notifyIdle = false, from, replyTo } = {}) {
 
 // ── register ─────────────────────────────────────────────────────────────────────────────────────────────
 
-function register({ kind = "desktop", name, cwd, entrypoint, sessionId } = {}) {
+// `stableKey`: what this session is, apart from its process (the editor and its folder; the desktop app). The
+// session id is made from it, so the same window has the same id after it is reloaded or the app is restarted, and
+// an id another session kept from before still reaches it. (Until 1.0.52 every start made a new id: a message sent
+// to the id from before a reload matched nothing, which is why the AI's first try failed and its second, by name,
+// worked.) Two windows on the same folder cannot share it: the second one gets an id of its own.
+function register({ kind = "desktop", name, cwd, entrypoint, sessionId, stableKey } = {}) {
   const dir = registryDir();
   fs.mkdirSync(dir, { recursive: true });
   const pid = process.pid;
   removeFiles(dir, pid); // (a leftover of an earlier run with this pid)
+  if (!sessionId && stableKey) {
+    const h = crypto.createHash("sha256").update(`classgrid-session:${stableKey}`).digest("hex");
+    const id = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+    if (!readEntries(dir).some((e) => e.sessionId === id && e.pid !== pid && pidAlive(e.pid))) sessionId = id;
+  }
   const hash = crypto.randomBytes(8).toString("hex");
   const token = crypto.randomBytes(32).toString("hex");
   const info = {

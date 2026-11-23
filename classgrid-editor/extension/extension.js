@@ -66,7 +66,8 @@ function startSession(context, runner) {
     const label = { "classgrid-code": "Classgrid Code", cursor: "Cursor", antigravity: "Antigravity", vscode: "VS Code" }[host];
     const folder = (vscode.workspace.workspaceFolders || [])[0]?.uri.fsPath || process.cwd();
     const name = `${label} - ${path.basename(folder) || folder}`;
-    const handle = require(file).register({ kind: host, name, cwd: folder, entrypoint: "extension" });
+    // (stableKey: this editor and this folder, so the window keeps its session id when it is reloaded)
+    const handle = require(file).register({ kind: host, name, cwd: folder, entrypoint: "extension", stableKey: `${host}|${String(folder).toLowerCase()}` });
     if (!handle) return;
     peer.handle = handle;
     runner.setSessionHandle?.(handle);

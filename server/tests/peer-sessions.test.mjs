@@ -34,7 +34,7 @@ const sessions = createRequire(import.meta.url)(SESSIONS_JS);
 const CHILD = path.join(dir, "child.cjs");
 fs.writeFileSync(CHILD, `
 const sessions = require(process.argv[2]);
-const h = sessions.register({ kind: "test", name: process.argv[3] });
+const h = sessions.register({ kind: process.argv[5] || "test", name: process.argv[3], stableKey: process.argv[4] || undefined });
 h.onMessage((m) => process.send({ ev: "message", m }));
 h.onNotice((n) => process.send({ ev: "notice", n }));
 process.on("message", async (c) => {
@@ -59,8 +59,8 @@ async function until(fn, what, ms = 15000) {
 }
 
 const children = [];
-async function startSession(name) {
-    const proc = fork(CHILD, [SESSIONS_JS, name], { env: { ...process.env, CLASSGRID_SESSIONS_DIR: dir }, stdio: ["ignore", "inherit", "inherit", "ipc"] });
+async function startSession(name, stableKey = "", kind = "") {
+    const proc = fork(CHILD, [SESSIONS_JS, name, stableKey, kind], { env: { ...process.env, CLASSGRID_SESSIONS_DIR: dir }, stdio: ["ignore", "inherit", "inherit", "ipc"] });
     const heard = [];
     let nextId = 0;
     proc.on("message", (e) => heard.push(e));
@@ -263,4 +263,49 @@ test("an answer carries the id of the message it answers, and reads as an answer
     assert.equal("replyTo" in myMessages.slice(before).find((m) => m.replyTo), true);
     me.markRead([got.id]);
     await three.ask({ cmd: "close" });
+});
+
+// ── "The first try always fails" (owner, 2026-11-23): the AI named the other session by an id from before its window
+// was reloaded (every start made a new id), or in words; the tool said "no session matches" and the second try, by
+// name, worked. Now a window keeps its id, and a target said in words is understood when only one session fits.
+test("a session keeps its id when it is started again; two on the same folder do not share it", async () => {
+    const first = await startSession("VS Code - shop", "vscode|c:\shop", "vscode");
+    const id = first.sessionId;
+    assert.match(id, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    // a second window on the same folder while the first is open: an id of its own
+    const twin = await startSession("VS Code - shop", "vscode|c:\shop", "vscode");
+    assert.notEqual(twin.sessionId, id);
+    await twin.ask({ cmd: "close" });
+    await until(() => twin.proc.exitCode !== null, "the twin to exit");
+    // the window is reloaded: the same id, so a message to the id from before still reaches it
+    await first.ask({ cmd: "close" });
+    await until(() => first.proc.exitCode !== null, "the first to exit");
+    const again = await startSession("VS Code - shop", "vscode|c:\shop", "vscode");
+    assert.equal(again.sessionId, id);
+    const r = await sessions.send({ target: id, text: "still you?" });
+    assert.equal(r.status, "delivered");
+    assert.equal(r.target.sessionId, id);
+    await again.ask({ cmd: "take" });
+    // another folder: another id
+    const other = await startSession("Cursor - blog", "cursor|c:\blog", "cursor");
+    assert.notEqual(other.sessionId, id);
+
+    // ── a target said in words ──
+    const toShop = await sessions.send({ target: "the other VS Code session", text: "one" });
+    assert.equal(toShop.target.name, "VS Code - shop");
+    const toBlog = await sessions.send({ target: "the Cursor window", text: "two" });
+    assert.equal(toBlog.target.name, "Cursor - blog");
+    const byFolder = await sessions.send({ target: "blog", text: "three" });
+    assert.equal(byFolder.target.name, "Cursor - blog");
+    // two sessions fit: it is not guessed
+    await assert.rejects(sessions.send({ target: "the other session", text: "x" }), /No running Classgrid session matches "the other session"\. Running now: .*@VS Code - shop.*@Cursor - blog|No running Classgrid session matches "the other session"\. Running now: .*@Cursor - blog.*@VS Code - shop/);
+    // an id that matches nothing is a closed session, never guessed
+    await assert.rejects(sessions.send({ target: "76878219-dad6-408c-88a3-3ec6ff3b3ba0", text: "x" }), /No running Classgrid session matches/);
+    await assert.rejects(sessions.send({ target: "99999999", text: "x" }), /No running Classgrid session matches/);
+    // only one other session left: "the other session" is that one
+    await other.ask({ cmd: "close" });
+    await until(() => other.proc.exitCode !== null, "the other to exit");
+    const only = await sessions.send({ target: "the other session", text: "four" });
+    assert.equal(only.target.name, "VS Code - shop");
+    await again.ask({ cmd: "close" });
 });

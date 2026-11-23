@@ -468,7 +468,8 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
             const asked = String(step.args?.target ?? '').trim().replace(/^@/, '');
             // (a session id or a pid is not a name: the name comes from the receipt once it is there)
             const name = delivered?.[1] ?? (asked && !/^[0-9a-f-]{8,}$/i.test(asked) && !/^\d+$/.test(asked) ? asked : '');
-            elements.push(<PeerMessageLine key={step.id} name={name} text={step.args.text.trim()} to />);
+            // (the receipt is the tool's own answer: delivered, its message id, not read yet, busy or idle)
+            elements.push(<PeerMessageLine key={step.id} name={name} text={step.args.text.trim()} to receipt={delivered ? answer.split(/\n\n\[/)[0] : undefined} />);
             return;
           }
         }

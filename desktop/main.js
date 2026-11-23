@@ -378,7 +378,8 @@ const peerQueue = [];
 function startPeerSession() {
   try {
     const sessions = require("./sessions");
-    peerSession = sessions.register({ kind: "desktop", name: "Classgrid desktop", cwd: app.getPath("home"), entrypoint: "classgrid-desktop" });
+    // (stableKey: this app on this computer account, so it keeps its session id when it is restarted)
+    peerSession = sessions.register({ kind: "desktop", name: "Classgrid desktop", cwd: app.getPath("home"), entrypoint: "classgrid-desktop", stableKey: `desktop|${String(app.getPath("userData")).toLowerCase()}` });
     runner.setSessionHandle(peerSession);
     // (messages and notices that arrive before the chat screen listens wait here, 200 at most, until "cg-peer-ready")
     const toScreens = (channel, payload) => {
