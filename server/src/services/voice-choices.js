@@ -14,6 +14,8 @@ export const VOICE_CHOICES = [
     { key: "raju", id: "pzxut4zZz4GImZNlqQ3H", name: "Raju", accent: "Indian", gender: "male", description: "Natural and conversational" },
     { key: "tara", id: "P7vsEyTOpZ6YUTulin8m", name: "Tara", accent: "Indian", gender: "female", description: "Conversational and expressive" },
     { key: "nikhil", id: "H9ipKj3VXe3Vi6aPCwm9", name: "Nikhil", accent: "Indian", gender: "male", description: "Classgrid's founder" },
+    // (Pratik: a cloned voice in the same workspace, added at the owner's word the same evening)
+    { key: "pratik", id: "82qFxihNEjOhstPIGYf1", name: "Pratik", accent: "Indian", gender: "male", description: "A young voice" },
     // America
     { key: "mark", id: "UgBBYS2sOqTuMpoF3BR0", name: "Mark", accent: "American", gender: "male", description: "Relaxed and natural" },
     { key: "hope", id: "tnSpp4vdxKPjI9w0GnoV", name: "Hope", accent: "American", gender: "female", description: "Upbeat and clear" },
