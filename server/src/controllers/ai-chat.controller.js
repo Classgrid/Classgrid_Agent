@@ -2263,8 +2263,9 @@ export const streamAskAi = async (req, res) => {
                 );
                 const summary = answer.replace(/["'*]/g, "").trim().slice(0, 60);
                 if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "answer", answer: summary })}\n\n`);
+                // (a message's short title is free like the chat's title: it cuts no credits; only the usage log
+                // keeps it. Owner, 2026-11-23: "don't cut it for title")
                 if (userId && usage?.total_tokens > 0) {
-                    deductTokens(userId, orgId, chargeableTokens(usage, titleModel), tokenSource, { label: { model: titleModel, what: "Chat title" } }).catch(() => {});
                     AiUsageLog.create({
                         organization_id: orgId || null, userId, provider: titleProvider, model: titleModel, feature: 'other',
                         promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, totalTokens: usage.total_tokens, success: true
