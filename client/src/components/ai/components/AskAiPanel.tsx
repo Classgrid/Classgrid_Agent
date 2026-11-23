@@ -212,7 +212,7 @@ import { McpConnectCards } from "./answer-cards/mcp-connect";
 
 import { SongsDisplay } from "./answer-cards/songs";
 
-import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, markCheckpoint, helperReportsOf, HelperReportLines, planFileOf, markdownFilePath, openLocalFile, OPEN_PROJECT_FILE_EVENT } from "./stepper/ProjectToolSteps";
+import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, markCheckpoint, helperReportsOf, HelperReportLines, PeerMessageLine, planFileOf, markdownFilePath, openLocalFile, OPEN_PROJECT_FILE_EVENT } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 
 import { ReplySteps } from "./stepper/ReplySteps";
@@ -262,6 +262,11 @@ import { showDesktopNotification } from "@/lib/desktopNotifications";
 
 import { AgentMapButton } from "./AgentMap";
 
+import { isPeerContent, markPeerRead, parsePeerContent, peerInboxNow, peerNoticeText, peerPrompt, reportSessionStatus, subscribePeers } from "@/lib/peerSessions";
+
+// Session-to-session messaging: the AI panels that are open, the newest one is the one that answers other sessions
+const peerPanels: symbol[] = [];
+
 
 // Fetch real presigned URL for R2 uploads
 // Chats known to be ended (id -> end reason), so an ended chat shows its card at once on refresh or open,
@@ -293,7 +298,7 @@ function chatProjectOf(sData: any): string | null {
 // question dot or copied text. Sent now it has hidden; loaded from the server it is known by its "[SYSTEM:" start.
 function isHiddenMessage(m: { role?: string; content?: unknown; hidden?: boolean } | null | undefined): boolean {
   if (!m) return false;
-  return !!m.hidden || (m.role === "user" && typeof m.content === "string" && m.content.trim().startsWith("[SYSTEM:"));
+  return !!m.hidden || (m.role === "user" && typeof m.content === "string" && (m.content.trim().startsWith("[SYSTEM:") || isPeerContent(m.content)));
 }
 
 // The chat request's JSON, gzipped where the browser can (Chromium, Electron): the plain text where it can't or when
@@ -527,6 +532,8 @@ export type ChatMessage = {
   codeNotes?: CodeNoteChip[];
   /** The live doc that was open beside the chat when this was sent (Studio). */
   besideDoc?: OpenDoc;
+  /** A message from another Classgrid session that started this turn (shown as "Message from @name") */
+  meta?: { peer?: { from: { sessionId: string; name: string; kind?: string }; messageId: string } };
 };
 
 export type QueuedMessage = {
@@ -4549,6 +4556,52 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     askQuestionRef.current = askQuestion;
   }, [askQuestion]);
 
+  // Session-to-session messaging (desktop app / Classgrid Code; nothing happens on the website)
+  const peerMe = useRef<symbol>(Symbol("peer-panel"));
+  const peerBusyRef = useRef(false);
+  const peerHandledRef = useRef<Set<string>>(new Set());
+  const [peerPending, setPeerPending] = useState(0);
+  const [peerNotices, setPeerNotices] = useState<{ key: string; text: string }[]>([]);
+  useEffect(() => {
+    const me = peerMe.current;
+    peerPanels.push(me);
+    const active = () => peerPanels[peerPanels.length - 1] === me;
+    const off = subscribePeers(
+      (m) => {
+        if (!active() || peerHandledRef.current.has(m.id)) return;
+        if (peerBusyRef.current) { setPeerPending((n) => n + 1); return; } // busy: the host adds it to the next tool result (or sends it again when this turn ends)
+        peerHandledRef.current.add(m.id);
+        markPeerRead([m.id]);
+        void askQuestionRef.current?.(peerPrompt(m), { hidden: true, meta: { peer: { from: m.from, messageId: m.id } } });
+      },
+      (n) => {
+        if (!active() || n.kind === "read") return;
+        setPeerNotices((old) => [...old, { key: `${n.kind}-${n.from.sessionId}-${Date.now()}`, text: peerNoticeText(n) }].slice(-3));
+      },
+    );
+    return () => { off(); const i = peerPanels.indexOf(me); if (i >= 0) peerPanels.splice(i, 1); };
+  }, []);
+  // Tell the host when a turn starts (busy) and ends (idle: finished, failed or stopped)
+  useEffect(() => {
+    peerBusyRef.current = submitting;
+    if (peerPanels[peerPanels.length - 1] !== peerMe.current) return;
+    reportSessionStatus(submitting ? "busy" : "idle");
+    if (submitting) return;
+    setPeerPending(0);
+    // A message that came while the turn ran and that no later step read is still in the inbox: it starts the next turn
+    const t = setTimeout(() => {
+      if (peerBusyRef.current || peerPanels[peerPanels.length - 1] !== peerMe.current) return;
+      void peerInboxNow().then((msgs) => {
+        const m = msgs.find((x) => !peerHandledRef.current.has(x.id));
+        if (!m || peerBusyRef.current) return;
+        peerHandledRef.current.add(m.id);
+        markPeerRead([m.id]);
+        void askQuestionRef.current?.(peerPrompt(m), { hidden: true, meta: { peer: { from: m.from, messageId: m.id } } });
+      });
+    }, 400);
+    return () => clearTimeout(t);
+  }, [submitting]);
+
   // Whatever way a chat was opened (refresh restore, sidebar, link), read whether it has ended.
   useEffect(() => {
     if (!sessionId || readOnly) return;
@@ -4648,7 +4701,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     }
   }
 
-  async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null; codeNotes?: CodeNote[] }) {
+  async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null; codeNotes?: CodeNote[]; meta?: ChatMessage["meta"] }) {
     if (chatEnded) { setSubmitting(false); return; } // ended chats take no new messages
     // Desktop app: a chat another account on this computer had goes on under this account. Its messages are
     // copied into a new chat of this account first, then the message is sent there (the AI has the whole chat)
@@ -4796,6 +4849,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         contextTitle: sentContextTitle,
         attachments: allAttachments.length > 0 ? allAttachments : undefined,
         hidden: options?.hidden,
+        meta: options?.meta,
         codeNotes: sentCodeNotes.length > 0 ? sentCodeNotes.map(toChip) : undefined,
         besideDoc: besideDoc || undefined,
       },
@@ -5959,11 +6013,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             </div>
           </>
         ) : (() => {
-          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy, localImagesFound];
+          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy, localImagesFound, peerNotices, peerPending];
           if (typingOnlyRender && chatListRef.current && chatListRef.current.deps.every((d, i) => d === listDeps[i])) return chatListRef.current.node;
           const node = (
           <>
             {messages.map((rawMessage, index) => {
+              // A message from another Classgrid session: "Message from @name", collapsed, opens to what they wrote
+              const peerMsg = rawMessage.role === "user" ? (rawMessage.meta?.peer ? { name: rawMessage.meta.peer.from.name, text: parsePeerContent(rawMessage.content)?.text ?? String(rawMessage.content) } : (() => { const p = parsePeerContent(rawMessage.content); return p ? { name: p.name, text: p.text } : null; })()) : null;
+              if (peerMsg) return <PeerMessageLine key={rawMessage.id} name={peerMsg.name} text={peerMsg.text} />;
               if (isHiddenMessage(rawMessage)) {
                 // A helper's report coming back: "Message from Helper 1 (...): ..." (the rest stays hidden)
                 const reports = rawMessage.role === "user" ? helperReportsOf(rawMessage.content) : null;
@@ -6590,6 +6647,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             {gridJoinLines.after.map((j) => <GridJoinLine key={`join-${j.email}`} {...j} />)}
             {/* Share Grid: the agent is answering someone else (sending is blocked until it is done) */}
             {gridBlockedBy && <GridReplyingLine person={gridBlockedBy} />}
+            {/* Other Classgrid sessions: a finished/closed notice, and messages waiting for this turn to end */}
+            {peerNotices.map((n) => <div key={n.key} className="pl-10 py-1 text-[13px] text-slate-500 dark:text-[#8a8a8a]">{n.text}</div>)}
+            {peerPending > 0 && <div className="ml-10 w-fit rounded-full border border-border/60 px-2.5 py-0.5 text-xs text-muted-foreground">{peerPending} message{peerPending === 1 ? "" : "s"} from another session waiting</div>}
 
             {/* Rendering priority message right after the normal messages */}
             {priorityMessage && (

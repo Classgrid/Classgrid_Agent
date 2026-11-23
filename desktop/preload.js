@@ -111,6 +111,15 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   browserDownloads: (q) => ipcRenderer.invoke("cg:browserDownloads", q),
   browserDownloadAct: (id, action) => ipcRenderer.invoke("cg:browserDownloadAct", id, action),
   browserClearData: () => ipcRenderer.invoke("cg:browserClearData"),
+  // Messages between Classgrid sessions on this computer (sessions.js). Events: "cg-peer-message" {id, from, text,
+  // notifyIdle, receivedAt, sessionStatus}, "cg-peer-notice" {kind: idle|exit|read, messageId, from}.
+  onPeerMessage: (fn) => { const l = (_e, m) => fn(m); ipcRenderer.on("cg-peer-message", l); ipcRenderer.send("cg-peer-ready"); /* main sends what queued up */ return () => ipcRenderer.removeListener("cg-peer-message", l); },
+  onPeerNotice: (fn) => { const l = (_e, m) => fn(m); ipcRenderer.on("cg-peer-notice", l); return () => ipcRenderer.removeListener("cg-peer-notice", l); },
+  sessionStatus: (status) => ipcRenderer.invoke("cg-session-status", { status }).catch(() => {}), // "busy" while an answer runs, "idle" after
+  peerRead: (ids) => ipcRenderer.invoke("cg-peer-read", { ids }).catch(() => {}), // the chat showed or used these messages
+  peerInbox: () => ipcRenderer.invoke("cg:peerInbox"), // unread messages that arrived before the chat was listening
+  listSessions: () => ipcRenderer.invoke("cg:listSessions"),
+  sendToSession: (req) => ipcRenderer.invoke("cg:sendToSession", req), // { target, text, notifyIdle } -> receipt or { error }
   onBrowser: (fn) => {
     const listener = (_e, msg) => fn(msg);
     ipcRenderer.on("cg:browser", listener);

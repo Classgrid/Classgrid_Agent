@@ -39,7 +39,7 @@ if (!process.argv.includes("--no-build")) {
 for (const f of fs.readdirSync(path.join(repo, "classgrid-editor", "extension"))) {
   fs.cpSync(path.join(repo, "classgrid-editor", "extension", f), path.join(ext, f), { recursive: true });
 }
-for (const f of ["runner.js", "aimemory.js", "computer.js", "chats.js", "memory.js", "notify-toast.ps1"]) {
+for (const f of ["runner.js", "aimemory.js", "computer.js", "chats.js", "memory.js", "sessions.js", "notify-toast.ps1"]) {
   fs.copyFileSync(path.join(repo, "desktop", f), path.join(ext, "desktop", f));
 }
 console.log("Copied the extension and the desktop parts");

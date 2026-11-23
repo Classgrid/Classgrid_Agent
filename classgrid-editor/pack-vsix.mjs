@@ -26,7 +26,7 @@ fs.mkdirSync(path.join(out, "desktop"), { recursive: true });
 for (const f of ["extension.js", "bridge.js", "editor-context.js", "electron-shim.js", "LICENSE.txt", "package.json", "README.md", "CHANGELOG.md"]) fs.copyFileSync(path.join(ext, f), path.join(out, f));
 fs.cpSync(path.join(ext, "media"), path.join(out, "media"), { recursive: true });
 fs.cpSync(appEditor, path.join(out, "app"), { recursive: true });
-for (const f of ["runner.js", "doctext.js", "pdfpages.js", "picture.js", "aimemory.js", "computer.js", "chats.js", "memory.js", "notify-toast.ps1"]) {
+for (const f of ["runner.js", "doctext.js", "pdfpages.js", "picture.js", "aimemory.js", "computer.js", "chats.js", "memory.js", "sessions.js", "notify-toast.ps1"]) {
   fs.copyFileSync(path.join(repo, "desktop", f), path.join(out, "desktop", f));
 }
 const deps = JSON.parse(fs.readFileSync(path.join(repo, "desktop", "package.json"), "utf8")).dependencies;

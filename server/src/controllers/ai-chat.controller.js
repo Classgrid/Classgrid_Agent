@@ -95,7 +95,7 @@ import NotificationLog from "../models/NotificationLog.js";
 import { getMcpTools, handleToolCall, readSandboxFiles } from "../mcp/tools.js";
 import { CUSTOM_MCP_TOOL, runCustomMcpTool, customMcpPromptLine } from "../services/custom-mcp-ai.js";
 import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../services/music-ai.js";
-import { localProjectFor, callLocal, readLocalFile, runOnComputer, useComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS, chatWorktree, setChatWorktree, inChatWorktree } from "../services/local-runner.service.js";
+import { localProjectFor, callLocal, callRunner, readLocalFile, runOnComputer, useComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS, chatWorktree, setChatWorktree, inChatWorktree } from "../services/local-runner.service.js";
 import { projectForChat } from "../services/ide-project.service.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
@@ -1206,6 +1206,42 @@ const helperBoard = (sessionId) => {
     if (!HELPER_BOARDS.has(key)) HELPER_BOARDS.set(key, { helpers: [], nextNo: 1 });
     return HELPER_BOARDS.get(key);
 };
+// Two copies of this server run (main and rescue, sibling-process.js) and a chat's helpers live in the memory of the
+// copy that started them. A message of that chat that lands on the OTHER copy knew nothing of them: owner, 2026-11-21,
+// five helpers working in the main copy, his next message answered by the rescue copy, which said "No helpers are
+// working in this chat" and started five more. So the copy that holds a chat's helpers writes its name in Redis
+// (while they work, and for half an hour after the last one finished, for their reports), and a message of that chat
+// that reaches the other copy is passed on to the copy that has them (askGoesToHelpersCopy), where it is answered
+// with the helpers in sight. The list of helpers for the chat box is already passed on the same way (getChatHelpers).
+const HELPERS_AT = (sessionId) => `ai:helpers:at:${sessionId}`;
+const HELPERS_WORKING_S = 6 * 3600;
+const HELPERS_DONE_S = 30 * 60;
+function noteHelpersHere(sessionId) {
+    if (!sessionId) return;
+    const board = HELPER_BOARDS.get(String(sessionId));
+    if (!board) return;
+    const working = board.helpers.some((h) => h.state === "running");
+    import("../services/sibling-process.js")
+        .then(({ PROCESS_ROLE }) => redis.set(HELPERS_AT(sessionId), PROCESS_ROLE, "EX", working ? HELPERS_WORKING_S : HELPERS_DONE_S))
+        .catch(() => {});
+}
+/** Passes this message on to the other copy when this chat's helpers are there. True = it was answered there. */
+async function askGoesToHelpersCopy(req, res, body) {
+    const sessionId = typeof body?.sessionId === "string" ? body.sessionId : "";
+    if (!sessionId || HELPER_BOARDS.has(sessionId)) return false;
+    try {
+        const at = await redis.get(HELPERS_AT(sessionId));
+        if (!at) return false;
+        const [{ PROCESS_ROLE, forwardToSibling }, { passOnToHelpersCopy }] = await Promise.all([import("../services/sibling-process.js"), import("../utils/helpers-copy.js")]);
+        // (named here but gone, e.g. this copy restarted: answered here)
+        if (!passOnToHelpersCopy({ hasBoardHere: false, markedAt: at, here: PROCESS_ROLE })) return false;
+        const sent = await forwardToSibling(req, res);
+        if (sent) console.log(`[AI-STREAM] this chat's helpers are in the ${at} copy: its message is answered there (chat ${sessionId})`);
+        return sent;
+    } catch {
+        return false;
+    }
+}
 // A helper's steps for the chat's Agent map, in the same shape as the main AI's steps, so they show with the same
 // stepper (its thinking, each tool with what it ran and what came back). Long texts (a whole file written) are cut.
 const cutArgs = (a) => {
@@ -1290,6 +1326,7 @@ const stopHelpers = (sessionId) => {
     if (!board) return;
     for (const h of board.helpers) if (h.state === "running") h.abort.abort(new Error("The chat answer ended"));
     HELPER_BOARDS.delete(String(sessionId || "none"));
+    if (sessionId) redis.del(HELPERS_AT(sessionId)).catch(() => {});
 };
 export const CF_PICKER_MODELS = new Map([
     ["@cf/deepseek-ai/deepseek-v4.1-flash-1017", "native"],
@@ -1462,6 +1499,34 @@ const READ_LOCAL_FILE_TOOL = {
         }
     }
 };
+// Desktop app and editors only: the other Classgrid sessions running on this computer (desktop/sessions.js, a copy of
+// Claude Code's peer messaging: a named pipe per session, no server). Run by the app that is chatting (pc_tool_call).
+const SESSION_TOOLS = [
+    {
+        type: "function",
+        function: {
+            name: "list_classgrid_sessions",
+            description: "List the other Classgrid AI sessions running on this computer right now (the desktop app, Classgrid Code, and the Classgrid extension in VS Code, Cursor or Antigravity), each with its name, kind, folder and whether it is busy or idle. A closed session is not listed.",
+            parameters: { type: "object", properties: {} }
+        }
+    },
+    {
+        type: "function",
+        function: {
+            name: "message_classgrid_session",
+            description: "Send a message to another Classgrid AI session on this computer (list them first). A busy session reads it at its next step; an idle one starts a new turn with it. It can answer you the same way. The result is a receipt: delivered to its inbox (not read yet), held or refused. Set notify_when_idle to get one notice when it finishes its turn or closes.",
+            parameters: {
+                type: "object",
+                properties: {
+                    target: { type: "string", description: "The session's name, session id or pid, from list_classgrid_sessions" },
+                    text: { type: "string", description: "The message" },
+                    notify_when_idle: { type: "boolean", description: "Get one notice when that session finishes its turn (or closes)" }
+                },
+                required: ["target", "text"]
+            }
+        }
+    }
+];
 // WHERE YOU WORK: the one fixed answer to "where am I and where does my work run", sent last in every system prompt so
 // the desktop app's AI and the website's AI never mix them up (the desktop AI used to reach for the cloud sandbox,
 // and the website AI for the user's computer)
@@ -1789,6 +1854,8 @@ const PHONE_BLOCKED_TOOLS = new Set(["write_project_file", "write_project_file_f
 export const streamAskAi = async (req, res) => {
     const requestStartedAt = Date.now();
     const body = req.body || {};
+    // This chat's helpers are working in the other copy of this server: the message is answered there (see HELPERS_AT)
+    if (await askGoesToHelpersCopy(req, res, body)) return;
     // Sent from the website (chat.classgrid.in): folder projects (a folder on the user's computer) work only in the
     // desktop app, so they are never linked, described or reached from here (utils/client-app.js)
     const fromWebsite = isWebsite(req);
@@ -4741,10 +4808,12 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 // Its report goes to the chat by itself: now, or when the answer the chat is writing ends, if
                                 // the main AI did not read it there with check_helpers (sendHelperReports)
                                 sendHelperReports(userId, sessionId).catch(() => {});
+                                noteHelpersHere(sessionId); // (the last one finished: kept half an hour more, for the reports)
                             });
                             board.helpers.push(h);
                             return h;
                         });
+                        noteHelpersHere(sessionId); // this copy holds this chat's helpers (see HELPERS_AT)
                         const label = (h) => `Helper ${h.no} (${MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.usedModel || h.model}, ${h.canEdit ? "can edit" : "read only"}): ${h.task.slice(0, 80)}`;
                         // Helpers always work in the background (owner, 2026-11-18: "from now on make it a rule: helpers only
                         // work in the background"; DeepSeek sent one with wait: true, so the answer waited, was stopped, and the
@@ -4867,6 +4936,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     },
                     // Desktop app only (see READ_LOCAL_FILE_TOOL): the user's own Classgrid app reads the file
                     read_local_file: async (args) => readLocalFile(req.user?._id || req.user?.id, args, { seesImages: modelSeesImages, chat: sessionId }),
+                    // Desktop app and editors only (see SESSION_TOOLS): run by the app that is chatting, so it speaks as its own session
+                    list_classgrid_sessions: async (args) => (await callRunner(req.user?._id || req.user?.id, "list_classgrid_sessions", args || {}, sessionId))?.text || "The Classgrid desktop app isn't open on this computer.",
+                    message_classgrid_session: async (args) => (await callRunner(req.user?._id || req.user?.id, "message_classgrid_session", args || {}, sessionId))?.text || "The Classgrid desktop app isn't open on this computer.",
                     run_code: async (args) => {
                         // A project from a folder on the user's computer: the code runs there, in their desktop app
                         const localProject = fromWebsite ? null : await localProjectFor(sessionId);
@@ -6880,7 +6952,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     return runOnComputer(termUser, "execute_terminal_command", args, sessionId);
                 };
             }
-            for (const def of [READ_LOCAL_FILE_TOOL, ...MEMORY_NOTE_DEFS, ...(onComputer ? COMPUTER_TERMINAL_DEFS : [])]) {
+            for (const def of [READ_LOCAL_FILE_TOOL, ...SESSION_TOOLS, ...MEMORY_NOTE_DEFS, ...(onComputer ? COMPUTER_TERMINAL_DEFS : [])]) {
                 // The terminal tools replace the cloud sandbox ones here, so the AI reads the right description
                 for (const list of [fullToolList, activeToolList]) {
                     const at = list.findIndex(t => t.function.name === def.function.name);

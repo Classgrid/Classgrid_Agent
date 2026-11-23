@@ -595,24 +595,35 @@ export function helperReportsOf(content: unknown): HelperReport[] | null {
   return out.length ? out : null;
 }
 
-function HelperReportLine({ r }: { r: HelperReport }) {
+// The one collapsed line + expandable body that every "Message from ..." row uses: a helper's report, a message from
+// another Classgrid session (PeerMessageLine below) and the receipt of a message sent to one (tool-results/renderers.tsx)
+export function ReportRow({ label, body }: { label: string; body: string }) {
   const [open, setOpen] = useState(false);
-  const snap = useHelperSnapshot();
-  const h = snap.helpers.find((x) => x.no === r.no);
-  const task = h?.task || r.task;
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 py-1 pl-10 text-left text-[14px] italic text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
-        <span className="min-w-0 truncate">Message from Helper {r.no} ({helperTitle({ no: r.no, task, title: h?.title })}): {r.report.replace(/\s+/g, ' ').trim()}</span>
+        <span className="min-w-0 truncate">{label}: {body.replace(/\s+/g, ' ').trim()}</span>
         {open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
       </button>
       {open && (
         <FollowBox className="ml-10 mb-2 max-h-[360px]" follow={0}>
-          <div className="whitespace-pre-wrap text-[14px] text-slate-500 dark:text-[#8a8a8a]">{r.report}</div>
+          <div className="whitespace-pre-wrap text-[14px] text-slate-500 dark:text-[#8a8a8a]">{body}</div>
         </FollowBox>
       )}
     </div>
   );
+}
+
+function HelperReportLine({ r }: { r: HelperReport }) {
+  const snap = useHelperSnapshot();
+  const h = snap.helpers.find((x) => x.no === r.no);
+  const task = h?.task || r.task;
+  return <ReportRow label={`Message from Helper ${r.no} (${helperTitle({ no: r.no, task, title: h?.title })})`} body={r.report} />;
+}
+
+// A message from another Classgrid session (hidden turn started by lib/peerSessions.ts): "Message from @name: text"
+export function PeerMessageLine({ name, text }: { name: string; text: string }) {
+  return <div className="mb-3 flex flex-col"><ReportRow label={`Message from @${name}`} body={text} /></div>;
 }
 
 export function HelperReportLines({ reports }: { reports: HelperReport[] }) {

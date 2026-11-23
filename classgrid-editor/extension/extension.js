@@ -43,6 +43,40 @@ let saveTimer = null;
 const loaders = new Set(); // each open panel's "load our screens again"
 // The Agent panel (right side) and the chats sidebar (the window's left edge, classgrid-left-strip.patch)
 const screens = { agent: null, chats: null };
+// Session-to-session messaging (desktop/sessions.js): this editor's session handle, and the messages and notices that
+// arrived while the Agent panel's page wasn't ready (it says so with "peerReady"; then they are flushed to it)
+const peer = { handle: null, queue: [], ready: new WeakSet() };
+function peerSend(event) {
+  const w = screens.agent;
+  if (w && peer.ready.has(w)) { w.postMessage(event); return; }
+  peer.queue.push(event);
+  if (peer.queue.length > 200) peer.queue.shift();
+}
+function peerFlush(webview) {
+  peer.ready.add(webview);
+  const q = peer.queue.splice(0);
+  for (const e of q) webview.postMessage(e);
+}
+function startSession(context, runner) {
+  try {
+    const file = path.join(DESKTOP_DIR, "sessions.js");
+    if (!fs.existsSync(file)) return;
+    const app = vscode.env.appName || "";
+    const host = /classgrid/i.test(app) ? "classgrid-code" : /cursor/i.test(app) ? "cursor" : /antigravity/i.test(app) ? "antigravity" : "vscode";
+    const label = { "classgrid-code": "Classgrid Code", cursor: "Cursor", antigravity: "Antigravity", vscode: "VS Code" }[host];
+    const folder = (vscode.workspace.workspaceFolders || [])[0]?.uri.fsPath || process.cwd();
+    const name = `${label} - ${path.basename(folder) || folder}`;
+    const handle = require(file).register({ kind: host, name, cwd: folder, entrypoint: "extension" });
+    if (!handle) return;
+    peer.handle = handle;
+    runner.setSessionHandle?.(handle);
+    handle.onMessage?.((m) => peerSend({ cgEvent: "peerMessage", data: { id: m.id, from: m.from, text: m.text, notifyIdle: !!m.notifyIdle, receivedAt: m.receivedAt || Date.now() } }));
+    handle.onNotice?.((n) => peerSend({ cgEvent: "peerNotice", data: { kind: n.kind, messageId: n.messageId, from: n.from } }));
+    context.subscriptions.push({ dispose: () => { try { handle.close(); } catch { /* already closed */ } } });
+  } catch (err) {
+    log?.appendLine(`[${new Date().toISOString()}] sessions: ${err?.message || err}`);
+  }
+}
 
 async function activate(context) {
   log = vscode.window.createOutputChannel("Classgrid");
@@ -71,6 +105,7 @@ async function activate(context) {
     vscode.commands.executeCommand("workbench.extensions.installExtension", id).then(undefined, () => context.globalState.update(`added:${id}`, false));
   }
   parts = { runner, chats, memory, version, context };
+  startSession(context, runner);
   try { storage = JSON.parse((await context.secrets.get(STORAGE_KEY)) || "{}"); } catch { storage = {}; }
   // (the Classgrid app logged out: Classgrid Code too, now and whenever it happens while the editor is open. Only
   // Classgrid Code shares the app's login; the extension in VS Code, Cursor or Antigravity signed in by itself in the
@@ -221,6 +256,8 @@ async function openAt(q) {
 }
 
 function deactivate() {
+  try { peer.handle?.close(); } catch { /* already closed */ }
+  peer.handle = null;
   try { parts?.runner.stopAll(); } catch { /* already stopped */ }
   try { clipHost?.proc.kill(); } catch { /* already gone */ }
 }
@@ -251,6 +288,7 @@ function holdScreens(webview, startPath) {
   const load = () => {
     // The page that goes away doesn't need its calls' answers any more (a long answer would keep coming for nothing)
     stopFetches(webview);
+    peer.ready.delete(webview); // (the new page says peerReady again)
     // Signed out: our own sign-in screen (browser sign-in, like Antigravity and Claude Code)
     if (!storage.token) { webview.html = signedOutHtml(webview); return; }
     if (!fs.existsSync(path.join(APP_DIR, "index.html"))) { webview.html = signedOutHtml(webview, "missing"); return; }
@@ -900,6 +938,12 @@ const HANDLERS = {
   readFile: (_p, folder, rel) => parts.runner.readForFilesTab(String(folder || ""), String(rel || "")),
   // One AI step on this computer (pc_tool_call on the answer's own stream): the same runner the socket fallback uses
   runTool: (_p, req) => parts.runner.runTool(req && typeof req === "object" ? req : {}),
+  // Session messaging: the page is ready for peer messages (flush what waited), its busy/idle state, and the messages it showed
+  peerReady: (p) => { if (p.webview === screens.agent) peerFlush(p.webview); },
+  sessionStatus: (p, status) => { if (p.webview === screens.agent && (status === "busy" || status === "idle")) peer.handle?.setStatus(status); },
+  peerRead: (p, ids) => { if (p.webview === screens.agent && Array.isArray(ids)) peer.handle?.markRead(ids.map(String)); },
+  // Unread messages still in the inbox (came while a turn ran and no later step picked them up): read when the turn ends
+  peerInbox: (p) => (p.webview === screens.agent && peer.handle ? peer.handle.peek() : []),
   // Studio's Review tab for a folder on this computer: an answer's changes, and its files put back (runner.js keepBefore)
   listCheckpoints: (_p, chat) => parts.runner.listCheckpoints(chat),
   reviewCheckpoint: (_p, chat, cp) => parts.runner.reviewCheckpoint(chat, cp),

@@ -2609,11 +2609,41 @@ export const handleToolCall = async (name, args, context = {}) => {
           return { content: [{ type: 'text', text: `Error: Schedule with ID ${args.schedule_id} not found or you don't have permission.` }] };
         }
 
+        let resendCounted = false;
+        const { sendsOneTimeWhatsapp, countWhatsappResend, freeWhatsappResend } = await import('../services/ai-feature-limits.js');
         if (args.scheduled_at) {
           schedule.scheduled_at = new Date(args.scheduled_at);
-          if (schedule.status !== 'pending') schedule.status = 'pending';
+          if (schedule.status !== 'pending') {
+            // WhatsApp limit (2026-11-21, owner: "fix all"): a one-time schedule that already went out is set back
+            // to "pending" here, and the worker sends its WhatsApp message again. That is one more message, but it
+            // was still one counted row (none once the row was older than the period). Now it is checked against
+            // the person's limit the way a new schedule is, the message that went out stays counted and the new one
+            // is counted from this moment (countWhatsappResend, services/ai-feature-limits.js).
+            if (sendsOneTimeWhatsapp(schedule)) {
+              const User = (await import('../models/User.js')).default;
+              // The person the schedule belongs to (with the plan, so the limit is their own plan's)
+              const ownerId = schedule.user_id || context.userId;
+              const owner = ownerId
+                ? await User.findById(ownerId).select('_id plan role email organization_id').lean()
+                : await User.findOne({ email: finalUserEmail }).select('_id plan role email organization_id').lean();
+              if (!owner) return { content: [{ type: 'text', text: 'Error: User not found.' }] };
+              await schedule.validate(); // (a time that can't be saved is refused before anything is counted or paid)
+              const wa = await countWhatsappResend(schedule, owner);
+              if (wa && !wa.allowed) {
+                return { content: [{ type: 'text', text: `FAILED: This user has used ${wa.used} of ${wa.limit} WhatsApp messages allowed in the last ${wa.periodText || '7 days'} (the limit is set by Classgrid admins). The schedule was not changed.${wa.resetText ? ` Reset time: ${wa.resetText}${owner.role === 'super_admin' ? '' : ' (share only if the user asks)'}.` : ''}${wa.extraOffer || ''} Tell the user exactly this; do not guess other reasons.` }] };
+              }
+              resendCounted = !!wa;
+            }
+            schedule.status = 'pending';
+          }
         }
-        await schedule.save();
+        try {
+          await schedule.save();
+        } catch (saveError) {
+          // The new time was not saved, so nothing will go out again: the place that was just counted is given back
+          if (resendCounted) await freeWhatsappResend(schedule).catch(() => {});
+          throw saveError;
+        }
         await emitScheduleUpdate(schedule.user_id, schedule._id);
         return { content: [{ type: 'text', text: `Successfully updated schedule execution time.` }] };
       } catch (e) {
@@ -2783,8 +2813,19 @@ export const handleToolCall = async (name, args, context = {}) => {
           return { content: [{ type: 'text', text: `Error: Schedule with ID ${args.schedule_id} not found or you don't have permission to delete it.` }] };
         }
 
+        // WhatsApp limit (2026-11-21, owner: "fix all"): deleting a schedule after its WhatsApp message went out
+        // removed its row, and the sent message dropped out of the person's count. The sent message is kept in the
+        // count first (services/ai-feature-limits.js); if that can't be written, nothing is deleted.
+        const { keepSentWhatsappCounted, freeWhatsappResend } = await import('../services/ai-feature-limits.js');
+        await keepSentWhatsappCounted(schedule);
+
         // Delete the exact document the ownership check found, never by the raw argument
         await AiSchedule.deleteOne({ _id: schedule._id, user_email: finalUserEmail });
+        // A schedule deleted while still waiting frees its place, as before. One that was set to go out again
+        // (edit_schedule_time) had that message counted the moment it was booked: that place is given back here.
+        if (schedule.status === 'pending') {
+          await freeWhatsappResend(schedule).catch((e) => console.error('[WhatsApp] the place of a deleted schedule could not be given back:', e.message));
+        }
         await emitScheduleUpdate(schedule.user_id, schedule._id);
         return { content: [{ type: 'text', text: `Successfully deleted schedule ${args.schedule_id}.` }] };
       } catch (e) {
@@ -6873,6 +6914,28 @@ export const handleToolCall = async (name, args, context = {}) => {
           throw new Error("WhatsApp Business API keys are not configured in the backend environment.");
         }
 
+        // WhatsApp limit (2026-11-21, owner: "fix all"): this tool sends from Classgrid's own WhatsApp number, the
+        // same number and cost as send_whatsapp_message, but it sent with no limit check and counted nothing, and
+        // any signed-in person can switch it on (GET /api/ai-integrations/connect/whatsapp). Every message now goes
+        // through the same gate as any other message sent right away: the person's WhatsApp limit first (past the
+        // number it is paid from their credits or refused, exactly as send_whatsapp_message does), and the message
+        // is counted once Meta accepts it. A caller that can't be matched to an account is refused, never sent.
+        const User = (await import('../models/User.js')).default;
+        const senderEmail = String(userEmail || '').trim();
+        const sender = context.userId
+          ? await User.findById(context.userId).select('_id plan role email organization_id').lean()
+          : (senderEmail && senderEmail !== 'unknown@unknown.invalid'
+            ? await User.findOne({ email: senderEmail }).select('_id plan role email organization_id').lean()
+            : null);
+        if (!sender?._id) {
+          return { content: [{ type: 'text', text: 'FAILED: Sign in to send WhatsApp messages.' }] };
+        }
+        const { checkWhatsappLimit, recordDirectWhatsappSend } = await import('../services/ai-feature-limits.js');
+        const waLimit = await checkWhatsappLimit(sender);
+        if (!waLimit.allowed) {
+          return { content: [{ type: 'text', text: `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${sender.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""}${waLimit.extraOffer || ""} Tell the user exactly this; do not guess other reasons.` }] };
+        }
+
         const res = await fetch(`https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {
           method: 'POST',
           headers: {
@@ -6895,6 +6958,10 @@ export const handleToolCall = async (name, args, context = {}) => {
         if (data.error) {
           throw new Error(data.error.message);
         }
+
+        // Meta accepted the message: it counts toward the person's limit (with Meta's id, so a later "failed"
+        // delivery report takes it off the count again)
+        await recordDirectWhatsappSend(sender._id, data.messages?.[0]?.id);
 
         return { content: [{ type: 'text', text: `WhatsApp message sent successfully to ${toPhoneNumber}. Message ID: ${data.messages[0].id}` }] };
       } catch (e) {

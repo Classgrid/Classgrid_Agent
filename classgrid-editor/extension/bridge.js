@@ -451,6 +451,14 @@
     // The plan card's plan file (plan/*.md): its own tab beside the chat, the plan shown as a page (extension.js showPlan)
     showPlan: bind("showPlan"),
     onOpenFolderProject: on("openFolderProject"),
+    // Session-to-session messaging (desktop/sessions.js). onPeerMessage(cb): cb({ id, from, text, notifyIdle, receivedAt });
+    // onPeerNotice(cb): cb({ kind, messageId, from }). Registering the first listener tells the extension this page is
+    // ready, and it sends what arrived before. sessionStatus('busy'|'idle') and peerRead(ids) go the other way.
+    onPeerMessage: function (fn) { var off = on("peerMessage")(fn); send("peerReady"); return off; },
+    onPeerNotice: on("peerNotice"),
+    sessionStatus: function (status) { send("sessionStatus", status); },
+    peerRead: function (ids) { send("peerRead", ids); },
+    peerInbox: bind("peerInbox"), // unread messages still waiting (read when a turn ends)
     // Settings → Appearance: light, dark or the same as the computer, for the whole editor. It also says which one that
     // is now (the computer's own for "same as your PC"), so the AI panel switches at once, not after the editor does
     setEditorTheme: function (mode) {

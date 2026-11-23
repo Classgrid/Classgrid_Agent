@@ -1082,7 +1082,42 @@ async function readLocalVideo(full, stat, key) {
   return out;
 }
 
-const anywhereTools = { read_local_file: readLocalFile };
+// ── Other Classgrid sessions on this computer (sessions.js): list them, message them ──────────────────────
+// The host (the desktop app or the editor extension) hands over its own session with setSessionHandle(handle).
+let sessionHandle = null;
+const sessionsLib = () => require("./sessions");
+const ago = (t) => { const s = Math.max(0, Math.round((Date.now() - Number(t || 0)) / 1000)); return s < 60 ? `${s}s` : s < 3600 ? `${Math.round(s / 60)} min` : `${Math.round(s / 3600)} h`; };
+async function listClassgridSessions() {
+  const rows = await sessionsLib().list({ excludeSelf: true });
+  if (!rows.length) return { text: "No other Classgrid session is running on this computer." };
+  return { text: `${rows.length} other Classgrid session${rows.length === 1 ? "" : "s"} running:\n${rows.map((s) => `- @${s.name} (${s.kind}, pid ${s.pid}, session ${s.sessionId}) is ${s.status} for ${ago(s.statusUpdatedAt)}${s.cwd ? `, folder ${s.cwd}` : ""}`).join("\n")}` };
+}
+async function messageClassgridSession(args) {
+  if (!sessionHandle) return { text: "Error: this session is not set up for messaging other sessions." };
+  let r;
+  try { r = await sessionsLib().send({ target: args.target, text: args.text, notifyIdle: !!(args.notify_when_idle ?? args.notifyIdle), from: sessionHandle.identity() }); }
+  catch (e) { return { text: `Error: ${e.message}` }; }
+  const who = `@${r.target.name}`;
+  const idle = r.targetStatus === "idle";
+  let text;
+  if (r.status === "delivered") text = `Delivered to ${who}'s inbox (message id ${r.id}, not read yet). ${idle ? "It was idle and will start a new turn." : "It is busy; it will read it at its next step."}${args.notify_when_idle || args.notifyIdle ? " You will get one notice when it finishes its turn." : ""}`;
+  else if (r.status === "held") text = `${who} is holding the message (message id ${r.id}, not read yet): ${r.reason || "its inbox is full"}.`;
+  else text = `${who} refused the message (message id ${r.id}): ${r.reason || "no reason given"}.`;
+  return { text };
+}
+// Messages other sessions sent that this one has not read yet, put after a tool's answer, then marked read
+function withPeerInbox(reply) {
+  try {
+    if (!sessionHandle || !reply || typeof reply.text !== "string") return reply;
+    const msgs = sessionHandle.takeInbox();
+    if (!msgs.length) return reply;
+    const add = msgs.map((m) => `\n\n[Peer message from @${m.from.name} (session ${m.from.sessionId}, message ${m.id})]: ${m.text}`).join("");
+    sessionHandle.markRead(msgs.map((m) => m.id));
+    return { ...reply, text: reply.text + add };
+  } catch { return reply; }
+}
+
+const anywhereTools = { read_local_file: readLocalFile, list_classgrid_sessions: listClassgridSessions, message_classgrid_session: messageClassgridSession };
 
 // Project Mode's file tools for files anywhere on this computer (chats that aren't a project): full paths, the same
 // answers and the same steps in the chat ("Edited notes.txt +3 -1"). Each one is allowed by the user first. Windows,
@@ -1567,7 +1602,10 @@ let onActivity = null;
 async function runTool(req) {
   const counts = req?.tool !== "ping" && !SCREEN_TOOLS.has(req?.tool);
   if (counts) { stepsRunning++; try { onActivity?.(); } catch { /* the listener's own problem */ } }
-  try { return await runToolStep(req); }
+  try {
+    const r = await runToolStep(req);
+    return counts && req?.tool !== "message_classgrid_session" ? withPeerInbox(r) : r;
+  }
   finally { if (counts) { stepsRunning--; try { onActivity?.(); } catch { /* the listener's own problem */ } } }
 }
 
@@ -1777,6 +1815,8 @@ module.exports = {
   tools, // the AI's tools on this computer (also used by the terminal tests)
   runTool, // one step { tool, args, root?, chat?, checkpoint? } -> reply, for the chat screens (pc_tool_call) and the socket
   readLocalFile,
+  setSessionHandle(h) { sessionHandle = h || null; }, // the host's own session (sessions.js register()); both hosts call this
+  withPeerInbox, // reply -> reply with unread peer messages appended (runTool already does this for every step)
   listForFilesTab,
   githubRepoOf,
   readForFilesTab,

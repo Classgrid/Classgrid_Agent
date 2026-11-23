@@ -357,7 +357,7 @@ export const FEATURE_FLAG_CATALOG = Object.freeze([
         group: "studio",
         description: "In the desktop app the AI uses the person's computer: terminal, files, mouse and keyboard.",
         message: "Using your computer is turned off for now. Please try again later.",
-        tools: ["computer", "computer_terminal", "read_local_file", "save_memory", "read_memory", "search_memory", "delete_memory"],
+        tools: ["computer", "computer_terminal", "read_local_file", "list_classgrid_sessions", "message_classgrid_session", "save_memory", "read_memory", "search_memory", "delete_memory"],
         computerTools: ["run_code", ...TERMINAL_TOOLS, "notebook_edit", "use_worktree", "write_project_file", "edit_project_file", "search_project", "find_project_files", "list_project_files"],
     },
 

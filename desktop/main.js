@@ -370,6 +370,39 @@ ipcMain.handle("cg:runTool", (e, req) => {
   if (!from.startsWith(`${APP_URL}/`) && from !== APP_URL) return { text: "Error: this step can only be asked by the Classgrid app itself." };
   return runner.runTool(req && typeof req === "object" ? req : {});
 });
+// Session-to-session messaging (sessions.js): this app is one running Classgrid session others on this computer can
+// list and message. Host -> screens: "cg-peer-message", "cg-peer-notice". Screens -> host: "cg-session-status", "cg-peer-read".
+let peerSession = null;
+let peerReady = false;
+const peerQueue = [];
+function startPeerSession() {
+  try {
+    const sessions = require("./sessions");
+    peerSession = sessions.register({ kind: "desktop", name: "Classgrid desktop", cwd: app.getPath("home"), entrypoint: "classgrid-desktop" });
+    runner.setSessionHandle(peerSession);
+    // (messages and notices that arrive before the chat screen listens wait here, 200 at most, until "cg-peer-ready")
+    const toScreens = (channel, payload) => {
+      if (peerReady && win && !win.isDestroyed()) win.webContents.send(channel, payload);
+      else { peerQueue.push([channel, payload]); if (peerQueue.length > 200) peerQueue.shift(); }
+    };
+    peerSession.onMessage((m) => toScreens("cg-peer-message", { id: m.id, from: m.from, text: m.text, notifyIdle: m.notifyIdle, receivedAt: m.receivedAt, sessionStatus: m.sessionStatus }));
+    peerSession.onNotice((n) => toScreens("cg-peer-notice", n));
+  } catch (e) { console.warn("[sessions] not started:", e.message); }
+}
+ipcMain.on("cg-peer-ready", (e) => {
+  if (!fromOurScreens(e)) return;
+  peerReady = true;
+  for (const [channel, payload] of peerQueue.splice(0)) { try { e.sender.send(channel, payload); } catch { /* window gone */ } }
+});
+ipcMain.handle("cg-session-status", (e, msg) => { if (fromOurScreens(e) && peerSession) peerSession.setStatus(msg && msg.status); return true; });
+ipcMain.handle("cg-peer-read", (e, msg) => { if (fromOurScreens(e) && peerSession) peerSession.markRead(msg && msg.ids); return true; });
+ipcMain.handle("cg:peerInbox", (e) => (fromOurScreens(e) && peerSession ? peerSession.peek() : []));
+ipcMain.handle("cg:listSessions", async (e) => (fromOurScreens(e) ? require("./sessions").list({ excludeSelf: true }) : []));
+ipcMain.handle("cg:sendToSession", async (e, req) => {
+  if (!fromOurScreens(e)) return { error: "only the Classgrid app itself may send messages" };
+  try { return await require("./sessions").send({ target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle) }); }
+  catch (err) { return { error: err.message }; }
+});
 // Studio's Review tab for a folder on this computer (runner.js keepBefore): an answer's changes, Reject, Undo
 const fromOurScreens = (e) => { try { const from = String(e.sender.getURL() || ""); return from.startsWith(`${APP_URL}/`) || from === APP_URL; } catch { return false; } };
 ipcMain.handle("cg:listCheckpoints", (e, chat) => (fromOurScreens(e) ? runner.listCheckpoints(chat) : []));
@@ -549,6 +582,7 @@ if (!app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     Menu.setApplicationMenu(null);
     runner.init(app.getPath("userData"));
+    startPeerSession();
     // Remote PC: the runner's connection says which computer it is (read when it connects, after the login arrives)
     runner.setIdentity({ deviceId: computerId, app: "desktop" });
     chats.init(app.getPath("userData"));
@@ -572,7 +606,7 @@ if (!app.requestSingleInstanceLock()) {
   });
   // (the window hidden in the tray is not closed; a window closed for good with the tray off ends the app)
   app.on("window-all-closed", () => { if (!remotepc.keepsRunning()) app.quit(); });
-  app.on("before-quit", () => { runner.stopAll(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
+  app.on("before-quit", () => { try { peerSession && peerSession.close(); } catch { /* closing */ } runner.stopAll(); require("./recorder").stop(); require("./computer").stop(); terminal.stop(); });
 }
 
 // One question, once: add the Classgrid extension to the code editors found on this computer

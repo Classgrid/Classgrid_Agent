@@ -19,6 +19,7 @@ files:
   - pdfpages.js
   - picture.js
   - aimemory.js
+  - sessions.js
   - recorder.js
   - computer.js
   - terminal.js
