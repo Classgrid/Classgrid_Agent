@@ -8085,6 +8085,11 @@ export const getChatSessions = async (req, res) => {
                     const RemoteChat = (await import("../models/RemoteChat.js")).default;
                     const remote = await RemoteChat.find({ userId: req.user._id, on: true }).select("sessionId").lean().catch(() => []);
                     for (const r of remote) ids.add(r.sessionId);
+                    // The phone never lists a chat started in the desktop app (Classgrid Code too), with or without a
+                    // project (owner, 2026-11-23: "stop showing no project chat on phone"); the website still lists
+                    // them (2026-11-04 rule)
+                    const started = await User.findById(req.user._id).select("desktop_chat_ids").lean().catch(() => null);
+                    for (const id of started?.desktop_chat_ids || []) ids.add(id);
                 }
                 sessions = (sessions || []).filter((s) => !ids.has(s.id));
             }
