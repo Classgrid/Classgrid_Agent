@@ -4998,7 +4998,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     // clients; stepStatus carries running/done/failed.
                     ...buildLiveDocHandlers({ user: req.user }),
                     ...buildAppHistoryHandlers({ user: req.user }),
-                    ...buildPlanInfoHandlers({ user: req.user }),
+                    ...buildPlanInfoHandlers({ user: req.user, modelNames: MODEL_DISPLAY_NAMES }),
                     ...buildSavedNoteHandlers({ user: isIncognito ? null : req.user, sessionId, onChange: () => forgetKept(`usernotes:${userId}`) }),
                     ...buildEndConversationHandlers({ sessionId, isIncognito, messages, question: body.question, res }),
                     update_plan_step: async (args) => {
