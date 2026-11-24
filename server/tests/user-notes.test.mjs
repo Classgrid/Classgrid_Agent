@@ -232,3 +232,64 @@ for (const [name, L] of Object.entries(loops)) {
         assert.equal(r.answer, "All done.");
     });
 }
+
+// ── 4. More of the same path, as the app really uses it ──
+
+for (const [name, L] of Object.entries(loops)) {
+    test(`${name}: several messages sent during one step go to the model together; one sent during a later step arrives after that step`, T, async () => {
+        L.script(["tool", "tool", "tool", "answer"]);
+        const notes = makeUserNotes();
+        let steps = 0;
+        const r = await L.run({
+            toolHandlers: { computer_terminal: async () => {
+                steps++;
+                if (steps === 1) { notes.add({ id: "a", text: "first thing" }); notes.add({ id: "b", text: "second thing" }); }
+                if (steps === 3) notes.add({ id: "c", text: "third thing, later" });
+                return "ok";
+            } },
+            userNotes: () => notes.take()?.text || null,
+        });
+        assert.equal(r.answer, "All done.");
+        const sent = L.sent();
+        assert.equal(sent.length, 4);
+        assert.equal(L.said(sent[1]).length, 1, "two messages, one text");
+        assert.ok(JSON.stringify(sent[1]).includes("these 2 messages") && JSON.stringify(sent[1]).includes("first thing") && JSON.stringify(sent[1]).includes("second thing"));
+        assert.equal(JSON.stringify(sent[2]).includes("third thing"), false, "not before it was sent");
+        assert.equal(L.said(sent[3]).length, 2, "the later one after its own step");
+        assert.ok(JSON.stringify(sent[3]).includes("third thing, later"));
+    });
+
+    test(`${name}: with the app driving the steps, a message posted to the answer while a step waits goes to the model with that round`, T, async () => {
+        L.script(["tool", "answer"]);
+        const stopAll = new AbortController();
+        const notes = makeUserNotes();
+        const events = [];
+        const turnId = `e2e-${name.slice(0, 2)}-${++turnNo}`;
+        const loop = makeLocalLoopDriver({ turnId, userId: "u1", emit: (ev) => events.push(ev), onStop: () => stopAll.abort(), onSay: (n) => notes.add(n), signal: stopAll.signal });
+        const read = [];
+        const answer = L.run({
+            signal: stopAll.signal, toolDriver: loop.driver,
+            toolHandlers: { computer_terminal: async () => "deleted" },
+            userNotes: () => { const got = notes.take(); if (got) read.push(...got.notes.map((n) => n.id)); return got ? got.text : null; },
+        });
+        // the model asked for a step and waits for the app
+        for (let i = 0; i < 400 && !events.some((e) => e.type === "round_end"); i++) await new Promise((r) => setImmediate(r));
+        const round = events.find((e) => e.type === "round_end");
+        assert.ok(round, "the round is handed to the app");
+        // the person sends a message now (the app posts it), then the app drives the round
+        assert.deepEqual(await handleTurnCommand(turnId, "u1", { type: "say", id: "m1", text: "do not delete the photos" }), { ok: true });
+        assert.deepEqual(await handleTurnCommand(turnId, "u1", { type: "run", roundId: round.roundId, id: round.calls[0].id }), { ok: true });
+        for (let i = 0; i < 400 && !events.some((e) => e.type === "tool_done"); i++) await new Promise((r) => setImmediate(r));
+        assert.deepEqual(await handleTurnCommand(turnId, "u1", { type: "round_done", roundId: round.roundId }), { ok: true });
+        const r = await answer;
+        loop.dispose();
+        assert.equal(r.answer, "All done.");
+        assert.deepEqual(read, ["m1"]);
+        const sent = L.sent();
+        assert.equal(sent.length, 2);
+        assert.equal(L.said(sent[1]).length, 1);
+        assert.ok(JSON.stringify(sent[1]).includes("do not delete the photos"));
+        // after the answer has ended nothing more is taken (the app sends it as the next message)
+        assert.deepEqual(await handleTurnCommand(turnId, "u1", { type: "say", id: "m2", text: "late" }), { error: "unknown_turn" });
+    });
+}

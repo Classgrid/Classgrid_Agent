@@ -83,3 +83,36 @@ test("code run with run_code is moved the same way", T, async () => {
     const end = await runner.runTool({ tool: "check_background_command", args: { job_id: jobId, wait_seconds: 30 } });
     assert.match(end.text, /code-done/);
 });
+
+test("two commands running at once: each is moved by its own step's id, the other keeps the AI waiting", T, async () => {
+    const one = runner.runTool({ tool: "execute_terminal_command", args: { command: slow(5, "one-done") }, chat: "chat-3", call: "call-a" });
+    const two = runner.runTool({ tool: "execute_terminal_command", args: { command: slow(3, "two-done") }, chat: "chat-3", call: "call-b" });
+    let twoAnswered = false;
+    two.then(() => { twoAnswered = true; });
+    await sleep(1500);
+    assert.equal(runner.backgroundCommand("call-a"), true);
+    const first = await one;
+    assert.match(first.text, /The user moved this command to the background/);
+    assert.equal(twoAnswered, false, "the other command is still waited for");
+    const second = await two;
+    assert.match(second.text, /two-done/);
+    assert.match(second.text, /\[exit code 0\]$/, "it ended by itself, in the foreground");
+    assert.equal(runner.backgroundCommand("call-b"), false);
+    const jobId = first.text.match(SERVER_KNOWS)?.[1];
+    const end = await runner.runTool({ tool: "check_background_command", args: { job_id: jobId, wait_seconds: 30 } });
+    assert.match(end.text, /one-done/);
+});
+
+test("a command moved to the background can still be stopped", T, async () => {
+    const step = runner.runTool({ tool: "execute_terminal_command", args: { command: slow(30, "never-printed") }, chat: "chat-4", call: "call-s" });
+    await sleep(1500);
+    assert.equal(runner.backgroundCommand("call-s"), true);
+    const jobId = (await step).text.match(SERVER_KNOWS)?.[1];
+    assert.ok(jobId);
+    const stopped = await runner.runTool({ tool: "stop_background_command", args: { job_id: jobId } });
+    assert.equal(/^Error/.test(stopped.text), false, stopped.text);
+    await sleep(1500);
+    const after = await runner.runTool({ tool: "check_background_command", args: { job_id: jobId } });
+    assert.equal(after.text.includes("never-printed"), false);
+    assert.equal(/still running/.test(after.text), false, "it is not running any more");
+});
