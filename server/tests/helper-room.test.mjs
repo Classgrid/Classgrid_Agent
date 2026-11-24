@@ -18,15 +18,18 @@ test("the Free plan, 1 helper at a time: the two left out are named, with the re
     const note = notStartedNote({ asked: ASKED, started: 1, maxHelpers: 1, planName: "Free" });
     assert.ok(note.startsWith("\n\nNOT started (2 of the 3 you asked for), because the Free plan allows 1 helper working at the same time in a chat:\n2. Map the AI and search code under lib with every file\n3. Map scripts and Sanity\n"));
     assert.match(note, /Do not call run_project_helpers for them again now: it is refused while the helper is working\./);
-    assert.match(note, /Tell the user plainly that the Free plan allows 1 helper working at the same time in a chat, so these tasks have not started\./);
-    assert.match(note, /Then either start them when a helper finishes \(its report reaches you by itself\), or do that work yourself\.$/);
+    assert.match(note, /Go on with the work: start them when a helper finishes \(its report reaches you by itself\), or do that work yourself\./);
+    // (the plan is not brought up by the AI itself: only when the person asks)
+    assert.match(note, /Do not bring up the plan or this limit by yourself, and do not say that helpers "did not launch" or that you will start them "in a moment": tell the user what is being worked on now\./);
+    assert.match(note, /Only if the user asks why fewer helpers are working, say that the Free plan allows 1 helper working at the same time in a chat\.$/);
+    assert.equal(/Tell the user plainly/.test(note), false);
 });
 
 test("the Pro plan, 3 at a time, one left out", () => {
     const note = notStartedNote({ asked: [...ASKED, { task: "Fourth job" }], started: 3, maxHelpers: 3, planName: "Pro" });
     assert.match(note, /^\n\nNOT started \(1 of the 4 you asked for\), because the Pro plan allows 3 helpers working at the same time in a chat:\n4\. Fourth job\n/);
     assert.match(note, /it is refused while these helpers are working\./);
-    assert.match(note, /so this task has not started\. Then either start it when a helper finishes/);
+    assert.match(note, /Go on with the work: start it when a helper finishes/);
 });
 
 test("the most any chat has (5), or plans off: the reason is the chat's own limit, no plan is named", () => {

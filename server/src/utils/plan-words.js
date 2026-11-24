@@ -1,3 +1,8 @@
+// The AI never brings up the person's plan by itself (owner, 2026-11-24: "why will it tell about Free every time
+// without being asked; only if the user asked"). Where the work can go on (fewer helpers, another model, credits that
+// paid, a file that is not in the Library), it goes on and gives the limit only when the person asks. Where what the
+// person asked for cannot be done at all (the picture limit, the usage used up), it says why, because the request failed.
+//
 // What the AI is told when the person's plan stops or shrinks something it is doing (owner, 2026-11-24, after a Free
 // account's test: "find all limits and fix it so the AI knows its limit"). A check of every plan limit found places
 // where the AI was told nothing, or only that something failed: it then guessed, promised what would be refused
@@ -35,11 +40,11 @@ export function usageUsedUpText(what, resetAt) {
 export function helpersBusyText({ maxHelpers = 5, planName = "" }) {
     const many = maxHelpers === 1 ? "1 helper" : `${maxHelpers} helpers`;
     const why = planName && maxHelpers < 5 ? `the ${planName} plan allows ${many} working at the same time in a chat` : `at most ${many} can work at the same time in a chat`;
-    return `Error: no helper was started, because ${why} and ${maxHelpers === 1 ? "it is" : "they are"} already working. Do not call run_project_helpers again now: it is refused until a helper finishes (its report reaches you by itself). Tell the user plainly that ${why}, then wait for a report or do that work yourself.`;
+    return `Error: no helper was started, because ${why} and ${maxHelpers === 1 ? "it is" : "they are"} already working. Do not call run_project_helpers again now: it is refused until a helper finishes (its report reaches you by itself). Wait for a report or do that work yourself. Do not bring up the plan or this limit by yourself; only if the user asks why no more helpers are working, say that ${why}.`;
 }
 
 /** Helpers are not in the plan at all */
-export const helpersNotInPlanText = (planName = "") => `Error: helpers are not included in the ${planName ? `${planName} ` : ""}plan. Do the work yourself in this chat, and if the user asked for helpers, tell them plainly that their plan has none.`;
+export const helpersNotInPlanText = (planName = "") => `Error: helpers are not included in the ${planName ? `${planName} ` : ""}plan. Do the work yourself in this chat. Do not bring up the plan by yourself; only if the user asks for helpers or asks why none are working, say that their plan has none.`;
 
 /**
  * Why a helper does not run on the model the main AI asked for. Returns "" when it does, or when no model was asked.
@@ -85,7 +90,7 @@ export function callTimeWords({ maxMs = 15 * 60000, minutesRunOut = false, planN
         : minutes < 15 ? `${minutes} minute${minutes === 1 ? " is" : "s are"} the longest one call can be on ${plan}` : "15 minutes is the longest a call can be";
     return {
         line: `The call can last at most ${minutes} minute${minutes === 1 ? "" : "s"}${minutesRunOut ? ` (the call minutes left on ${plan} for this period)` : minutes < 15 ? ` (the longest call on ${plan})` : ""}. If the caller asks why a call ended, that is the reason.`,
-        ends: `[The call ends in about 15 seconds, because ${why}. Tell the caller that in a few words and say goodbye.]`,
+        ends: `[The call ends in about 15 seconds, because ${why}. Say goodbye now. Give that reason only if the caller asks why the call is ending.]`,
     };
 }
 
@@ -114,10 +119,10 @@ export const isPlanRefusal = (result) => !String(result?.answer || "").trim() &&
 // ── Limits that were not checked where the AI works (owner, 2026-11-24: "fix all then") ──
 
 /** A file the AI made that does not fit the plan's Library storage: the link works, the Library entry is not made */
-export const libraryFullNote = (room) => `\nNOT added to the user's Library: the Library of their ${room?.planName ? `${room.planName} ` : ""}plan is full (${room?.used} of ${room?.cap} used). The link above works. Tell the user plainly that the file is not saved in their Library because it is full, and that deleting files there makes room.`;
+export const libraryFullNote = (room) => `\nNOT added to the user's Library: the Library of their ${room?.planName ? `${room.planName} ` : ""}plan is full (${room?.used} of ${room?.cap} used). The link above works: give it to the user as usual. Do not bring up the Library or the plan by yourself; only if the user asks where the file is in their Library, say it was not saved there because the Library is full, and that deleting files there makes room.`;
 
 /** Something past the plan's number that the person's credits paid for (a picture, a WhatsApp message) */
-export const paidFromCreditsNote = (what, planName = "") => ` This ${what} was past the number the person's ${planName ? `${planName} ` : ""}plan includes for this period, so it was paid from their AI credits: tell them that in a few words.`;
+export const paidFromCreditsNote = (what, planName = "") => ` This ${what} was past the number the person's ${planName ? `${planName} ` : ""}plan includes for this period, so it was paid from their AI credits. Do not bring that up by yourself; say it only if the user asks about their limit or their credits.`;
 
 /** transcribe_audio past the plan's voice minutes. error: the limit's own sentence (voice-input-limit.service.js) */
 export const notTranscribedText = (error) => `NOT transcribed: ${String(error || "").trim()} Tell the user that plainly, and do not turn this sound into text another way.`;
