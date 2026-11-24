@@ -539,11 +539,12 @@ export type ChatMessage = {
 };
 
 // A message the person sent while the AI worked: their bubble, inside the answer where the AI read it, or at the
-// end of the chat while it still waits for the AI's next step (dimmed)
+// end of the chat while it still waits for the AI's next step. It looks the same in both places, like any message of
+// theirs (it was dimmed while it waited: owner, 2026-11-24, "don't make these messages blur")
 function SaidWhileWorking({ text, waiting = false }: { text: string; waiting?: boolean }) {
   return (
     <div className={cn("flex w-full justify-end", waiting ? "mb-3" : "mb-4")}>
-      <div className={cn("max-w-[75%] rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C] text-[15px] leading-relaxed text-foreground whitespace-pre-wrap [overflow-wrap:anywhere] transition-opacity", waiting && "opacity-60")}>{text}</div>
+      <div className={cn("max-w-[75%] rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C] text-[15px] leading-relaxed text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]")}>{text}</div>
     </div>
   );
 }
