@@ -82,7 +82,7 @@ import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpo
 import { cfAiFetch, providersWithoutCappedCloudflare, isCfNeuronCapError } from "../services/cf-neuron-cap.service.js";
 import { usageParts, claudeSwitches, keepsCloudflareRounds, CAP_REFUSED_WHY } from "../services/cap-fallback.service.js";
 import * as eleven from "../services/elevenlabs.service.js";
-import { planOf, isUnlimited, filesPerMessage } from "../services/plan-limits.service.js";
+import { planOf, isUnlimited, filesPerMessage, libraryRoomFor } from "../services/plan-limits.service.js";
 import { PLANNER_BROWSER_TOOLS, PLANNER_BLIND_TOOLS, WORKER_BROWSER_TOOLS, BROWSER_TOOL_NAMES, makeBrowserHandlers, BROWSER_WORKER_SYSTEM } from "../services/studio-browser-tools.js";
 import { ensureBrowser } from "../services/studio-browser.service.js";
 import { gateHandlers, askPermission, PERMISSION_MODES } from "../services/permission-gate.js";
@@ -103,7 +103,7 @@ import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
 import { setHelperJobSink } from "../utils/helper-jobs.js";
 import { notStartedNote } from "../utils/helper-room.js";
-import { helperLimitReport, READER_LIMIT_ERROR, usageUsedUpText, helpersBusyText, helpersNotInPlanText, helperModelWhy, helperModelNote, thinkingNotInPlanNote, contextCutNote } from "../utils/plan-words.js";
+import { limitStopNote, libraryFullNote, paidFromCreditsNote, notTranscribedText, helperLimitReport, READER_LIMIT_ERROR, usageUsedUpText, helpersBusyText, helpersNotInPlanText, helperModelWhy, helperModelNote, thinkingNotInPlanNote, contextCutNote } from "../utils/plan-words.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -4718,7 +4718,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 emitHelper({ helper: i, id, tool: n, args: a });
                                 const step = helperStep(h, id, n, a);
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
-                                const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }, { chat: sessionId }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId, desktop: !fromWebsite })).content[0].text;
+                                const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }, { chat: sessionId }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId, userId: String(req.user?._id || ""), desktop: !fromWebsite })).content[0].text; // (userId: a helper's cloud run is checked and counted on the plan's cloud computer hours like the main AI's; it was neither)
                                 emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
                                 helperStepDone(step, out);
                                 // The files this helper changed, for the chat's "files changed" box
@@ -5315,8 +5315,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const cdnDomain = process.env.AWS_CLOUDFRONT_ERP_DOMAIN || 'https://cdn.classgrid.in';
                             const url = `${cdnDomain}/${s3Key}`;
 
-                            // Automatically add to AI Library
-                            try {
+                            // Automatically add to AI Library, when the plan's Library storage has room for it
+                            const libraryRoom = await libraryRoomFor(req.user, buffer.length).catch(() => ({ ok: true }));
+                            if (libraryRoom.ok) try {
                                 const AiLibraryFile = (await import('../models/AiLibraryFile.js')).default;
                                 const { getIO } = await import('../services/socket.service.js');
                                 
@@ -5353,6 +5354,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 console.error("Error saving generated file to AI Library:", libErr);
                             }
 
+                            if (!libraryRoom.ok) return `SUCCESS: File uploaded. Public URL: ${url}${libraryFullNote(libraryRoom)}`;
                             return `SUCCESS: File uploaded and added to the user's AI Library. Public URL: ${url}`;
                         } catch (e) {
                             return `FAILED to upload file: ${e.message}`;
@@ -5418,8 +5420,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const cdnDomain = process.env.AWS_CLOUDFRONT_ERP_DOMAIN || 'https://cdn.classgrid.in';
                             const url = `${cdnDomain}/${s3Key}`;
 
-                            // Automatically add to AI Library
-                            try {
+                            // Automatically add to AI Library, when the plan's Library storage has room for it
+                            const libraryRoom = await libraryRoomFor(req.user, buffer.length).catch(() => ({ ok: true }));
+                            if (libraryRoom.ok) try {
                                 const AiLibraryFile = (await import('../models/AiLibraryFile.js')).default;
                                 const { getIO } = await import('../services/socket.service.js');
                                 
@@ -5456,6 +5459,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 console.error("Error saving generated file to AI Library:", libErr);
                             }
 
+                            if (!libraryRoom.ok) return `SUCCESS: File uploaded. Public URL: ${url}${libraryFullNote(libraryRoom)}`;
                             return `SUCCESS: File uploaded and added to the user's AI Library. Public URL: ${url}`;
                         } catch (e) {
                             return `FAILED to upload file: ${e.message}`;
@@ -5469,7 +5473,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const { key, url } = await uploadToCdn(video.mp4, name, "video/mp4");
                             const stills = [];
                             for (const c of video.checks) stills.push(`${c.at}s: ${(await uploadToCdn(c.jpg, `frame-${c.at}s.jpg`, "image/jpeg")).url}`);
-                            try {
+                            const libraryRoom = await libraryRoomFor(req.user, video.mp4.length).catch(() => ({ ok: true }));
+                            if (libraryRoom.ok) try {
                                 const AiLibraryFile = (await import('../models/AiLibraryFile.js')).default;
                                 await AiLibraryFile.create({
                                     user_email: req.user?.email || '', user_id: req.user?._id || null, organization_id: req.user?.organization_id || null,
@@ -5740,7 +5745,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                     // (the backup image maker only makes squares: the model is told when the shape it asked for was not made)
                                     const askedShape = args.aspect_ratio ? eleven.imageShape(args.aspect_ratio) : "";
                                     const squareNote = askedShape && json.aspectRatio && json.aspectRatio !== askedShape ? `The picture came out square, not ${askedShape}: the usual image maker could not make it this time and the other one only makes squares. Tell the user in a few words. ` : "";
-                                    return `${squareNote}The image is ready and the app already shows it to the user at the top of your reply. Do not write its link, any [IMAGE_GENERATION...] marker or a Markdown image. Continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request. If you need to look at this image again later (to describe, check or compare it), open it with analyze_image using this link (for the tool only, never in your reply): ${json.imageUrl}; never say you can't see it.`;
+                                    return `${squareNote}${json.paidFromCredits ? paidFromCreditsNote("picture", json.plan === "their" ? "" : json.plan).trim() + " " : ""}The image is ready and the app already shows it to the user at the top of your reply. Do not write its link, any [IMAGE_GENERATION...] marker or a Markdown image. Continue your answer normally: briefly describe the image, offer changes, and finish any other part of the user's request. If you need to look at this image again later (to describe, check or compare it), open it with analyze_image using this link (for the tool only, never in your reply): ${json.imageUrl}; never say you can't see it.`;
                                 }
                                 if (json.code === 'IMAGE_LIMIT_REACHED') {
                                     // The weekly image limit is final: no retries and no other way of making the picture
@@ -5774,7 +5779,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             if (json.imageUrl) {
                                 generatedImages.push({ prompt: String(args.prompt || ""), url: json.imageUrl });
                                 if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "generated_image", prompt: String(args.prompt || ""), url: json.imageUrl })}\n\n`);
-                                return `The edited image is ready and the app already shows it to the user at the top of your reply. Do not write its link or any marker; just tell the user what was changed.`;
+                                return `The edited image is ready and the app already shows it to the user at the top of your reply. Do not write its link or any marker; just tell the user what was changed.${json.paidFromCredits ? paidFromCreditsNote("picture", json.plan === "their" ? "" : json.plan) : ""}`;
                             }
                             if (json.code === 'IMAGE_LIMIT_REACHED') {
                                 return `IMAGE LIMIT REACHED. ${json.error}${req.user?.role === "super_admin" ? "" : " (share the reset time only if the user asks)"}\n\nDo NOT call edit_image or generate_image again in this conversation, and do NOT make or change the picture any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their image limit is used up${json.limit ? ` (${json.limit} images)` : ""} and that they can make and edit pictures again after the reset. You may still help with everything else.`;
@@ -6079,7 +6084,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 return "FAILED: Sign in to send WhatsApp messages.";
                             }
                             const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber, formatResetTime } = await import('../services/ai-feature-limits.js');
-                            const waLimit = await checkWhatsappLimit(req.user);
+                            // (chargeLater: a message past the plan's number is charged below, once it was really sent)
+                            const waLimit = await checkWhatsappLimit(req.user, { chargeLater: true });
                             if (!waLimit.allowed) {
                                 return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (${waLimit.limitWhy || "the limit is set by Classgrid admins"}). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""}${waLimit.extraOffer || ""} Tell the user exactly this; do not guess other reasons.`;
                             }
@@ -6153,13 +6159,14 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 firstId ||= out.data?.messages?.[0]?.id;
                             }
                             await recordDirectWhatsappSend(req.user._id, firstId);
+                            if (waLimit.extraDue) await import('../services/extra-usage.service.js').then((m) => m.chargeExtra(req.user, "whatsapp", 1, waLimit.extraDue)).catch(() => {});
                             // WhatsApp's 24-hour rule: Meta accepts the message now, but drops it later if this person
                             // hasn't messaged or called Classgrid in the last 24 hours (known only from now on)
                             const { LAST_IN_KEY } = await import('../services/whatsapp-inbox.service.js');
                             const { default: waRedis } = await import('../config/redis.js');
                             const lastIn = Number(await waRedis.get(LAST_IN_KEY(recipient)).catch(() => 0)) || 0;
                             const windowNote = Date.now() - lastIn < 24 * 60 * 60 * 1000 ? "" : " Note: Classgrid has no record of this person messaging or calling in the last 24 hours, and WhatsApp only delivers normal messages within 24 hours of that, so it may not arrive.";
-                            return `SUCCESS: WhatsApp message sent to ${recipient}${messages.length > 1 ? ` (${messages.length} parts)` : ""} (${waLimit.used + 1} of ${waLimit.limit} used in the last ${waLimit.periodText || "7 days"}). Reset time: ${formatResetTime(waLimit.resetAt || Date.now() + waLimit.periodMs)}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}. Do not send it again.${windowNote}`;
+                            return `SUCCESS: WhatsApp message sent to ${recipient}${messages.length > 1 ? ` (${messages.length} parts)` : ""} (${waLimit.extraDue ? `all ${waLimit.limit}` : `${waLimit.used + 1} of ${waLimit.limit}`} used in the last ${waLimit.periodText || "7 days"}).${waLimit.extraDue ? paidFromCreditsNote("message", waLimit.planName) : ""} Reset time: ${formatResetTime(waLimit.resetAt || Date.now() + waLimit.periodMs)}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}. Do not send it again.${windowNote}`;
                         } catch (e) {
                             return `FAILED to send WhatsApp message: ${e.message}`;
                         }
@@ -6381,7 +6388,12 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
                     transcribe_audio: async (args) => {
-                        const result = await handleToolCall('transcribe_audio', args, {});
+                        // The plan's voice input minutes of the day count for this tool too (it asked nothing and counted
+                        // nothing: voice-input-limit.service.js). Past them the person's credits pay, as for a voice note.
+                        const { voiceInputAllowed, countVoiceInput } = await import('../services/voice-input-limit.service.js');
+                        const voiceGate = req.user?._id ? await voiceInputAllowed(req.user).catch(() => ({ allowed: true })) : { allowed: true };
+                        if (!voiceGate.allowed) return notTranscribedText(voiceGate.error);
+                        const result = await handleToolCall('transcribe_audio', args, { onSeconds: (seconds) => { if (req.user?._id && Number(seconds) > 0) countVoiceInput(req.user, voiceGate, Number(seconds)); } });
                         return result.isError ? result.content[0].text : result.content[0].text;
                     },
                     zoom_connector: async (args) => {
@@ -8046,6 +8058,32 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         }
         // ---------------------------------
 
+        // The answer stopped because the person's usage ran out: which limit it was and when it comes back, worked out
+        // once here (the answer is charged by now), for the note at its end and for the limit card below.
+        // A Claude answer on a plan with Claude stops when the week's Claude credits are used up (or Fable's share of
+        // them), or the session window, or the week; the Claude credits come back at the end of the week. Any other
+        // answer: the session window or the week.
+        let limitStop = null;
+        if (limitEnded) {
+            limitStop = await (async () => {
+                if (claudePooled(usedModel) || (claudeOnCredits && CLAUDE_CHAT_MODELS.has(usedModel))) {
+                    const fresh = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
+                    const { weekCounters } = await import("../services/ai-credits.service.js");
+                    const counters = await weekCounters(userId, fresh?.ai_tokens).catch(() => null);
+                    const pool = Number(planRow?.claude_credits_per_week);
+                    const claudeUsedUp = !!counters && pool > 0 && counters.claude_week_used >= pool;
+                    const fableUsedUp = !claudeUsedUp && !!counters && pool > 0 && /claude-fable/.test(usedModel) && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100;
+                    const now = claudeUsedUp || fableUsedUp ? null : await hasEnoughTokens(userId, orgId, 1).catch(() => null);
+                    if (now && !now.allowed && now.resetAt) return { resetAt: now.resetAt };
+                    return { resetAt: counters?.weekEnd ? new Date(counters.weekEnd).toISOString() : undefined, claude: claudeUsedUp, fable: fableUsedUp };
+                }
+                const now = await hasEnoughTokens(userId, orgId, 1).catch(() => null);
+                return { resetAt: now && !now.allowed ? now.resetAt : undefined };
+            })().catch(() => ({}));
+            // (the note says which limit and when: it said "your plan's limit ran out" for every case)
+            if (typeof answer === "string" && answer.includes(BUDGET_STOP_NOTE)) answer = answer.replace(BUDGET_STOP_NOTE, limitStopNote({ planName: planRow?.name || "", claude: !!limitStop.claude, fable: !!limitStop.fable, resetAt: limitStop.resetAt }));
+        }
+
         if (generatedImages.length && typeof answer === "string" && answer !== "[RATE_LIMITED]") answer = withMadePictures(answer);
 
         // (a failed answer keeps the pictures it made: the app replaces what streamed with this final answer)
@@ -8121,7 +8159,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     else if (['docx', 'doc'].includes(extension)) fileType = 'doc';
                     else if (['pptx', 'ppt'].includes(extension)) fileType = 'pptx';
 
-                    if (req.user && (req.user.email || req.user.id)) {
+                    // (not while the plan's Library storage is full)
+                    if (req.user && (req.user.email || req.user.id) && (await libraryRoomFor(req.user, 0).catch(() => ({ ok: true }))).ok) {
                         try {
                             const AiLibraryFile = (await import('../models/AiLibraryFile.js')).default;
                             await AiLibraryFile.create({
@@ -8152,20 +8191,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 // that this answer is charged. The Claude credits come back at the end of the week; when they are
                 // not what ran out, the session window or the week is. Any other answer: the session window or the
                 // week.)
-                let resetAt;
-                if (claudePooled(usedModel) || (claudeOnCredits && CLAUDE_CHAT_MODELS.has(usedModel))) {
-                    const fresh = await User.findById(userId).select("ai_tokens").lean().catch(() => null);
-                    const { weekCounters } = await import("../services/ai-credits.service.js");
-                    const counters = await weekCounters(userId, fresh?.ai_tokens).catch(() => null);
-                    const pool = Number(planRow?.claude_credits_per_week);
-                    const claudeOut = !!counters && pool > 0 && (counters.claude_week_used >= pool || (/claude-fable/.test(usedModel) && counters.fable_week_used >= pool * Number(planRow.fable_share_percent) / 100));
-                    const now = claudeOut ? null : await hasEnoughTokens(userId, orgId, 1).catch(() => null);
-                    if (now && !now.allowed && now.resetAt) resetAt = now.resetAt;
-                    else if (counters?.weekEnd) resetAt = new Date(counters.weekEnd).toISOString();
-                } else {
-                    const now = await hasEnoughTokens(userId, orgId, 1).catch(() => null);
-                    if (now && !now.allowed) resetAt = now.resetAt;
-                }
+                // (worked out above, with the note at the answer's end: limitStop)
+                const resetAt = limitStop?.resetAt;
                 const blocked = await quotaBlocked({ reason: "Insufficient tokens.", resetAt }).catch(() => null);
                 res.write(`data: ${JSON.stringify({ type: "limit_ended", resetDate: blocked?.resetDate || null })}\n\n`);
             }
@@ -9320,6 +9347,7 @@ export const generateImage = async (req, res) => {
     // Set once this request has taken one of the user's image slots; given back if the image then fails
     let imageSlotUserId = null;
     let imageTokenCharge = null;
+    let imagePaidFromCredits = ""; // the plan's name when this picture was past the plan's number and the person's credits paid
     // The app that asked went away before the picture was ready (closed, or its connection dropped): the picture is
     // still made and saved in the chat, and the user's phone gets a push (user-push.service.js)
     let askerGone = false;
@@ -9440,6 +9468,7 @@ export const generateImage = async (req, res) => {
                 }
             }
             if (extraImage) {
+                imagePaidFromCredits = imagePlan?.name || "their";
                 // The extra image's price replaces the usual per-image credits and comes from the person's credits:
                 // the pool that started first, the rest from the other (canPayExtra checked both together). Until
                 // 2026-11-21 it was taken from bought credits only, with no move to the gifted ones: an account with
@@ -9626,7 +9655,7 @@ export const generateImage = async (req, res) => {
             if (askerGone) import("../services/user-push.service.js").then((m) => m.pushImageReady({ userId: req.user._id, sessionId: activeSessionId, prompt, imageUrl: r2Url })).catch(() => {});
         }
 
-        res.json({ imageUrl: r2Url, sessionId: activeSessionId, aspectRatio: madeShape, resolution: madeSize });
+        res.json({ imageUrl: r2Url, sessionId: activeSessionId, aspectRatio: madeShape, resolution: madeSize, ...(imagePaidFromCredits ? { paidFromCredits: true, plan: imagePaidFromCredits } : {}) });
     } catch (e) {
         console.error("Error generating image:", e);
         // No image was made: give the slot back (never below 0)

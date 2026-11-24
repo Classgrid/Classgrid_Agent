@@ -38,7 +38,7 @@ import { planOf, isUnlimited } from "./plan-limits.service.js";
 import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
-import { callTimeWords, workTimeNote, askRefusedForUsage } from "../utils/plan-words.js";
+import { callTimeWords, workTimeNote, askRefusedForUsage, isBudgetStop } from "../utils/plan-words.js";
 import { hasEnoughTokens, deductTokens, planWording, chargeClaudeOnPlan } from "./ai-credits.service.js";
 import { callRefusedLimitText, callMinutesUsedUpText, callCountLimitText } from "./email-templates.service.js";
 import {
@@ -884,7 +884,12 @@ async function afterCall(call, why) {
         const base = (words.map((w) => w[0].toUpperCase() + w.slice(1).toLowerCase()).join(" ") || "Call Task").slice(0, 60);
         let name = base;
         for (let i = 2; await findProject(call.user, name, { withLocal: true }).catch(() => null); i++) name = `${base} ${i}`;
-        project = await IdeProject.create({ owner: call.user._id, name }).catch((e) => { console.error("[WA call] project could not be made:", e.message); return null; });
+        // (inside the plan's number of projects, like one made with make_project on the call: it was made with no count)
+        const { makeCloudProject, cloudProjectLimitForAi } = await import("./plan-limits.service.js");
+        const made = await makeCloudProject(call.user, { name }).catch((e) => { console.error("[WA call] project could not be made:", e.message); return null; });
+        project = made?.ok ? made.project : null;
+        // (no room: the work runs in a normal chat, and the Agent tells the person why there is no project)
+        if (made && !made.ok) call.tasks[0].task = `${call.tasks[0].task}\n\n[${cloudProjectLimitForAi(made)} Do the work in this chat without a project.]`;
         if (project) console.log(`[WA call] ${call.id}: no project named, made "${name}" (Project Mode only)`);
         if (project) record.callProject(call.id, { projectId: project._id, projectName: project.name, made: true });
     } else if (project) {
@@ -1272,7 +1277,8 @@ async function runAgentTaskOnce(user, question, projectId, onSession, sessionId,
     }
     const finalAnswer = String(answer || (error ? "" : streamed)).trim();
     // Tokens ran out partway through: the answer ends with the budget note
-    if (!quota && finalAnswer.endsWith(BUDGET_STOP_NOTE)) quota = { resetDate: null };
+    // (isBudgetStop: the note names the limit that ran out now, so it is known by its shape, not by one fixed sentence)
+    if (!quota && (finalAnswer.endsWith(BUDGET_STOP_NOTE) || isBudgetStop(finalAnswer))) quota = { resetDate: null };
     return { sessionId, answer: finalAnswer, error, quota, ...(code ? { code } : {}) };
 }
 

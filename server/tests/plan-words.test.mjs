@@ -104,3 +104,33 @@ test("a background task's run refused by the plan is told apart from a failed ru
     assert.equal(w.isPlanRefusal({ answer: "", error: "the request failed (500)" }), false);
     assert.equal(w.isPlanRefusal({ answer: "Done.", code: "model_locked" }), false);
 });
+
+test("limits that were not checked where the AI works: the Library, a paid extra, the voice minutes", () => {
+    const full = w.libraryFullNote({ planName: "Free", used: "590 MB", cap: "600 MB" });
+    assert.match(full, /^\nNOT added to the user's Library: the Library of their Free plan is full \(590 MB of 600 MB used\)\. The link above works\./);
+    assert.match(full, /Tell the user plainly that the file is not saved in their Library because it is full/);
+    assert.equal(w.paidFromCreditsNote("picture", "Pro"), " This picture was past the number the person's Pro plan includes for this period, so it was paid from their AI credits: tell them that in a few words.");
+    assert.match(w.paidFromCreditsNote("message"), /past the number the person's plan includes/);
+    assert.equal(w.notTranscribedText("You've used the 15 minutes of voice input a day of your Free plan. It refills on 25 Nov."), "NOT transcribed: You've used the 15 minutes of voice input a day of your Free plan. It refills on 25 Nov. Tell the user that plainly, and do not turn this sound into text another way.");
+});
+
+test("the note at the end of an answer the limit stopped says which limit and when it comes back", () => {
+    const soon = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
+    const usage = w.limitStopNote({ planName: "Free", resetAt: soon });
+    assert.match(usage, /^_\(Stopped here: your Free plan's usage limit ran out while I was working\. It comes back on .+ \(India time\)\. Ask me to continue then\.\)_$/);
+    const claude = w.limitStopNote({ planName: "Pro", claude: true, resetAt: soon });
+    assert.match(claude, /^_\(Stopped here: this week's Claude credits of your Pro plan ran out while I was working\. They come back on .+\. Ask me to continue then, or pick another model to go on now\.\)_$/);
+    const fable = w.limitStopNote({ planName: "Max", fable: true, resetAt: soon });
+    assert.match(fable, /^_\(Stopped here: this week's Claude Fable share of your Max plan ran out while I was working\. It comes back on .+\. Ask me to continue then, or pick Sonnet or Opus to go on now\.\)_$/);
+    // (the time is not known: the closing words are the old ones)
+    assert.equal(w.limitStopNote({ planName: "Free" }), "_(Stopped here: your Free plan's usage limit ran out while I was working. When it comes back, ask me to continue.)_");
+    assert.equal(w.limitStopNote(), "_(Stopped here: your plan's usage limit ran out while I was working. When it comes back, ask me to continue.)_");
+});
+
+test("an answer that ends with the stop note is known in the old words and in every new form", () => {
+    const soon = new Date(Date.now() + 2 * 3600 * 1000).toISOString();
+    assert.equal(w.isBudgetStop(`Half an answer.\n\n${STOP}`), true);
+    for (const o of [{ planName: "Free", resetAt: soon }, { planName: "Pro", claude: true, resetAt: soon }, { planName: "Max", fable: true }, {}]) assert.equal(w.isBudgetStop(`Half an answer.\n\n${w.limitStopNote(o)}`), true, JSON.stringify(o));
+    assert.equal(w.isBudgetStop("A whole answer about a plan's limit that ran out while I was working."), false);
+    assert.equal(w.isBudgetStop(`${STOP}\n\nMore text after it.`), false);
+});

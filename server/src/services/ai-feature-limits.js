@@ -170,7 +170,10 @@ const directSendKey = (userId) => `ai:wa-direct:${userId}`;
  * in the next 7 days count too, so several repeats can't together go over the limit.
  * Returns { allowed, limit, used }.
  */
-export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false, readOnly = false } = {}) {
+// chargeLater: a message past the plan's number is allowed when the person's credits can pay it, but NOT charged
+// here: the caller charges it (extraDue) once the message was really sent. Without it the credits were taken before
+// the number was checked and before the send, and a failed send said "not counted" with the credits already gone.
+export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false, readOnly = false, chargeLater = false } = {}) {
     const [{ default: GlobalAiConfig }, { default: Organization }, { default: AiSchedule }, { default: WhatsappDirectSend }] = await Promise.all([
         import("../models/GlobalAiConfig.js"),
         import("../models/Organization.js"),
@@ -250,12 +253,14 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false,
     // Past the number: a single message (not a repeat) is paid from top-up credits (extra-usage.service.js); the
     // credits are taken here, right before the send or the schedule row is made
     let extraCredits = 0;
+    let extraDue = 0;
     let extraOffer = "";
     if (!allowed) {
         const { canPayExtra, chargeExtra, extraOfferText } = await import("./extra-usage.service.js");
         const extra = await canPayExtra(user, "whatsapp");
         if (extra.allowed && !includeUpcomingRepeats && !readOnly) {
-            extraCredits = await chargeExtra(user, "whatsapp", 1, extra.price);
+            if (chargeLater) extraDue = extra.price;
+            else extraCredits = await chargeExtra(user, "whatsapp", 1, extra.price);
             allowed = true;
         } else {
             extraOffer = extraOfferText("whatsapp", extra.price, plan?.key);
@@ -289,7 +294,7 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false,
     // limitWhy: whose limit this is, for what the AI is told (it said "set by Classgrid admins" for a plan's own number,
     // so the AI could not tell the person it is their plan's limit)
     const limitWhy = plan?.name ? `the ${shownLimit === limit ? "" : "daily "}WhatsApp message limit of their ${plan.name} plan` : "the limit is set by Classgrid admins";
-    return { allowed, limit: shownLimit, used, periodMs, periodText: shownLimit === limit ? formatPeriodLength(period) : "24 hours", resetText, resetAt, extraCredits, extraOffer, limitWhy };
+    return { allowed, limit: shownLimit, used, periodMs, periodText: shownLimit === limit ? formatPeriodLength(period) : "24 hours", resetText, resetAt, extraCredits, extraDue, extraOffer, limitWhy, planName: plan?.name || "" };
 }
 
 const messageOwnerKey = (messageId) => `ai:wa-msg:${messageId}`;

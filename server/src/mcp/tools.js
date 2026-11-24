@@ -4020,8 +4020,9 @@ export const handleToolCall = async (name, args, context = {}) => {
         // ElevenLabs Scribe first (the grant, 2026-11-14); Cloudflare's Whisper when it is not set up or fails
         if (eleven.elevenLabsEnabled()) {
           try {
-            const { text } = await eleven.speechToText(Buffer.from(audioBuffer), { mimeType: cleanMime });
-            if (text) return { content: [{ type: 'text', text }] };
+            const { text, seconds } = await eleven.speechToText(Buffer.from(audioBuffer), { mimeType: cleanMime });
+            // (the seconds heard are counted on the plan's voice minutes of the day by the caller)
+            if (text) { try { context?.onSeconds?.(seconds); } catch { /* the count only */ } return { content: [{ type: 'text', text }] }; }
           } catch (e) {
             console.error("[transcribe_audio] ElevenLabs failed, using Cloudflare:", e.message);
           }

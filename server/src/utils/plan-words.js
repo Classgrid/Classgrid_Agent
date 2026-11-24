@@ -110,3 +110,34 @@ export function askRefusedForUsage(resetAt) {
 export const PLAN_REFUSAL_CODES = new Set(["chats_cap_reached", "model_locked", "claude_cap_reached", "fable_cap_reached", "files_per_message"]);
 /** The result of a run (whatsapp-call.service.js runAgentTask) that the plan refused; not the usage limit, which has its own pause */
 export const isPlanRefusal = (result) => !String(result?.answer || "").trim() && !result?.quota && PLAN_REFUSAL_CODES.has(String(result?.code || ""));
+
+// ── Limits that were not checked where the AI works (owner, 2026-11-24: "fix all then") ──
+
+/** A file the AI made that does not fit the plan's Library storage: the link works, the Library entry is not made */
+export const libraryFullNote = (room) => `\nNOT added to the user's Library: the Library of their ${room?.planName ? `${room.planName} ` : ""}plan is full (${room?.used} of ${room?.cap} used). The link above works. Tell the user plainly that the file is not saved in their Library because it is full, and that deleting files there makes room.`;
+
+/** Something past the plan's number that the person's credits paid for (a picture, a WhatsApp message) */
+export const paidFromCreditsNote = (what, planName = "") => ` This ${what} was past the number the person's ${planName ? `${planName} ` : ""}plan includes for this period, so it was paid from their AI credits: tell them that in a few words.`;
+
+/** transcribe_audio past the plan's voice minutes. error: the limit's own sentence (voice-input-limit.service.js) */
+export const notTranscribedText = (error) => `NOT transcribed: ${String(error || "").trim()} Tell the user that plainly, and do not turn this sound into text another way.`;
+
+// ── The note at the end of an answer that the limit stopped ──
+
+/**
+ * What the person reads at the end of an answer that stopped because their usage ran out. It said "your plan's limit
+ * ran out" for every case; it now says which one (the plan's usage, the week's Claude credits, the Claude Fable
+ * share) and when it comes back (owner, 2026-11-24, "fix all": the sixth point of the limits check). The AI reads
+ * the same note in the chat's history, so it knows too.
+ * resetAt unknown: the old closing words ("When it comes back, ask me to continue").
+ */
+export function limitStopNote({ planName = "", claude = false, fable = false, resetAt = null } = {}) {
+    const when = comesBackText(resetAt);
+    const plan = planName ? `your ${planName} plan` : "your plan";
+    const what = fable ? `this week's Claude Fable share of ${plan}` : claude ? `this week's Claude credits of ${plan}` : `${plan}'s usage limit`;
+    const back = when ? `${claude && !fable ? "They come" : "It comes"} back on ${when}. Ask me to continue then` : "When it comes back, ask me to continue";
+    const other = fable ? ", or pick Sonnet or Opus to go on now" : claude ? ", or pick another model to go on now" : "";
+    return `_(Stopped here: ${what} ran out while I was working. ${back}${other}.)_`;
+}
+/** An answer that ends with the stop note, in the old words or the new ones */
+export const isBudgetStop = (text) => /_\(Stopped here: [^\n]* ran out while I was working\.[^\n]*\)_\s*$/.test(String(text || ""));

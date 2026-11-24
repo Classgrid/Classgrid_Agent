@@ -209,6 +209,20 @@ export async function libraryStorageFor(user) {
     };
 }
 
+/**
+ * Room in the plan's Library storage for a file the AI made (an upload from the app is checked by checkUploadAllowed).
+ * These files were added with no check, so the AI answered "added to the user's AI Library" for a full Library.
+ * { ok: true } or { ok: false, planName, used, cap } (used and cap as text, "590 MB"). No plan row, or a plan with
+ * no storage limit: always room.
+ */
+export async function libraryRoomFor(user, sizeBytes = 0) {
+    const s = await libraryStorageFor(user).catch(() => null);
+    if (!s || s.unlimited || !s.plan) return { ok: true };
+    const size = Math.max(0, Number(sizeBytes) || 0);
+    if (s.used_bytes + size <= s.max_bytes) return { ok: true };
+    return { ok: false, planName: s.plan.name, used: mbText(s.used_bytes / (1024 * 1024)), cap: mbText(s.max_bytes / (1024 * 1024)) };
+}
+
 export async function checkUploadAllowed(user, sizeBytes) {
     const plan = await planOf(user).catch(() => null);
     if (!plan) return { ok: true };
