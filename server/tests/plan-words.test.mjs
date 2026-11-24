@@ -107,7 +107,7 @@ test("a background task's run refused by the plan is told apart from a failed ru
 
 test("limits that were not checked where the AI works: the Library, a paid extra, the voice minutes", () => {
     const full = w.libraryFullNote({ planName: "Free", used: "590 MB", cap: "600 MB" });
-    assert.match(full, /^\nNOT added to the user's Library: the Library of their Free plan is full \(590 MB of 600 MB used\)\. The link above works\./);
+    assert.match(full, /^\nNOT added to the user's Library: the Library of their Free plan is full \(590 MB of 600 MB used\)\. The link above works: /);
     assert.match(full, /give it to the user as usual\. Do not bring up the Library or the plan by yourself; only if the user asks where the file is in their Library, say it was not saved there because the Library is full/);
     assert.equal(w.paidFromCreditsNote("picture", "Pro"), " This picture was past the number the person's Pro plan includes for this period, so it was paid from their AI credits. Do not bring that up by yourself; say it only if the user asks about their limit or their credits.");
     assert.match(w.paidFromCreditsNote("message"), /past the number the person's plan includes/);
