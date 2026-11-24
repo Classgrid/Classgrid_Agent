@@ -4557,6 +4557,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   }, [askQuestion]);
 
   // Session-to-session messaging (desktop app / Classgrid Code; nothing happens on the website)
+  // How long a "finished its turn" notice waits for that session's answer before it starts a turn by itself, and how
+  // long after an answer a notice from the same session is taken as said already
+  const PEER_NOTICE_HOLD_MS = 5000;
+  const PEER_ANSWER_FRESH_MS = 20000;
   const peerMe = useRef<symbol>(Symbol("peer-panel"));
   const peerBusyRef = useRef(false);
   const peerHandledRef = useRef<Set<string>>(new Set());
@@ -4565,6 +4569,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const peerTurnRef = useRef<{ sessionId: string; messageId: string } | null>(null);
   const peerMessagesRef = useRef<ChatMessage[]>([]);
   peerMessagesRef.current = messages;
+  // When each session's last message arrived, and the "finished its turn" notices waiting for that session's answer
+  const peerAnswerAtRef = useRef<Map<string, number>>(new Map());
+  const heldNoticesRef = useRef<Map<string, { timer: ReturnType<typeof setTimeout>; m: PeerMessage }>>(new Map());
   // A message from another session starts a turn here. Its whole answer is sent back when the turn ends (below), the
   // way a helper's report goes to the main agent: the other session gets a real answer, not a one-line note.
   const startPeerTurn = (m: PeerMessage) => {
@@ -4582,6 +4589,32 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const off = subscribePeers(
       (m) => {
         if (!active() || peerHandledRef.current.has(m.id)) return;
+        // A session that finished sends two things: the notice "finished its turn" and its answer. The notice used
+        // to come first and start a turn here at once; this AI, with no answer yet, did the other session's work
+        // again, and the answer arrived while it was busy (owner, 2026-11-24: "it should have waited 2 seconds, it
+        // duplicated the work"). So a notice waits a moment for that session's answer: when the answer comes (or
+        // came just before), the answer starts the turn and the notice starts nothing.
+        const sid = m.from?.sessionId || "";
+        const dropNotice = (n: PeerMessage) => { peerHandledRef.current.add(n.id); markPeerRead([n.id]); };
+        if (m.notice === "idle") {
+          if (Date.now() - (peerAnswerAtRef.current.get(sid) || 0) < PEER_ANSWER_FRESH_MS) { dropNotice(m); return; }
+          if (!peerBusyRef.current) {
+            const before = heldNoticesRef.current.get(sid);
+            if (before) { clearTimeout(before.timer); dropNotice(before.m); }
+            const timer = setTimeout(() => {
+              heldNoticesRef.current.delete(sid);
+              if (peerHandledRef.current.has(m.id)) return;
+              if (peerBusyRef.current) { setPeerPending((n) => n + 1); return; }
+              startPeerTurnRef.current(m); // (no answer came: the notice itself is what there is to act on)
+            }, PEER_NOTICE_HOLD_MS);
+            heldNoticesRef.current.set(sid, { timer, m });
+            return;
+          }
+        } else if (!m.notice) {
+          peerAnswerAtRef.current.set(sid, Date.now());
+          const held = heldNoticesRef.current.get(sid);
+          if (held) { clearTimeout(held.timer); heldNoticesRef.current.delete(sid); dropNotice(held.m); }
+        }
         if (peerBusyRef.current) { setPeerPending((n) => n + 1); return; } // busy: the host adds it to the next tool result (or sends it again when this turn ends)
         startPeerTurnRef.current(m);
       },
@@ -4595,7 +4628,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   useEffect(() => {
     peerBusyRef.current = submitting;
     if (peerPanels[peerPanels.length - 1] !== peerMe.current) return;
-    reportSessionStatus(submitting ? "busy" : "idle");
+    // (idle is told after this turn's answer went back to the session that asked, below: the "finished its turn"
+    // notice the host sends on idle used to reach that session before the answer did)
+    if (submitting || !peerTurnRef.current) reportSessionStatus(submitting ? "busy" : "idle");
     if (submitting) return;
     setPeerPending(0);
     // The turn a message from another session started has ended: its whole answer goes back to that session. Not when
@@ -4608,14 +4643,27 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const answer = at >= 0 ? list.slice(at + 1).find((x) => x.role === "assistant") : undefined;
       const text = String(answer?.content || "").trim();
       const answeredItself = (answer?.steps || []).some((s: any) => s?.tool === "message_classgrid_session" && /^Delivered to /.test(String(s?.result || "")));
-      if (text && !answeredItself) void sendPeerAnswer(asked.sessionId, text, asked.messageId);
+      // The answer first, then "finished its turn" (idle), whatever happens to the send; not when a new turn has
+      // already started here (that turn tells the host itself when it ends)
+      const tellIdle = () => { if (!peerBusyRef.current && peerPanels[peerPanels.length - 1] === peerMe.current) reportSessionStatus("idle"); };
+      if (text && !answeredItself) void sendPeerAnswer(asked.sessionId, text, asked.messageId).then(tellIdle, tellIdle);
+      else tellIdle();
     }, 300) : null;
     // A message that came while the turn ran and that no later step read is still in the inbox: it starts the next turn
     const t = setTimeout(() => {
       if (peerBusyRef.current || peerPanels[peerPanels.length - 1] !== peerMe.current) return;
       void peerInboxNow().then((msgs) => {
-        const m = msgs.find((x) => !peerHandledRef.current.has(x.id));
+        const waiting = msgs.filter((x) => !peerHandledRef.current.has(x.id));
+        // (an answer or a message before a "finished its turn" notice; the notice of a session whose message is
+        // taken now starts no turn of its own)
+        const m = waiting.find((x) => !x.notice) || waiting[0];
         if (!m || peerBusyRef.current) return;
+        if (!m.notice) {
+          const same = waiting.filter((x) => x.notice === "idle" && x.from?.sessionId === m.from?.sessionId);
+          for (const n of same) peerHandledRef.current.add(n.id);
+          if (same.length) markPeerRead(same.map((n) => n.id));
+          peerAnswerAtRef.current.set(m.from?.sessionId || "", Date.now());
+        }
         startPeerTurnRef.current(m);
       });
     }, 400);

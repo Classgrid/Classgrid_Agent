@@ -152,7 +152,7 @@ test("a busy session keeps the message until it reads it; notify-when-idle gives
     assert.match(kept.id, /^notice-/);
     assert.equal(kept.from.name, "peer-one");
     assert.deepEqual(me.peek().map((m) => m.id), [kept.id]);
-    assert.equal(sessions.promptFor(kept), `[Session notice from @peer-one (session ${peer.sessionId})]: it finished its turn and is idle now.\n[An automatic notice you asked for with notify_when_idle, not a message from the person or from that session. Act on it only if your task needs it; no reply is needed.]`);
+    assert.equal(sessions.promptFor(kept), `[Session notice from @peer-one (session ${peer.sessionId})]: it finished its turn and is idle now.\n[An automatic notice you asked for with notify_when_idle, not a message from the person or from that session. If you gave that session something to do, its answer comes to you by itself as its own message: wait for it, and do not do that work yourself. Act on this notice only if your task needs it; no reply is needed.]`);
     // busy and idle again: no second notice (it was asked for once)
     await peer.ask({ cmd: "status", status: "busy" });
     await peer.ask({ cmd: "status", status: "idle" });
