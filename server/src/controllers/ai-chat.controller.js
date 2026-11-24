@@ -102,6 +102,7 @@ import { sharedHelperTools, loadHelperGroups, groupsWithRules } from "../service
 import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
 import { setHelperJobSink } from "../utils/helper-jobs.js";
+import { notStartedNote } from "../utils/helper-room.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -4953,7 +4954,12 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         // work in the background"; DeepSeek sent one with wait: true, so the answer waited, was stopped, and the
                         // helper went with it). Only a workflow step of this server (_quiet) waits for its own helpers here.
                         if (!(args?._quiet === true && (args?.wait === true || args?.wait === "true"))) {
-                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}\nTalk to them with message_helper and read their notes and reports with check_helpers. Now tell the user what the helpers are doing and end your answer, so the user can keep talking to you: each helper's report reaches you by itself when it finishes, and you tell the user then.`;
+                            // Fewer started than were asked for: the main AI is told which were left out and why. It was
+                            // told only "Started 1 helper(s)" (owner's test on a Free account, 2026-11-24: three asked,
+                            // the plan allows one at a time, and the AI wrote "Helpers 2 and 3 didn't launch, so I'll
+                            // start them again in a moment", which is refused while the first one works).
+                            const leftOut = notStartedNote({ asked: specs, started: batch.length, maxHelpers, planName: helperPlan?.name || "" });
+                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}${leftOut}\nTalk to them with message_helper and read their notes and reports with check_helpers. Now tell the user what the helpers are doing and end your answer, so the user can keep talking to you: each helper's report reaches you by itself when it finishes, and you tell the user then.`;
                         }
                         await Promise.all(batch.map((h) => h.promise));
                         let resultRoom = HELPER_RESULT_ROOM;
