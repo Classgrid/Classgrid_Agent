@@ -1,8 +1,8 @@
 // The voices a user can pick for answers read aloud (voice mode in the phone app; owner, 2026-11-14): Classgrid's own
 // voice (ELEVENLABS_VOICE_ID) plus five Indian and five American voices from the ElevenLabs voice library, chosen by
-// popularity for conversation, and Nikhil, the owner's own cloned voice in Classgrid's ElevenLabs workspace (owner,
-// 2026-11-23: "this is my voice, add it to our mobile app"). Only these ids are accepted from the app; anything else
-// reads in Classgrid's voice.
+// popularity for conversation. Only these ids are accepted from the app; anything else reads in Classgrid's voice.
+// (Two cloned voices of the workspace, Nikhil and Pratik, were in this list from 2026-11-23 to 2026-11-24, when the
+// owner had them taken out: "remove Pratik and my voice". A phone that had one of them picked reads in Classgrid's.)
 import { classgridVoiceId } from "./elevenlabs.service.js";
 
 export const VOICE_CHOICES = [
@@ -13,9 +13,6 @@ export const VOICE_CHOICES = [
     { key: "alisha", id: "ftDdhfYtmfGP0tFlBYA1", name: "Alisha", accent: "Indian", gender: "female", description: "Soft and engaging" },
     { key: "raju", id: "pzxut4zZz4GImZNlqQ3H", name: "Raju", accent: "Indian", gender: "male", description: "Natural and conversational" },
     { key: "tara", id: "P7vsEyTOpZ6YUTulin8m", name: "Tara", accent: "Indian", gender: "female", description: "Conversational and expressive" },
-    { key: "nikhil", id: "H9ipKj3VXe3Vi6aPCwm9", name: "Nikhil", accent: "Indian", gender: "male", description: "Classgrid's founder" },
-    // (Pratik: a cloned voice in the same workspace, added at the owner's word the same evening)
-    { key: "pratik", id: "82qFxihNEjOhstPIGYf1", name: "Pratik", accent: "Indian", gender: "male", description: "A young voice" },
     // America
     { key: "mark", id: "UgBBYS2sOqTuMpoF3BR0", name: "Mark", accent: "American", gender: "male", description: "Relaxed and natural" },
     { key: "hope", id: "tnSpp4vdxKPjI9w0GnoV", name: "Hope", accent: "American", gender: "female", description: "Upbeat and clear" },
