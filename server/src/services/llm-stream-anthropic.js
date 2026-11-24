@@ -653,6 +653,9 @@ export async function streamClaudeChat({
     inputTooBig,
     // beforeRound(): awaited before every round, in front of the token check (same as streamChat)
     beforeRound = null,
+    // userNotes(): what the person said while this round's tools ran (same as streamChat): one more text block after
+    // the tools' results
+    userNotes = null,
     signal,
     onToken,
     onThought,
@@ -1097,7 +1100,9 @@ export async function streamClaudeChat({
             }
 
             // All results go back in one user message, which keeps Claude making parallel calls.
-            conversation.push({ role: "user", content: [...toolResults, ...extraTexts.map((text) => ({ type: "text", text: `Rules for the tools just loaded:\n${text}` }))] });
+            let saidMeanwhile = null;
+            if (userNotes && !stopAnswer) { try { saidMeanwhile = userNotes(); } catch { saidMeanwhile = null; } }
+            conversation.push({ role: "user", content: [...toolResults, ...extraTexts.map((text) => ({ type: "text", text: `Rules for the tools just loaded:\n${text}` })), ...(saidMeanwhile ? [{ type: "text", text: String(saidMeanwhile) }] : [])] });
             earlierCalls.push(...callsThisRound);
             if (onConversation) { try { await onConversation(conversation, usage); } catch { /* the answer goes on without the saved copy */ } }
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun, servedModel };

@@ -67,6 +67,7 @@
 import redis from '../config/redis.js';
 import { getSessionMessages } from './ai-chat.service.js';
 import { senderLabels } from './ai-chat-grid.service.js';
+import { answerWithUserNotes } from '../utils/user-notes.js';
 
 const REDIS_KEY_PREFIX  = 'ai:chat:history:';
 const MAX_HISTORY       = 500;   // absolute cap stored in Redis
@@ -153,7 +154,8 @@ export async function getHistory(sessionId, depth = DEFAULT_DEPTH, { desktop = f
                     try {
                         const inner = JSON.parse(parsed.content);
                         if (inner && inner.classgrid_ai_message) {
-                            parsed.content = inner.content || '';
+                            // (with what the person wrote while that answer worked: utils/user-notes.js)
+                            parsed.content = answerWithUserNotes(inner);
                             // An answer that didn't finish: the AI is told so right after it, like Claude Code's
                             // "[Request interrupted by user]" (the user pressed Stop, or an error cut it off)
                             const cut = String(inner.content || '');
@@ -330,7 +332,7 @@ async function getHistoryFromSupabase(sessionId, depth = DEFAULT_DEPTH) {
                     try {
                         const inner = JSON.parse(text);
                         if (inner && inner.classgrid_ai_message) {
-                            text = inner.content || '';
+                            text = answerWithUserNotes(inner);
                         }
                     } catch {}
                 }

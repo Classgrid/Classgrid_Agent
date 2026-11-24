@@ -24,6 +24,23 @@ import { Laptop } from 'lucide-react';
 import { ToolOutputContainer } from './ToolOutputContainer';
 import { Spinner } from '@/components/marketing_ui/spinner';
 import { cn } from '@/lib/utils';
+import { runInBackground, useRunningCommandId } from '@/lib/runningCommands';
+
+// A command on this computer that is still running: "Run in background" in place of the spinner and "Waiting for
+// output..." (owner, 2026-11-24). The command goes on, and the AI goes on with its work and is told when it ends.
+function RunInBackground({ id }: { id: string }) {
+  const [asked, setAsked] = useState(false);
+  return (
+    <button
+      type="button"
+      disabled={asked}
+      onClick={() => { setAsked(true); void runInBackground(id).then((moved) => { if (!moved) setAsked(false); }); }}
+      className="cursor-pointer font-sans text-[13px] text-slate-500 dark:text-[#a3a3a3] underline-offset-2 hover:underline hover:text-slate-800 dark:hover:text-[#e6edf3] disabled:cursor-default disabled:no-underline disabled:opacity-60"
+    >
+      Run in background
+    </button>
+  );
+}
 
 interface TerminalToolViewProps {
   command: string;
@@ -36,6 +53,8 @@ interface TerminalToolViewProps {
 
 export function TerminalToolView({ command, output, running = false, shell }: TerminalToolViewProps) {
   const [activeTab, setActiveTab] = useState<'command' | 'output'>('output');
+  // (the id of this command while it runs on this computer, when this app can move it to the background)
+  const runningId = useRunningCommandId(typeof command === 'object' ? JSON.stringify(command) : String(command || ''), running);
 
   // Extremely basic pseudo-syntax highlighting for the Command view
   const formatCommand = (cmd: string) => {
@@ -66,7 +85,7 @@ export function TerminalToolView({ command, output, running = false, shell }: Te
           <div className="p-3 leading-relaxed whitespace-pre-wrap break-words">{formatCommand(cmd)}</div>
           <div className="border-t border-slate-200 dark:border-[#2e2e2e] p-3 leading-relaxed whitespace-pre-wrap break-words overflow-x-auto max-h-[400px] text-slate-600 dark:text-[#d4d4d4] [scrollbar-color:#D3D1CB_transparent] dark:[scrollbar-color:rgba(255,255,255,0.2)_transparent] [scrollbar-width:thin]">
             {waiting
-              ? <span className="inline-flex items-center gap-2"><Spinner className="size-3.5 shrink-0" />Waiting for output...</span>
+              ? (runningId ? <RunInBackground id={runningId} /> : <span className="inline-flex items-center gap-2"><Spinner className="size-3.5 shrink-0" />Waiting for output...</span>)
               : shown || '(no output)'}
           </div>
           {/* Desktop app and Classgrid Code: an exit code other than 0 is often a plain answer ("not found", "no
@@ -123,7 +142,7 @@ export function TerminalToolView({ command, output, running = false, shell }: Te
           ) : (
             <div className="leading-relaxed text-slate-600 dark:text-[#d4d4d4]">
               {typeof output === 'object' ? JSON.stringify(output, null, 2) : running && (!output || output === 'Waiting for output...') ? (
-                <span className="inline-flex items-center gap-2"><Spinner className="size-3.5 shrink-0" />Waiting for output...</span>
+                runningId ? <RunInBackground id={runningId} /> : <span className="inline-flex items-center gap-2"><Spinner className="size-3.5 shrink-0" />Waiting for output...</span>
               ) : (output || 'Waiting for output...')}
             </div>
           )}

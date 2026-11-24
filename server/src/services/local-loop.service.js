@@ -23,8 +23,10 @@ const loops = new Map(); // turnId -> { userId, rounds: Map<roundId, Round>, nex
  * app's Stop command did; after the other stops the answer hung on the round until the 15-minute timer, which then
  * ran the steps on the user's PC through the runner socket, after the answer had stopped).
  */
-export function makeLocalLoopDriver({ turnId, userId, emit, onStop, signal = null }) {
-    const state = { userId: String(userId), rounds: new Map(), nextRound: 0, emit, onStop, stopped: false, disposed: false };
+export function makeLocalLoopDriver({ turnId, userId, emit, onStop, onSay = null, signal = null }) {
+    // (onSay({ id, text }): a message the person sends while this answer works, command "say"; utils/user-notes.js)
+    const state = { userId: String(userId), rounds: new Map(), nextRound: 0, emit, onStop, onSay, stopped: false, disposed: false };
+    state.signal = signal;
     loops.set(turnId, state);
     const onAbort = () => stopLoop(state);
     if (signal?.aborted) stopLoop(state);
@@ -111,6 +113,8 @@ function stopLoop(state) {
     }
 }
 
+const signalGone = (state) => state.signal?.aborted === true;
+
 /** One command from the app for an answer in progress. Returns { ok: true } or { error } */
 export async function handleTurnCommand(turnId, userId, cmd) {
     const state = loops.get(String(turnId || ""));
@@ -120,6 +124,14 @@ export async function handleTurnCommand(turnId, userId, cmd) {
         stopLoop(state);
         try { state.onStop?.(); } catch { /* nothing to stop */ }
         return { ok: true };
+    }
+    // What the person says while the answer works: it goes to the model with its next round of tools. Not taken once
+    // the answer has stopped or ended (the app then sends it as the next message itself).
+    if (type === "say") {
+        if (state.stopped || state.disposed || signalGone(state) || typeof state.onSay !== "function") return { error: "not_taken" };
+        let taken = false;
+        try { taken = state.onSay({ id: cmd?.id, text: cmd?.text }) === true; } catch { taken = false; }
+        return taken ? { ok: true } : { error: "not_taken" };
     }
     const roundId = Number(cmd?.roundId);
     const round = state.rounds.get(roundId);

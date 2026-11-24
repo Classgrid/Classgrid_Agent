@@ -370,6 +370,12 @@ ipcMain.handle("cg:runTool", (e, req) => {
   if (!from.startsWith(`${APP_URL}/`) && from !== APP_URL) return { text: "Error: this step can only be asked by the Classgrid app itself." };
   return runner.runTool(req && typeof req === "object" ? req : {});
 });
+ipcMain.handle("cg:backgroundCommand", (e, id) => {
+  let from = "";
+  try { from = String(e.sender.getURL() || ""); } catch { from = ""; }
+  if (!from.startsWith(`${APP_URL}/`) && from !== APP_URL) return false;
+  return runner.backgroundCommand(String(id || ""));
+});
 // Session-to-session messaging (sessions.js): this app is one running Classgrid session others on this computer can
 // list and message. Host -> screens: "cg-peer-message", "cg-peer-notice". Screens -> host: "cg-session-status", "cg-peer-read".
 let peerSession = null;

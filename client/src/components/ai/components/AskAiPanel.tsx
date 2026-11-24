@@ -248,6 +248,8 @@ import { usePlanOverview } from "@/features/shared/queries/usePlanOverview";
 // Until the plan overview has loaded (the server's own default: PlanConfig files_per_message)
 const DEFAULT_FILES_PER_MESSAGE = 6;
 import { fetchWithRescue } from "@/lib/rescue";
+import { commandStarted, commandEnded } from "@/lib/runningCommands";
+import { combinedNotes, partsAtUserNotes, plainFollowUp, sayToAnswer, useFollowUpMode, USER_NOTE_TOOL, type SentNote } from "@/lib/followUps";
 import { ANSWER_FEEDBACK_ASK, ANSWER_FEEDBACK_SET, closeReading, getReading, startReading, useReadingOf, useReadingOn } from "../reading";
 import { ReadingBar } from "./ReadingBar";
 import { docContextLine, getOpenDoc, openDocInStudio, splitDocContext, type OpenDoc } from "@/features/live-docs/docContext";
@@ -535,6 +537,16 @@ export type ChatMessage = {
   /** A message from another Classgrid session that started this turn (shown as "Message from @name") */
   meta?: { peer?: { from: { sessionId: string; name: string; kind?: string }; messageId: string } };
 };
+
+// A message the person sent while the AI worked: their bubble, inside the answer where the AI read it, or at the
+// end of the chat while it still waits for the AI's next step (dimmed)
+function SaidWhileWorking({ text, waiting = false }: { text: string; waiting?: boolean }) {
+  return (
+    <div className={cn("flex w-full justify-end", waiting ? "mb-3" : "mb-4")}>
+      <div className={cn("max-w-[75%] rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C] text-[15px] leading-relaxed text-foreground whitespace-pre-wrap [overflow-wrap:anywhere] transition-opacity", waiting && "opacity-60")}>{text}</div>
+    </div>
+  );
+}
 
 export type QueuedMessage = {
   id: string;
@@ -2247,6 +2259,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   const [messageQueue, setMessageQueue] = useState<QueuedMessage[]>([]);
   const [isQueueVisible, setIsQueueVisible] = useState(true);
   const [priorityMessage, setPriorityMessage] = useState<QueuedMessage | null>(null);
+  // Messages sent while the AI works ("Send immediately", lib/followUps.ts): shown in the chat at once, posted to the
+  // running answer, and taken off this list when the AI has read them (the stream's user_note_read; they are then
+  // drawn inside the answer, where they were read). What is still here when the answer ends goes out as one message.
+  const [followMode] = useFollowUpMode();
+  const [sentNotes, setSentNotes] = useState<SentNote[]>([]);
+  const sentNotesRef = useRef<SentNote[]>([]);
+  sentNotesRef.current = sentNotes;
   const [input, setInput] = useState("");
   // A key typed in the chat box changes only the box: the chat above is kept as it was drawn, not drawn again
   // for every key (in a long chat that made typing slow)
@@ -3478,6 +3497,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setThinking(false);
       setSubmitting(false);
       setMessageQueue([]);
+        setSentNotes([]);
       setPriorityMessage(null);
     };
 
@@ -3716,6 +3736,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         setThinking(false);
         setSubmitting(false);
         setMessageQueue([]);
+        setSentNotes([]);
         setPriorityMessage(null);
         setChatEnded(null);
       }
@@ -3867,6 +3888,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       setThinking(false);
       setSubmitting(false);
       setMessageQueue([]);
+        setSentNotes([]);
       setPriorityMessage(null);
       setChatEnded(null);
       setSessionId(null);
@@ -3940,6 +3962,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     if (e?.kind === "ended") {
       setChatEnded({ reason: e.reason ?? null, canReopen: !!e.canReopen });
       setMessageQueue([]);
+        setSentNotes([]);
       setPriorityMessage(null);
     }
     if (!gridSessionId || gridSubmittingRef.current) return; // my own reply is streaming: it shows already
@@ -4698,6 +4721,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   useEffect(() => {
     if (!chatEnded) return;
     setMessageQueue([]);
+        setSentNotes([]);
     setPriorityMessage(null);
   }, [chatEnded]);
 
@@ -5136,12 +5160,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const apiBase = endpoint.replace(/\/api\/ai\/ask$/, "");
       const runPcToolCall = async (ev: any) => {
         let reply: any;
+        // (a command: its box can offer "Run in background" while it runs, lib/runningCommands.ts; `call` names it)
+        commandStarted(String(ev.id), String(ev.tool || ""), ev.args);
         try {
           // peer: unread messages from other Classgrid sessions may come back after this step (the host adds them and
           // marks them read): only for the answer on this screen, and never for a helper's step (ev.helper, from the server)
-          reply = await (window as any).classgridDesktop.runTool({ tool: ev.tool, args: ev.args || {}, root: ev.root, chat: ev.chat, checkpoint: ev.checkpoint, peer: !ev.helper && peerPanels[peerPanels.length - 1] === peerMe.current });
+          reply = await (window as any).classgridDesktop.runTool({ tool: ev.tool, args: ev.args || {}, root: ev.root, chat: ev.chat, checkpoint: ev.checkpoint, call: String(ev.id), peer: !ev.helper && peerPanels[peerPanels.length - 1] === peerMe.current });
         } catch (e: any) {
           reply = { text: `Error: ${e?.message || e}` };
+        } finally {
+          commandEnded(String(ev.id));
         }
         if (!reply || typeof reply !== "object") reply = { text: String(reply ?? "") };
         // The reply is posted until it gets through (a short internet drop must not lose a finished step)
@@ -5426,6 +5454,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 turnId = String(event.turnId);
                 myTurnId = turnId;
                 activeTurnIdRef.current = turnId;
+                // (messages sent while this answer was starting: posted now; the server takes each id once)
+                for (const waitingNote of sentNotesRef.current) void sayToAnswer(apiBase, String(event.turnId), waitingNote);
               } else if (event.type === "round_end") {
                 // The model asked for tools: this app drives the round (which run, in what order)
                 void driveRound(event);
@@ -5635,10 +5665,23 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                   updatedSteps[idx] = { ...step, helpers };
                   return [...prev.slice(0, -1), { ...lastMsg, steps: updatedSteps }];
                 });
+              } else if (event.type === "user_note_read" && event.id) {
+                // The AI has read a message sent while it worked: it leaves the waiting bubbles and becomes a step
+                // of this answer at this place (drawn as the person's message there; the server saves the same step)
+                const noteId = String(event.id);
+                const noteStep: AgentStep = { id: `said-${noteId}`, type: 'tool', tool: USER_NOTE_TOOL, args: { message: String(event.text || ""), thoughtAt: typeof event.thoughtAt === "number" ? event.thoughtAt : undefined }, result: "Read.", status: 'success' };
+                setSentNotes((prev) => prev.filter((n) => n.id !== noteId));
+                setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (!lastMsg || lastMsg.role !== "assistant") return [...prev, { id: createMessageId("assistant"), role: "assistant", content: "", createdAt: Date.now(), steps: [noteStep] }];
+                  if ((lastMsg.steps || []).some((s) => s.id === noteStep.id)) return prev;
+                  return [...prev.slice(0, -1), { ...lastMsg, steps: [...(lastMsg.steps || []), noteStep] }];
+                });
               } else if (event.type === "chat_ended") {
                 chatEndedSeen = true;
                 setChatEnded({ reason: event.reason ?? null, canReopen: !!event.canReopen });
                 setMessageQueue([]);
+        setSentNotes([]);
                 setPriorityMessage(null);
               } else if (event.type === "limit_ended") {
                 limitEndedReset = event.resetDate || new Date().toISOString();
@@ -5813,6 +5856,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     }
   }
 
+  // A queued message goes back into the chat box to be changed (its files and pasted text with it) and leaves the
+  // queue; what is already typed in the box stays in front of it
+  const editQueued = (msg: QueuedMessage) => {
+    setMessageQueue((prev) => prev.filter((m) => m.id !== msg.id));
+    const typed = typedNow();
+    const text = typed.trim() ? `${typed}\n${msg.text}` : msg.text;
+    setInput(text);
+    const el = inputRef.current as any;
+    if (el && typeof el.value === "string") { el.value = text; el.focus?.(); }
+    if (msg.attachedFiles.length) setAttachedFiles((prev) => [...prev, ...msg.attachedFiles]);
+    if (msg.pastedTexts.length) setPastedTexts((prev) => [...prev, ...msg.pastedTexts]);
+  };
+
+  const apiBaseForSay = () => (typeof import.meta !== "undefined" && import.meta.env ? (import.meta.env.VITE_API_URL || "https://api.classgrid.in") : "");
+
   function submitInput() {
     // The box's own text, not the `input` state: the last keys typed may not have reached the state yet
     const typed = typedNow();
@@ -5834,6 +5892,17 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     const isTyping = messages.length > 0 && messages[messages.length - 1]?.typing === true;
     if (thinking || submitting || isTyping || wordTypingActiveRef.current) {
+      // "Send immediately" (Settings → Input box; the desktop app, Classgrid Code and the extension): plain words
+      // join the answer that is running. They show in the chat at once and are posted to the answer; the AI reads
+      // them with its next step. A message with files, pasted text or code comments, and a "/" command, wait in
+      // the queue as before.
+      if (followMode === "now" && plainFollowUp({ text: finalInput, files: attachedFiles.length, pasted: pastedTexts.length, codeNotes: notesToSend.length })) {
+        const note: SentNote = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, text: finalInput.trim() };
+        setSentNotes((prev) => [...prev, note]);
+        const turnId = activeTurnIdRef.current;
+        // (no answer id yet: it is posted the moment the id arrives, see turn_info)
+        if (turnId) void sayToAnswer(apiBaseForSay(), turnId, note);
+      } else
       // Linear Approach: Queue the message instead of sending immediately to prevent stream collisions
       setMessageQueue(prev => [
         ...prev,
@@ -5879,6 +5948,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         setSubmitting(true);
         setTimeout(() => askQuestionRef.current?.(hiddenNext.text, { hidden: true }), 50);
       }
+      // Messages sent while the AI worked that it did not get to (no step came after them): all of them go out
+      // now as ONE message, so several messages get one answer, never one each
+      else if (sentNotes.length > 0) {
+        setSubmitting(true);
+        const together = combinedNotes(sentNotes);
+        setSentNotes([]);
+        setTimeout(() => { askQuestionRef.current?.(together); }, 50);
+      }
       // Then check if there is a priority message
       else if (priorityMessage) {
         setSubmitting(true);
@@ -5907,7 +5984,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         }, 50); // fast fire
       }
     }
-  }, [thinking, submitting, messages, messageQueue.length, priorityMessage, gridBlockedBy]);
+  }, [thinking, submitting, messages, messageQueue.length, priorityMessage, gridBlockedBy, sentNotes.length]);
 
   // ─── Panel content (shared between desktop sidebar and mobile bottom-sheet) ───
   const pendingQueueUI = null;
@@ -6085,7 +6162,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             </div>
           </>
         ) : (() => {
-          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy, localImagesFound, peerPending];
+          const listDeps = [messages, thinking, submitting, priorityMessage, gridBlockedBy, localImagesFound, peerPending, sentNotes];
           if (typingOnlyRender && chatListRef.current && chatListRef.current.deps.every((d, i) => d === listDeps[i])) return chatListRef.current.node;
           const node = (
           <>
@@ -6377,9 +6454,34 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   so CombinedReasoningBlock is a DIRECT sibling of the step elements.
                                   This is required for the CSS .combined-reasoning-block ~ * trick to work! */}
                               {((message.thought && message.thought.trim().length > 0) || (index === messages.length - 1 && thinking) || (message.steps && message.steps.length > 0)) && (
-                                <div className="mb-4">
-                                  <ReplySteps thought={message.thought} steps={message.steps} live={index === messages.length - 1 && (thinking || submitting || !!message.typing)} thinking={index === messages.length - 1 && thinking} workedMs={message.workedMs} />
-                                </div>
+                                (() => {
+                                  const liveNow = index === messages.length - 1 && (thinking || submitting || !!message.typing);
+                                  const thinkingNow = index === messages.length - 1 && thinking;
+                                  // A message the person sent while this answer worked is drawn where the AI read
+                                  // it: work, their message, the work after it (lib/followUps.ts)
+                                  const parts = partsAtUserNotes(message.steps, message.thought);
+                                  if (parts.length === 1) {
+                                    return (
+                                      <div className="mb-4">
+                                        <ReplySteps thought={message.thought} steps={message.steps} live={liveNow} thinking={thinkingNow} workedMs={message.workedMs} />
+                                      </div>
+                                    );
+                                  }
+                                  return parts.map((part, partNo) => {
+                                    const lastPart = partNo === parts.length - 1;
+                                    const hasWork = part.steps.length > 0 || part.thought.trim().length > 0 || (lastPart && thinkingNow);
+                                    return (
+                                      <React.Fragment key={part.saidId || `work-${partNo}`}>
+                                        {hasWork && (
+                                          <div className="mb-4">
+                                            <ReplySteps thought={part.thought} steps={part.steps} live={lastPart && liveNow} thinking={lastPart && thinkingNow} workedMs={lastPart ? message.workedMs : undefined} />
+                                          </div>
+                                        )}
+                                        {part.said !== undefined && <SaidWhileWorking text={part.said} />}
+                                      </React.Fragment>
+                                    );
+                                  });
+                                })()
                               )}
 
                               {/* Old thought accordion removed — CombinedReasoningBlock above stepper handles all thought display now */}
@@ -6725,6 +6827,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             {/* Other Classgrid sessions: messages waiting for this turn's next step, or for it to end */}
             {peerPending > 0 && <div className="ml-10 w-fit rounded-full border border-border/60 px-2.5 py-0.5 text-xs text-muted-foreground">{peerPending} message{peerPending === 1 ? "" : "s"} from another session waiting</div>}
 
+            {/* Sent while the AI works and not read yet: they wait here, then move into the answer */}
+            {sentNotes.map((n) => <SaidWhileWorking key={n.id} text={n.text} waiting />)}
+
             {/* Rendering priority message right after the normal messages */}
             {priorityMessage && (
               <motion.div
@@ -6855,6 +6960,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   >
                                     Send
                                   </button>
+                                  {!msg.codeNotes?.length && (
+                                    <button
+                                      type="button"
+                                      onClick={() => editQueued(msg)}
+                                      className="text-[12px] cursor-pointer px-2 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                    >
+                                      Edit
+                                    </button>
+                                  )}
                                   <button
                                     type="button"
                                     onClick={() => setMessageQueue(prev => prev.filter(m => m.id !== msg.id))}
@@ -7690,6 +7804,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             >
                                               Send
                                             </button>
+                                            {!msg.codeNotes?.length && (
+                                              <button
+                                                type="button"
+                                                onClick={() => editQueued(msg)}
+                                                className="text-[12px] cursor-pointer px-2 py-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                                              >
+                                                Edit
+                                              </button>
+                                            )}
                                             <button
                                               type="button"
                                               onClick={() => setMessageQueue(prev => prev.filter(m => m.id !== msg.id))}

@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld("classgridDesktop", {
   readFile: (folder, rel) => ipcRenderer.invoke("cg:readFile", folder, rel),
   // One AI step on this computer, asked by the chat for a pc_tool_call on the answer's own stream (runner.js runTool)
   runTool: (req) => ipcRenderer.invoke("cg:runTool", req),
+  // "Run in background" on a command the AI is waiting for (runner.js backgroundCommand): the step's id
+  backgroundCommand: (id) => ipcRenderer.invoke("cg:backgroundCommand", id),
   // Studio's Review tab for a folder on this computer: an answer's changes (null for a cloud project's answer), and
   // its files put back, one or all (runner.js reviewCheckpoint / rejectCheckpoint)
   listCheckpoints: (chat) => ipcRenderer.invoke("cg:listCheckpoints", chat),

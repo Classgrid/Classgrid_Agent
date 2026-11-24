@@ -103,6 +103,7 @@ import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
 import { setHelperJobSink } from "../utils/helper-jobs.js";
 import { notStartedNote } from "../utils/helper-room.js";
+import { makeUserNotes } from "../utils/user-notes.js";
 import { keptHelpers, forgetOldWork, helperToRestart, restartHint, limitRestartHint, stillUsedUpText, resumeFrom, reviveHelper } from "../utils/helper-restart.js";
 import { shownStepResult, plainModelError } from "../utils/shown-step.js";
 import { comesBackText, limitStopNote, libraryFullNote, paidFromCreditsNote, notTranscribedText, helperLimitReport, READER_LIMIT_ERROR, usageUsedUpText, helpersBusyText, helpersNotInPlanText, helperModelWhy, helperModelNote, thinkingNotInPlanNote, contextCutNote } from "../utils/plan-words.js";
@@ -2335,6 +2336,8 @@ export const streamAskAi = async (req, res) => {
     let pcExecutor = null; // this answer's app, for the steps on the computer (local-runner.service.js pcExecutors)
     let durableTurn = null;
     let localLoop = null; // the app driving the loop (set below, once the abort controls exist)
+    // What the person says while this answer works (the app's "say" command; utils/user-notes.js)
+    const saidMeanwhile = makeUserNotes();
     let resumeState = null; // an answer going on after a server restart (turn-state.service.js)
     if (body.pcTools === true && !fromWebsite && !body.taskOrigin && !body.wakeUp && userId) {
         // The answer survives the app's internet dropping: its events are kept under a turn id and the app comes back
@@ -3876,6 +3879,23 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
 
         // 3. Initialize the real LLM Client from the Classgrid SDK using the fallback hierarchy
         let accSteps = []; // hoisted here so tool wrappers can push to it
+        // The model loop takes what the person said meanwhile after a round of tools (its userNotes hook): each
+        // message becomes a step of this answer at that place (the chat draws it as the person's message there, and
+        // it is saved with the answer), and the app is told it was read.
+        const takeSaid = () => {
+            const got = saidMeanwhile.take();
+            if (!got) return null;
+            // (thoughtAt: how much of the answer's thinking was written by then, so the chat shows the thinking that
+            // came before the message above it and the rest below it)
+            let thoughtAt;
+            try { thoughtAt = String(accThought || "").length; } catch { thoughtAt = undefined; }
+            for (const note of got.notes) {
+                accSteps.push({ id: `said-${note.id}`, type: "tool", tool: "user_message", args: { message: note.text, thoughtAt }, status: "success", result: "Read." });
+                try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "user_note_read", id: note.id, text: note.text, thoughtAt })}\n\n`); } catch { /* the stream is gone */ }
+            }
+            console.log(`[AI-STREAM] ${got.notes.length} message(s) the person sent meanwhile went to the model with this round's results`);
+            return got.text;
+        };
         // Shows a tool's step in the chat (the terminal box, file steps...) while it runs and with its result. A helper
         // calling the same handler passes { fromHelper: true }: its steps show under the helper, not as the main AI's.
         const stepWrapped = new WeakMap(); // a shown handler -> the handler it wraps
@@ -7497,6 +7517,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 userId: String(userId),
                 emit: (ev) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`); },
                 onStop: () => { requestAborted = true; streamAbort.abort(); },
+                onSay: (note) => saidMeanwhile.add(note),
                 // (every other stop aborts streamAbort too: the durable turn's grace running out, a newer message)
                 signal: streamAbort.signal,
             });
@@ -7775,6 +7796,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 ...(thinking ? { effort: thinking } : {}),
                                 outputBudget: quotaRemaining,
                                 ...meterHooks(requestedModel),
+                                userNotes: takeSaid,
                                 timeoutMs: llmConfig.providers[0].timeoutMs,
                                 systemCacheBoundary,
                                 // Images and PDFs attached to this message are sent to Claude directly (native vision),
@@ -7884,6 +7906,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                                 maxContinuations: 3,
                                 outputBudget: quotaRemaining,
                                 ...meterHooks(model),
+                                userNotes: takeSaid,
                                 timeoutMs: llmConfig.providers[0].timeoutMs,
                                 signal: streamAbort.signal,
                                 // The desktop app driving the loop decides which tool calls run (local-loop.service.js)

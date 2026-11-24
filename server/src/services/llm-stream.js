@@ -396,6 +396,9 @@ export async function streamChat({
     // beforeRound(): awaited before every round, in front of the token check (the caller reads the person's real
     // balance again there when the meter is low: answer-meter.js refillMeter)
     beforeRound = null,
+    // userNotes(): what the person said while this round's tools ran (utils/user-notes.js), as one text or null. It
+    // goes to the model as a user message right after the tools' results, and the loop goes on.
+    userNotes = null,
     signal,
     onToken,
     onThought,
@@ -497,6 +500,7 @@ export async function streamChat({
                 maxOutputTokens: stand.maxOutputTokens || maxOutputTokens,
                 inputTooBig: stand.inputTooBig || inputTooBig,
                 beforeRound: stand.beforeRound || beforeRound,
+                userNotes,
                 // (Deep thinks harder, Fast less; Normal is the model's own default. Only what the caller asked for:
                 // a title, a summary, a file read or a helper gives no thinking level, and "all" is only this loop's
                 // own default; it used to make every such stand-in work at effort high, slower and dearer than the
@@ -814,6 +818,13 @@ export async function streamChat({
 
             // Tool messages hold only text, so the images follow as one message the model looks at
             if (roundImages.length) conversation.push({ role: "user", content: [{ type: "text", text: "The images from the tool results above. Look at them yourself:" }, ...roundImages] });
+            // What the person said meanwhile (never when a tool just ended the answer: it stays with the app, which
+            // sends it as the next message)
+            if (userNotes && !stopAnswer) {
+                let said = null;
+                try { said = userNotes(); } catch { said = null; }
+                if (said) conversation.push({ role: "user", content: String(said) });
+            }
             if (onConversation) { try { await onConversation(conversation, usage); } catch { /* the answer goes on without the saved copy */ } }
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun };
             if (countsTowardDepth) depth++;

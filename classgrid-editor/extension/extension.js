@@ -939,6 +939,8 @@ const HANDLERS = {
   readFile: (_p, folder, rel) => parts.runner.readForFilesTab(String(folder || ""), String(rel || "")),
   // One AI step on this computer (pc_tool_call on the answer's own stream): the same runner the socket fallback uses
   runTool: (_p, req) => parts.runner.runTool(req && typeof req === "object" ? req : {}),
+  // "Run in background" on a command the AI is waiting for (runner.js backgroundCommand)
+  backgroundCommand: (_p, id) => parts.runner.backgroundCommand(String(id || "")),
   // Session messaging: the page is ready for peer messages (flush what waited), its busy/idle state, and the messages it showed
   peerReady: (p) => { if (p.webview === screens.agent) peerFlush(p.webview); },
   sessionStatus: (p, status) => { if (p.webview === screens.agent && (status === "busy" || status === "idle")) peer.handle?.setStatus(status); },

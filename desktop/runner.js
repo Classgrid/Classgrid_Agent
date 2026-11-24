@@ -32,6 +32,9 @@ let identity = { deviceId: null, app: null };
 // The person's phone shows it on the computer's dot (owner, 2026-11-18: green open, yellow closed, red not connected).
 let windowOpen = null;
 const jobs = new Map(); // job id -> { proc, command, log, startedAt, exitCode }
+// Commands the AI is waiting for right now: the step's id on the answer's stream (__call) -> moves that command to
+// the background at once ("Run in background" in the command's box; owner, 2026-11-24)
+const foreground = new Map();
 let browserStep = null; // the app's browser (browser.js), once the window is open
 
 // ── Folders the user picked ──────────────────────────────────────────────────────────────────────────────
@@ -722,15 +725,15 @@ const tools = {
   // and goes on in the background wakes that chat with its result when it ends. It wasn't passed on before, so the AI
   // was told "you are woken with the result", ended its answer, and was never woken: every Python script longer than
   // 45 seconds looked like the AI "never came back", 2026-11-09)
-  run_code(root, { language = "bash", code = "", timeout_seconds, __chat }) {
+  run_code(root, { language = "bash", code = "", timeout_seconds, __chat, __call }) {
     if (!String(code).trim()) return Promise.resolve("Error: code is empty");
     const lang = String(language).toLowerCase();
-    if (lang === "bash" || lang === "shell" || lang === "sh" || lang === "powershell") return tools.execute_terminal_command(root, { command: code, timeout_seconds, __chat });
+    if (lang === "bash" || lang === "shell" || lang === "sh" || lang === "powershell") return tools.execute_terminal_command(root, { command: code, timeout_seconds, __chat, __call });
     const ext = lang === "python" ? "py" : "js";
     const file = path.join(require("node:os").tmpdir(), `classgrid-run-${Date.now()}.${ext}`);
     fs.writeFileSync(file, String(code), "utf8");
     const runner = lang === "python" ? (process.platform === "win32" ? "python" : "python3") : "node";
-    return tools.execute_terminal_command(root, { command: `${runner} "${file}"`, timeout_seconds, __chat }).finally(() => fs.rm(file, { force: true }, () => {}));
+    return tools.execute_terminal_command(root, { command: `${runner} "${file}"`, timeout_seconds, __chat, __call }).finally(() => fs.rm(file, { force: true }, () => {}));
   },
 
   // A command in the project folder (PowerShell on Windows). The AI waits for it in the foreground for timeout_seconds
@@ -750,16 +753,27 @@ const tools = {
       proc.stdout.on("data", add);
       proc.stderr.on("data", add);
       let moved = false;
-      const toBackground = setTimeout(() => {
+      const callId = arguments[1] && arguments[1].__call ? String(arguments[1].__call) : "";
+      // The command goes on as a background job and the AI gets what it printed so far: by itself after the waiting
+      // time, or at once when the person presses "Run in background" in its box (byUser). The words after "so it
+      // keeps running..." are the ones the server knows (local-runner.service.js withWakeNote: it tells the AI it is
+      // woken with the result).
+      const toJob = (byUser) => {
+        if (moved || job.exitCode !== null) return false;
         moved = true;
+        clearTimeout(toBackground);
+        if (callId) foreground.delete(callId);
         const id = `job${jobs.size + 1}-${Date.now().toString(36).slice(-4)}`;
         job.id = id;
         job.chat = arguments[1] && arguments[1].__chat;
         jobs.set(id, job);
-        resolve(`${cap(job.log.trim()) || "(no output yet)"}\n[Still running after ${waitS} seconds, so it keeps running in the background as job_id ${id}. Wait for it to finish with check_background_command (job_id "${id}", wait_seconds up to 120), or stop it with stop_background_command.]`);
-      }, waitS * 1000);
-      proc.on("close", (code) => { job.exitCode = code; clearTimeout(toBackground); if (!moved) resolve(`${cap(job.log.trim()) || "(no output)"}\n[exit code ${code}]`); else jobDone(job); });
-      proc.on("error", (err) => { job.exitCode = -1; clearTimeout(toBackground); if (!moved) resolve(`Error: ${err.message}`); });
+        resolve(`${cap(job.log.trim()) || "(no output yet)"}\n[${byUser ? "The user moved this command to the background while it was still running" : `Still running after ${waitS} seconds`}, so it keeps running in the background as job_id ${id}. Wait for it to finish with check_background_command (job_id "${id}", wait_seconds up to 120), or stop it with stop_background_command.]`);
+        return true;
+      };
+      const toBackground = setTimeout(() => toJob(false), waitS * 1000);
+      if (callId) foreground.set(callId, () => toJob(true));
+      proc.on("close", (code) => { job.exitCode = code; clearTimeout(toBackground); if (callId) foreground.delete(callId); if (!moved) resolve(`${cap(job.log.trim()) || "(no output)"}\n[exit code ${code}]`); else jobDone(job); });
+      proc.on("error", (err) => { job.exitCode = -1; clearTimeout(toBackground); if (callId) foreground.delete(callId); if (!moved) resolve(`Error: ${err.message}`); });
     });
   },
 
@@ -1622,6 +1636,7 @@ async function runToolStep(req) {
     const { tool, root, chat, checkpoint } = req || {};
     const args = (req && req.args && typeof req.args === "object") ? req.args : {};
     if (chat) args.__chat = String(chat); // which chat started it (a finished background job wakes that chat)
+    if (req && req.call) args.__call = String(req.call); // the step's own id: "Run in background" names the command by it
     // A file about to be changed in an answer with a checkpoint: its copy is kept first (Review / Reject / Undo)
     if (checkpoint && chat && CHECKPOINT_TOOLS.has(tool) && args.path) {
       // (the project folder may not be in this computer's list yet, see below: a folder that exists is used as is)
@@ -1821,6 +1836,9 @@ async function screenTool(tool, root, chat, args) {
 module.exports = {
   tools, // the AI's tools on this computer (also used by the terminal tests)
   runTool, // one step { tool, args, root?, chat?, checkpoint? } -> reply, for the chat screens (pc_tool_call) and the socket
+  // "Run in background": the running command of that step goes on as a background job, and the step answers at once.
+  // False when it has already ended (or is not a command of this app).
+  backgroundCommand(callId) { const move = foreground.get(String(callId || "")); return move ? move() === true : false; },
   readLocalFile,
   setSessionHandle(h) { sessionHandle = h || null; }, // the host's own session (sessions.js register()); both hosts call this
   withPeerInbox, // reply -> reply with unread peer messages appended (runTool already does this for every step)
