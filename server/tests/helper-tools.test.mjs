@@ -115,3 +115,16 @@ test("nothing left to load: no load_tools", () => {
     assert.deepEqual(names(set.loaded), ["search_web", "open_url"]);
     assert.equal(set.loader, null);
 });
+
+// The main AI has the helper tools in every chat (owner, 2026-11-24). They were loaded only by words like "code",
+// "files" or "project": he wrote "send helper" five times in a new chat and the AI had no helper tool.
+test("the helper tools are always loaded for the main AI, whatever the message says", async () => {
+    const { planToolsForMessage, CORE_TOOL_NAMES } = await import("../src/services/ai-tool-groups.js");
+    for (const n of ["run_project_helpers", "check_helpers", "message_helper"]) assert.ok(CORE_TOOL_NAMES.includes(n), n);
+    for (const text of ["you don't do, tell helper and tell max 3 minute tell result", "https://www.gemini.com/ send helper", "hi", ""]) {
+        const plan = planToolsForMessage({ allTools: MAIN, text, role: "user", email: "someone@example.com" });
+        for (const n of ["run_project_helpers", "check_helpers", "message_helper"]) assert.ok(plan.loadedNames.has(n), `${n} for "${text}"`);
+        // (the rest of the project tools still wait for their words)
+        assert.equal(plan.loadedNames.has("write_project_file"), false);
+    }
+});

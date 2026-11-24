@@ -69,6 +69,12 @@ export const CORE_TOOL_NAMES = [
     "end_conversation",
     "sleep_until",
     "end_task",
+    // Helpers are always loaded, in every chat (owner, 2026-11-24). They were only in the code_project group, which
+    // loads on words like "code", "files" or "project": in a new chat he wrote "send helper" five times, the word
+    // "helper" opened nothing, and the AI answered "I don't have a helper tool" and did the work itself each time.
+    "run_project_helpers",
+    "check_helpers",
+    "message_helper",
 ];
 
 // Tool definitions with no handler behind them: every call fails today, so they are not offered.
