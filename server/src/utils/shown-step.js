@@ -12,10 +12,14 @@
 // with the provider's name and its raw JSON ("Anthropic 400: {"type":"error",...}"), to the person. The reason is
 // now one plain phrase, and the main AI gets the same phrase, so it cannot repeat the raw error either.
 
-const cutStrings = (value, each) => {
-    if (typeof value === "string") return value.length > each ? `${value.slice(0, each)}…` : value;
-    if (Array.isArray(value)) return value.map((v) => cutStrings(v, each));
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cutStrings(v, each)]));
+// What the cards put on the screen is never cut: a website's name and its address (owner, 2026-11-24: "show
+// everything, don't cut; the web search shows the websites to me just like the main agent's"). Only the long page
+// text behind them, which no card shows, is made shorter.
+const SHOWN_WHOLE = new Set(["title", "url", "id", "domain", "favicon", "part", "name"]);
+const cutStrings = (value, each, key = "") => {
+    if (typeof value === "string") return value.length > each && !(SHOWN_WHOLE.has(key) && value.length <= 600) ? `${value.slice(0, each)}…` : value;
+    if (Array.isArray(value)) return value.map((v) => cutStrings(v, each, key));
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, cutStrings(v, each, k)]));
     return value;
 };
 

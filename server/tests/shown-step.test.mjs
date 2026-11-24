@@ -30,6 +30,29 @@ test("a long page cut for the chat is still JSON the card can read: its address,
     assert.throws(() => JSON.parse(whole.slice(0, 6000)));
 });
 
+test("a web search cut for the chat keeps every website, with its whole name and address, like the main agent's card", () => {
+    // What search_web returns (ai-chat.controller.js): the results with each page's long text
+    const results = Array.from({ length: 12 }, (_, i) => ({
+        id: i + 1,
+        title: `Context.dev review number ${i + 1}: web scraping API pricing, limits and how it compares with the others`,
+        url: `https://example-${i + 1}.com/blog/context-dev-web-scrape-api-review-and-pricing-comparison-${i + 1}`,
+        content: "The page's own text, long. ".repeat(160),
+    }));
+    const whole = JSON.stringify({ how_to_cite: "Cite facts from these results with the result id in square brackets.", answer: null, results, images: [] });
+    assert.ok(whole.length > 40000);
+    const shown = shownStepResult(whole, 6000);
+    assert.ok(shown.length <= 6000);
+    const parsed = JSON.parse(shown);
+    assert.equal(parsed.results.length, 12, "every website is still in the list");
+    parsed.results.forEach((r, i) => {
+        assert.equal(r.title, results[i].title, "its whole name");
+        assert.equal(r.url, results[i].url, "its whole address");
+        assert.equal(r.id, i + 1);
+    });
+    // (the old cut gave the card nothing it could read: "Could not parse search results.")
+    assert.throws(() => JSON.parse(whole.slice(0, 6000)));
+});
+
 test("a short result, and a long result that is not JSON, are as before", () => {
     const short = page(200);
     assert.equal(shownStepResult(short, 6000), short);
