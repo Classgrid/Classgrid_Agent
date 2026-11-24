@@ -61,7 +61,7 @@ import IdeProject from '../models/IdeProject.js';
 import { ensureFreshGithubToken } from '../services/github-token.service.js';
 import { repoAppToken, classgridAuthor, userCoAuthorLine } from '../services/github-app.service.js';
 import { projectTools, projectForChat, projectSnapshot, projectChangesBetween, formatProjectChanges, sandboxDataDir } from '../services/ide-project.service.js';
-import { cloudComputerGate } from '../services/cloud-computer-limit.service.js';
+import { cloudComputerGate, hoursRanOutNote } from '../services/cloud-computer-limit.service.js';
 import { LOCAL_TOOLS, callLocal, inChatWorktree } from '../services/local-runner.service.js';
 
 // What the sandbox container sees as /data, and where the hidden runner script is.
@@ -4525,7 +4525,8 @@ export const handleToolCall = async (name, args, context = {}) => {
         ssh.dispose();
 
         return {
-          content: [{ type: 'text', text: `Command executed in isolated Sandbox.\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}${formatProjectChanges(projectChanges)}` }]
+          // (the plan's cloud computer hours ran out while it ran and it was switched off: said to the AI, hoursRanOutNote)
+          content: [{ type: 'text', text: `Command executed in isolated Sandbox.\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}${result.code ? await hoursRanOutNote(context.userId) : ''}\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}${formatProjectChanges(projectChanges)}` }]
         };
       } catch (e) {
         return {
@@ -4637,7 +4638,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         ssh.dispose();
 
         return {
-          content: [{ type: 'text', text: `[Sandbox Execution Results]\n\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}\n\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}${formatProjectChanges(projectChanges)}` }],
+          content: [{ type: 'text', text: `[Sandbox Execution Results]\n\nEXIT CODE: ${result.code}${!result.stdout && !result.stderr ? ' (no output)' : ''}${result.code ? await hoursRanOutNote(context.userId) : ''}\n\nSTDOUT:\n${result.stdout}\nSTDERR:\n${result.stderr}${formatProjectChanges(projectChanges)}` }],
         };
       } catch (e) {
         return { content: [{ type: 'text', text: `Failed to connect to Sandbox: ${e.message}` }] };

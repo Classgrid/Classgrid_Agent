@@ -62,7 +62,7 @@ const PLAN_OF = { [A]: FREE, [B]: MAX, [C]: NONE, [D]: OPEN, [S]: null };
 mock.module("../src/services/plan-limits.service.js", { namedExports: { planOf: async (user) => PLAN_OF[String(user._id)] ?? null } });
 mock.module("../src/models/User.js", { defaultExport: { findById: (id) => ({ select: () => ({ lean: async () => ({ _id: id, plan: {}, role: "user", email: "x@example.com" }) }) }) } });
 
-const { cloudLabel, accountsRunning, cloudHoursGate, cloudComputerGate, sampleCloudComputers, cloudHoursUsed } = await import("../src/services/cloud-computer-limit.service.js");
+const { cloudLabel, accountsRunning, cloudHoursGate, cloudComputerGate, sampleCloudComputers, cloudHoursUsed, hoursRanOutNote } = await import("../src/services/cloud-computer-limit.service.js");
 const { monthKey } = await import("../src/services/plan-usage.service.js");
 
 const usedKey = (id) => `plan:sandbox:${id}:${monthKey()}`;
@@ -239,6 +239,21 @@ test("the count: used-up hours switch that account's containers off, and nobody 
     assert.ok(!stops[0].includes(B) && !stops[0].includes(D));
     assert.equal(store.has(`ide:port:${A}`), false);
     assert.equal(store.get(`ide:port:${B}`), "41001");
+});
+
+// A command that was running when the hours ran out came back to the AI with an exit code and no reason, so it ran it
+// again (owner, 2026-11-24: the AI must be told when the plan's limit stops its work).
+test("the count: an account switched off for its hours leaves a note for the AI's next result, and nobody else's", async () => {
+    reset();
+    setHours(A, 3);
+    await sampleCloudComputers(fakeSsh({ ps: `ide-u-${A}|\nide-u-${B}|\n` }));
+    const note = await hoursRanOutNote(A);
+    assert.match(note, /^\n\n\[This run was stopped by Classgrid: the \d+ hours of cloud computer a month of the person's .*plan ran out while it was running/);
+    assert.match(note, /Do not run it again: it is refused until the hours refill on /);
+    assert.match(note, /Tell the user plainly that their plan's cloud computer hours for this month are used up\.\]$/);
+    assert.equal(await hoursRanOutNote(B), "");
+    assert.equal(await hoursRanOutNote("not-an-id"), "");
+    assert.equal(await hoursRanOutNote(null), "");
 });
 
 test("cloudHoursUsed: hours with one decimal", async () => {

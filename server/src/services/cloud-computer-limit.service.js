@@ -185,9 +185,26 @@ export async function sampleCloudComputers(ssh) {
             `docker ps -q --filter label=cg-user=${uid} | xargs -r docker rm -f >/dev/null 2>&1; true`
         );
         await redis.del(`ide:port:${uid}`).catch(() => {});
+        // (a command that was running comes back to the AI with no word of why it ended: hoursRanOutNote below says it)
+        await redis.set(HOURS_OUT(uid), JSON.stringify({ plan: plan?.name || "", cap }), "EX", HOURS_OUT_S).catch(() => {});
         stopped.push(uid);
     }
     return { counted: users.size, stopped };
+}
+
+// The plan's hours ran out while something was running, and it was switched off (sampleCloudComputers). The command
+// came back to the AI as a normal result with an exit code, or as "No background command ... (it may have finished
+// long ago)", so the AI did not know the plan's hours had ended it and ran it again. For a few minutes after the
+// switch-off, a result of that account's run carries this note.
+const HOURS_OUT = (uid) => `cloud:hours-out:${uid}`;
+const HOURS_OUT_S = 15 * 60;
+export async function hoursRanOutNote(userId) {
+    const uid = String(userId || "").toLowerCase();
+    if (!HEX_ID.test(uid)) return "";
+    let out = null;
+    try { out = JSON.parse((await redis.get(HOURS_OUT(uid))) || "null"); } catch { out = null; }
+    if (!out) return "";
+    return `\n\n[This run was stopped by Classgrid: the ${out.cap} hours of cloud computer a month of the person's ${out.plan ? `${out.plan} ` : ""}plan ran out while it was running, and everything running for them in the cloud was switched off. Do not run it again: it is refused until the hours refill on ${nextMonthText()}. Tell the user plainly that their plan's cloud computer hours for this month are used up.]`;
 }
 
 /** Hours of cloud computer the account has used this month, for the Usage page (one decimal) */
