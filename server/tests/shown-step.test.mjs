@@ -53,6 +53,41 @@ test("a web search cut for the chat keeps every website, with its whole name and
     assert.throws(() => JSON.parse(whole.slice(0, 6000)));
 });
 
+// The search that still said "Could not parse search results. Failed" after the first fix (owner's screenshot,
+// 2026-11-24 10:35): a deep search gives 15 websites with their pictures, and with every text down to a few words the
+// list alone is longer than 6,000 characters. The first version then fell back to a plain cut, which is not JSON.
+test("a deep search (15 websites, long addresses, pictures) is still JSON with every website whole", () => {
+    const results = Array.from({ length: 15 }, (_, i) => ({
+        url: `https://www.example-company-${i + 1}.com/blog/2026/context-dev-web-scraping-api-founders-funding-and-the-full-company-story/part-${i + 1}?utm_source=search&ref=classgrid`,
+        title: `Context.dev, the web scraping API company: who made it, the founders, the funding and how it compares (${i + 1})`,
+        content: "A chunk of the page's text. ".repeat(120),
+        score: 0.87, raw_content: null, favicon: `https://www.example-company-${i + 1}.com/static/images/favicon-32x32.png`, snippet: "s".repeat(240), id: i + 1,
+    }));
+    const images = Array.from({ length: 6 }, (_, i) => ({ url: `https://cdn.example.com/images/context-dev-screenshot-of-the-dashboard-number-${i}.png`, description: "d".repeat(400) }));
+    const whole = JSON.stringify({ how_to_cite: "Cite facts from these results with the result id in square brackets. ".repeat(8), answer: null, results, images });
+    for (const max of [6000, 4000]) {
+        const shown = shownStepResult(whole, max);
+        const parsed = JSON.parse(shown); // (the card does exactly this)
+        assert.equal(parsed.results.length, 15, "every website");
+        parsed.results.forEach((r, i) => { assert.equal(r.title, results[i].title); assert.equal(r.url, results[i].url); });
+        assert.equal(parsed.images.length, 6);
+        assert.ok(shown.length > max && shown.length <= 30000, `the list is kept whole (${shown.length})`);
+    }
+});
+
+test("whatever the size, a JSON result is never cut into something that is not JSON", () => {
+    const huge = JSON.stringify({ results: Array.from({ length: 900 }, (_, i) => ({ id: i, title: `Title ${i} ${"t".repeat(80)}`, url: `https://site-${i}.example.com/${"p".repeat(120)}` })) });
+    assert.ok(huge.length > 150000);
+    const shown = shownStepResult(huge, 6000);
+    assert.ok(shown.length <= 30000);
+    const parsed = JSON.parse(shown);
+    assert.ok(parsed.results.length >= 1 && parsed.results.length < 900);
+    assert.equal(parsed.results[0].url, `https://site-0.example.com/${"p".repeat(120)}`);
+    // (one text so long that nothing else can be dropped still gives JSON)
+    assert.doesNotThrow(() => JSON.parse(shownStepResult(JSON.stringify({ title: "x".repeat(500), list: Array.from({ length: 400 }, () => "y".repeat(500)) }), 6000)));
+    assert.doesNotThrow(() => JSON.parse(shownStepResult(JSON.stringify(Array.from({ length: 5000 }, (_, i) => ({ url: `https://a.example/${i}` }))), 6000)));
+});
+
 test("a short result, and a long result that is not JSON, are as before", () => {
     const short = page(200);
     assert.equal(shownStepResult(short, 6000), short);

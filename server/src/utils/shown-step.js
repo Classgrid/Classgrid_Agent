@@ -23,6 +23,14 @@ const cutStrings = (value, each, key = "") => {
     return value;
 };
 
+// How long a JSON result may be when it is its list (the websites of a search) that makes it long
+const LIST_MAX = 30000;
+const shortLists = (value, keep) => {
+    if (Array.isArray(value)) return value.slice(0, keep).map((v) => shortLists(v, keep));
+    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, shortLists(v, keep)]));
+    return value;
+};
+
 /** The text of a step's result (a handler may return { text, ... }) */
 export const stepText = (out) => String(out && typeof out === "object" && "text" in out ? out.text : out ?? "");
 
@@ -35,17 +43,25 @@ export function shownStepResult(out, max = 6000) {
         let parsed;
         try { parsed = JSON.parse(text); } catch { parsed = undefined; }
         if (parsed !== undefined) {
-            // (its long texts shorter and shorter until the whole fits; a list keeps fewer items only as the last step)
+            // (its long texts shorter and shorter until the whole fits)
             for (const each of [2000, 800, 300, 120, 40]) {
                 const cut = JSON.stringify(cutStrings(parsed, each));
                 if (cut.length <= max) return cut;
             }
-            if (Array.isArray(parsed)) {
-                for (let n = Math.floor(parsed.length / 2); n >= 1; n = Math.floor(n / 2)) {
-                    const cut = JSON.stringify(cutStrings(parsed.slice(0, n), 120));
-                    if (cut.length <= max) return cut;
-                }
+            // Still longer than max with every long text down to a few words: what is left is the list itself, the
+            // websites with their names and addresses, and that is what the card shows. It is kept whole, up to a
+            // far higher size. (The first version fell back to a plain cut here, which is not JSON: a search with
+            // 15 websites, or with long addresses, still said "Could not parse search results. Failed".)
+            const small = cutStrings(parsed, 40);
+            const whole = JSON.stringify(small);
+            const most = Math.max(max, LIST_MAX);
+            if (whole.length <= most) return whole;
+            // Longer even than that: its lists keep fewer items, and it is still JSON
+            for (let keep = 64; keep >= 1; keep = Math.floor(keep / 2)) {
+                const cut = JSON.stringify(shortLists(small, keep));
+                if (cut.length <= most) return cut;
             }
+            return Array.isArray(parsed) ? "[]" : "{}";
         }
     }
     return text.slice(0, max);
