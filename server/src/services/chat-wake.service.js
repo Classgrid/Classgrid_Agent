@@ -9,6 +9,8 @@ import { getIO } from "./socket.service.js";
 const PENDING = (sessionId) => `chatwake:pending:${sessionId}`;
 const LOCK = (sessionId) => `chatwake:lock:${sessionId}`;
 const META = (sessionId) => `chatwake:meta:${sessionId}`;
+// The notes of a wake-up that was refused because the person's limit was used up (see holdNotes)
+const HELD = (sessionId) => `chatwake:held:${sessionId}`;
 const WORKING = (userId) => `ai:working:${userId}`;
 const DAY = 24 * 60 * 60;
 // The longest note a chat is woken with. Anything longer is cut, so a caller with more to say must keep the rest
@@ -91,6 +93,39 @@ export async function chatAnswering(userId, sessionId) {
     return !!(working || running);
 }
 
+// A wake-up that was refused keeps its notes.
+//
+// A woken answer is a normal answer of that chat, so the person's limits apply to it: when their usage is used up, or
+// the chat's model is a Claude model and the week's Claude credits are, the request is refused (HTTP 429 or 402)
+// before anything is saved. The notes had already been taken off the waiting list, so they were gone: a helper's
+// report, already marked as given, never reached the main AI. Owner's tests of 2026-11-23 and 24: the limit ran out
+// while three helpers worked, their reports woke the chat, every wake-up was refused, and the main AI said "Helper 1
+// never sent its final report".
+// Now the notes of a refused wake-up wait in their own list (not the waiting list: the end of a wake-up looks at that
+// one and would try again at once, for ever). They go back to the waiting list when the next message of that chat
+// has passed its usage check (releaseHeld, from the chat controller), so the chat is woken with them right after
+// that answer; a later wake-up of the same chat takes them along too.
+const HELD_DAYS = 7;
+export const wakeRefused = (result) => !String(result?.answer || "").trim() && (result?.status === 429 || result?.status === 402);
+export async function holdNotes(sessionId, notes) {
+    if (!sessionId || !notes?.length) return;
+    await redis.multi().rpush(HELD(sessionId), ...notes).expire(HELD(sessionId), HELD_DAYS * DAY).exec().catch(() => {});
+}
+async function takeHeld(sessionId) {
+    const held = [];
+    for (let n; (n = await redis.lpop(HELD(sessionId)).catch(() => null)); ) held.push(n);
+    return held;
+}
+/** The chat can answer again: what a refused wake-up held back waits to wake it (returns how many notes) */
+export async function releaseHeld(sessionId) {
+    if (!sessionId) return 0;
+    if (!((await redis.llen(HELD(sessionId)).catch(() => 0)) > 0)) return 0;
+    const held = await takeHeld(sessionId);
+    if (!held.length) return 0;
+    await redis.multi().rpush(PENDING(sessionId), ...held).expire(PENDING(sessionId), DAY).exec().catch(() => {});
+    return held.length;
+}
+
 const HELPER_NOTE = /^Helper (\d+) \([\s\S]*?\) says:\n/;
 /** The whole message that wakes a chat with these notes (what finished, or what its working helpers wrote) */
 export function wakeQuestion(notes) {
@@ -118,6 +153,8 @@ async function runWake(userId, sessionId) {
         const notes = [];
         for (let n; (n = await redis.lpop(PENDING(sessionId)).catch(() => null)); ) notes.push(n);
         if (!notes.length) return;
+        // (what an earlier, refused wake-up of this chat held back comes first)
+        notes.unshift(...(await takeHeld(sessionId)));
         const user = await User.findById(userId).select("-password -verificationToken");
         if (!user) return;
         let meta = {};
@@ -140,7 +177,7 @@ async function runWake(userId, sessionId) {
             }
         } catch { /* not followed on the phone */ }
         const { runAgentTask } = await import("./whatsapp-call.service.js");
-        await runAgentTask(user, question, null, null, sessionId, null, {
+        const result = await runAgentTask(user, question, null, null, sessionId, null, {
             ...(meta.clientApp ? { clientApp: meta.clientApp } : {}),
             ...(meta.appMode ? { appMode: meta.appMode } : {}),
             ...(meta.permissionMode ? { permissionMode: meta.permissionMode } : {}),
@@ -158,6 +195,9 @@ async function runWake(userId, sessionId) {
             // (its own socket event: an app from before this treats every "chat:woke" as the end and would reload each time)
             try { getIO().to(String(userId)).emit("chat:woke-live", { sessionId, event }); } catch { /* no socket server */ }
         });
+        // Refused before anything was saved (the person's usage or the week's Claude credits are used up): the notes
+        // are kept for when the chat can answer again (holdNotes above)
+        if (wakeRefused(result)) await holdNotes(sessionId, notes);
     } finally {
         await redis.del(LOCK(sessionId)).catch(() => {});
         if (ran) tell(userId, { sessionId, phase: "end" });

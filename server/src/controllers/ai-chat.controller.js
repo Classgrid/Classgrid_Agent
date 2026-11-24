@@ -2388,6 +2388,9 @@ export const streamAskAi = async (req, res) => {
         }
 
         let sessionId = body.sessionId;
+        // This message passed its usage check: notes a wake-up of this chat could not deliver while the person's limit
+        // was used up (a helper's report) wait again, and wake the chat when this answer ends (chat-wake.service.js)
+        if (sessionId && !body.wakeUp) import("../services/chat-wake.service.js").then((m) => m.releaseHeld(String(sessionId))).catch(() => {});
         // Incognito chats run like any chat (saved messages, Redis history, background summary). They are marked
         // is_incognito, so the user's lists never show them, and the browser deletes them when incognito is closed.
         const hideFromUser = !!body.isIncognito;

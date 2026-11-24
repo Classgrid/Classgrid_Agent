@@ -1220,7 +1220,9 @@ async function runAgentTaskOnce(user, question, projectId, onSession, sessionId,
     if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}));
         const quota = err.error === "ai_quota_exceeded" || err.code === "fable_needs_paid_credits" ? { resetDate: err.resetDate || null } : null;
-        return { sessionId, answer: "", error: err.message || err.error || `the request failed (${res.status})`, quota };
+        // (status and code: the request was refused before anything was saved in the chat, and why: the usage limit,
+        // the week's Claude credits, a model that is not in the plan, the new-chat limit)
+        return { sessionId, answer: "", error: err.message || err.error || `the request failed (${res.status})`, quota, status: res.status, code: String(err.code || err.error || "") };
     }
     let quota = null;
     let buffer = "", answer = "", streamed = "", error = "";
