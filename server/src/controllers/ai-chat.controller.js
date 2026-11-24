@@ -103,6 +103,7 @@ import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
 import { setHelperJobSink } from "../utils/helper-jobs.js";
 import { notStartedNote } from "../utils/helper-room.js";
+import { shownStepResult, plainModelError } from "../utils/shown-step.js";
 import { limitStopNote, libraryFullNote, paidFromCreditsNote, notTranscribedText, helperLimitReport, READER_LIMIT_ERROR, usageUsedUpText, helpersBusyText, helpersNotInPlanText, helperModelWhy, helperModelNote, thinkingNotInPlanNote, contextCutNote } from "../utils/plan-words.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
@@ -1265,7 +1266,7 @@ const helperStep = (h, id, tool, args) => {
     return step;
 };
 const helperStepDone = (step, out) => {
-    step.result = String(out && typeof out === "object" ? out.text : out ?? "").slice(0, 6000);
+    step.result = shownStepResult(out, 6000); // (a page or a search stays readable JSON: utils/shown-step.js)
     step.status = /^(error|tool error|failed)/i.test(step.result.trim()) ? "error" : "success";
 };
 
@@ -4456,7 +4457,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             if (userId && e?.usage?.total_tokens > 0) deductTokens(userId, orgId, chargeableTokens(e.usage, model), tokenSource, { label: { model, what: "Chat" } }).catch(() => {});
                         }
                     }
-                    throw new Error(lastError || "no answer");
+                    throw new Error(plainModelError(lastError)); // (the main AI gets plain words, never the provider's raw error)
                 };
                 return Object.fromEntries(Object.entries({
                     internal_thought_process: async (args) => {
@@ -4719,7 +4720,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 const step = helperStep(h, id, n, a);
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
                                 const out = onComputer ? await computerHandlers[n](a, { fromHelper: true }) : outsideProject(n, a) ? (n === "view_project_file" ? await readLocalFile(req.user?._id || req.user?.id, { path: a.path }, { chat: sessionId }) : await runOnComputer(req.user?._id || req.user?.id, n, a || {}, sessionId)) : h.wt && LOCAL_TOOLS.has(n) ? await callLocal(h.wt.project, n, a || {}, sessionId) : (await handleToolCall(n, a, { sessionId, userId: String(req.user?._id || ""), desktop: !fromWebsite })).content[0].text; // (userId: a helper's cloud run is checked and counted on the plan's cloud computer hours like the main AI's; it was neither)
-                                emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
+                                emitHelper({ helper: i, id, result: shownStepResult(out, 6000) });
                                 helperStepDone(step, out);
                                 // The files this helper changed, for the chat's "files changed" box
                                 const changed = (n === "write_project_file" || n === "edit_project_file") && a?.path ? String(out).match(/\+(\d+) -(\d+)\)\./) : null;
@@ -4743,7 +4744,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                         emitHelper({ helper: i, id, tool: n, args: a });
                                         const step = helperStep(h, id, n, a);
                                         const out = await browserHandlers[n](a);
-                                        emitHelper({ helper: i, id, result: String(out && typeof out === "object" ? out.text : out).slice(0, 6000) });
+                                        emitHelper({ helper: i, id, result: shownStepResult(out, 6000) });
                                         helperStepDone(step, out);
                                         return withInbox(out);
                                     };
@@ -4798,7 +4799,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                     playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
                                     let out;
                                     try { out = await llmConfig.toolHandlers[n](a, { fromHelper: true }); } catch (e) { out = `Error: ${e?.message || e}`; }
-                                    emitHelper({ helper: i, id, result: String(out && typeof out === "object" && "text" in out ? out.text : out).slice(0, 6000) });
+                                    emitHelper({ helper: i, id, result: shownStepResult(out, 6000) });
                                     helperStepDone(step, out);
                                     return withInbox(out);
                                 };
@@ -4950,14 +4951,14 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         // "Too many requests", a timeout or a busy server: wait once and retry this model, then move to the next one
                                         if (!capRefused && /429|408|5\d\d|rate limit|timeout|timed out/i.test(lastError) && attempt < 2) { await sleep(4000); continue; }
                                         // The Agent map says why the next model took over
-                                        h.switches = [...(h.switches || []), { from: model, why: lastError.slice(0, 300) }];
+                                        h.switches = [...(h.switches || []), { from: model, why: plainModelError(lastError) }]; // (plain words, never the provider's raw error: utils/shown-step.js)
                                         break;
                                     }
                                 }
                             }
                             if (onlyCapRefusals) break;
                             }
-                            return { state: "failed", text: `${lastError} (tried ${rounds === 1 ? "once" : `${rounds} times`} on ${models.map((m) => MODEL_DISPLAY_NAMES[m] || m).join(", ")})` };
+                            return { state: "failed", text: `${plainModelError(lastError)} (tried ${rounds === 1 ? "once" : `${rounds} times`} on ${models.map((m) => MODEL_DISPLAY_NAMES[m] || m).join(", ")})` };
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {

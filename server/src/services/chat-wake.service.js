@@ -5,6 +5,7 @@
 import redis from "../config/redis.js";
 import User from "../models/User.js";
 import { getIO } from "./socket.service.js";
+import { shownStepResult } from "../utils/shown-step.js";
 
 const PENDING = (sessionId) => `chatwake:pending:${sessionId}`;
 const LOCK = (sessionId) => `chatwake:lock:${sessionId}`;
@@ -56,7 +57,7 @@ export function wokenChatEvents(userId, sessionId) {
         start(note) { open = true; tell(userId, { sessionId, phase: "start", note }); },
         event(data) {
             if (!open || !LIVE_EVENTS.has(data?.type)) return;
-            const event = data.type === "tool_result" ? { ...data, result: String(data.result ?? "").slice(0, 4000) } : data;
+            const event = data.type === "tool_result" ? { ...data, result: shownStepResult(data.result, 4000) } : data;
             try { getIO().to(String(userId)).emit("chat:woke-live", { sessionId, event }); } catch { /* no socket server */ }
         },
         end() { if (open) { open = false; tell(userId, { sessionId, phase: "end" }); } },
@@ -191,7 +192,7 @@ async function runWake(userId, sessionId) {
             // The answer streams into the open chat as it is written (its thinking, steps and words), like any other
             // answer, instead of the whole message appearing at once when it ends
             if (!LIVE_EVENTS.has(data?.type)) return;
-            const event = data.type === "tool_result" ? { ...data, result: String(data.result ?? "").slice(0, 4000) } : data;
+            const event = data.type === "tool_result" ? { ...data, result: shownStepResult(data.result, 4000) } : data;
             // (its own socket event: an app from before this treats every "chat:woke" as the end and would reload each time)
             try { getIO().to(String(userId)).emit("chat:woke-live", { sessionId, event }); } catch { /* no socket server */ }
         });
