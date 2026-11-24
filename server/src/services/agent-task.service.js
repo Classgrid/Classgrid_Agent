@@ -41,6 +41,7 @@ import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
 import { hasEnoughTokens, deductTokens, limitBackAt, planWording } from "./ai-credits.service.js";
 import { taskPausedLimitText, callTaskTimeUpText } from "./email-templates.service.js";
 import { workLeftMs, workClock } from "./call-limits.service.js";
+import { workTimeNote, isPlanRefusal } from "../utils/plan-words.js";
 import { chargeableTokens } from "./ai-token-pricing.js";
 import { noteMessagesRead, messagesByIds, messagesSince, readUpTo } from "./whatsapp-inbox.service.js";
 import {
@@ -551,6 +552,18 @@ async function afterRunDecide({ user, phone, sessionId, projectId, projectName, 
     task.no_progress = steps > 0 ? 0 : (task.no_progress || 0) + 1;
     const stuck = task.no_progress >= NO_PROGRESS_LIMIT;
 
+    // Refused by the person's plan before the AI ran (the new-chat limit, a model that is not in the plan, the week's
+    // Claude credits): not a failed run. It was tried again every 5 minutes and after 5 tries the person was told the
+    // task was "stuck". Now they are told the real reason once, in the refusal's own words, and the task waits for
+    // their reply.
+    if (isPlanRefusal(result)) {
+        console.warn(`[agent task] run refused by the plan for ${task._id}: ${result.code}`);
+        Object.assign(task, { status: "sleeping", wake_at: null, wake_on_reply: true, no_progress: 0, note: `Your last run was refused by the person's plan (${String(result.error || result.code).slice(0, 300)}). Continue the task only if that has changed.` });
+        await task.save();
+        if (result.error) await say(String(result.error).slice(0, 600));
+        return task._id;
+    }
+
     if (!result.answer) {
         // Failed: try again in 5 minutes (after 5 failures in a row, when the user writes)
         console.error(`[agent task] run failed for ${task._id}: ${result.error || "no answer"}`);
@@ -723,7 +736,8 @@ export async function wakeTask(taskId, reason) {
         // The woken run uses the model the person picked in that chat, not the default (chat-wake.service.js chatModelChoice)
         const modelChoice = task.session_id ? await import("./chat-wake.service.js").then((m) => m.chatModelChoice(task.session_id)).catch(() => ({})) : {};
         shown?.start(question);
-        const result = await runAgentTask(user, question, task.project_id, (sessionId) => {
+        // (a task from a call is told the minutes of work the caller's plan gives it)
+        const result = await runAgentTask(user, question + workTimeNote(workLeftMs(task), task.work_cap_ms), task.project_id, (sessionId) => {
             setTaskSession(task._id, sessionId);
             // The "no project was made" note is in this chat now: it is cleared (only if it is still that note), so
             // later wake-ups don't give it again as "Your note from before" and the person is told once

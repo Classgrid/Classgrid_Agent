@@ -286,7 +286,10 @@ export async function checkWhatsappLimit(user, { includeUpcomingRepeats = false,
         resetAt = new Date(Number.isFinite(oldestMs) ? oldestMs + periodMs : Date.now() + periodMs);
         if (!allowed) resetText = formatResetTime(resetAt);
     }
-    return { allowed, limit: shownLimit, used, periodMs, periodText: shownLimit === limit ? formatPeriodLength(period) : "24 hours", resetText, resetAt, extraCredits, extraOffer };
+    // limitWhy: whose limit this is, for what the AI is told (it said "set by Classgrid admins" for a plan's own number,
+    // so the AI could not tell the person it is their plan's limit)
+    const limitWhy = plan?.name ? `the ${shownLimit === limit ? "" : "daily "}WhatsApp message limit of their ${plan.name} plan` : "the limit is set by Classgrid admins";
+    return { allowed, limit: shownLimit, used, periodMs, periodText: shownLimit === limit ? formatPeriodLength(period) : "24 hours", resetText, resetAt, extraCredits, extraOffer, limitWhy };
 }
 
 const messageOwnerKey = (messageId) => `ai:wa-msg:${messageId}`;

@@ -2542,13 +2542,13 @@ export const handleToolCall = async (name, args, context = {}) => {
             dropWhatsapp('the user is not signed in.');
           } else {
             const { checkWhatsappLimit, normalizeWhatsappNumber } = await import('../services/ai-feature-limits.js');
-            const { allowed, limit, used, periodMs, periodText = '7 days', resetText, extraOffer = '' } = await checkWhatsappLimit(user, { includeUpcomingRepeats: rep.repeat !== 'once' });
+            const { allowed, limit, used, periodMs, periodText = '7 days', resetText, extraOffer = '', limitWhy = 'the limit is set by Classgrid admins' } = await checkWhatsappLimit(user, { includeUpcomingRepeats: rep.repeat !== 'once' });
             const weekRuns = rep.repeat !== 'once' ? runsWithin(rep, rep.first, periodMs || 7 * 24 * 60 * 60 * 1000) : 1;
             if (!allowed) {
-              dropWhatsapp(`the user has used ${used} of ${limit} WhatsApp messages allowed in the last ${periodText} (limit set by Classgrid admins).${resetText ? ` Reset time: ${resetText}${user.role === 'super_admin' ? '' : ' (share only if the user asks)'}.` : ''}${extraOffer}`);
+              dropWhatsapp(`the user has used ${used} of ${limit} WhatsApp messages allowed in the last ${periodText} (${limitWhy}).${resetText ? ` Reset time: ${resetText}${user.role === 'super_admin' ? '' : ' (share only if the user asks)'}.` : ''}${extraOffer}`);
             } else if (rep.repeat !== 'once' && used + weekRuns > limit) {
               // A repeat must fit its first week of WhatsApp messages into what is left of the weekly limit
-              dropWhatsapp(`this repeat would send ${weekRuns} WhatsApp messages in its first ${periodText} but only ${Math.max(0, limit - used)} of ${limit} WhatsApp messages per ${periodText} are left (limit set by Classgrid admins).`);
+              dropWhatsapp(`this repeat would send ${weekRuns} WhatsApp messages in its first ${periodText} but only ${Math.max(0, limit - used)} of ${limit} WhatsApp messages per ${periodText} are left (${limitWhy}).`);
             } else {
               args.whatsapp_phone_number = normalizeWhatsappNumber(args.whatsapp_phone_number);
             }
@@ -2631,7 +2631,7 @@ export const handleToolCall = async (name, args, context = {}) => {
               await schedule.validate(); // (a time that can't be saved is refused before anything is counted or paid)
               const wa = await countWhatsappResend(schedule, owner);
               if (wa && !wa.allowed) {
-                return { content: [{ type: 'text', text: `FAILED: This user has used ${wa.used} of ${wa.limit} WhatsApp messages allowed in the last ${wa.periodText || '7 days'} (the limit is set by Classgrid admins). The schedule was not changed.${wa.resetText ? ` Reset time: ${wa.resetText}${owner.role === 'super_admin' ? '' : ' (share only if the user asks)'}.` : ''}${wa.extraOffer || ''} Tell the user exactly this; do not guess other reasons.` }] };
+                return { content: [{ type: 'text', text: `FAILED: This user has used ${wa.used} of ${wa.limit} WhatsApp messages allowed in the last ${wa.periodText || '7 days'} (${wa.limitWhy || 'the limit is set by Classgrid admins'}). The schedule was not changed.${wa.resetText ? ` Reset time: ${wa.resetText}${owner.role === 'super_admin' ? '' : ' (share only if the user asks)'}.` : ''}${wa.extraOffer || ''} Tell the user exactly this; do not guess other reasons.` }] };
               }
               resendCounted = !!wa;
             }
@@ -6934,7 +6934,7 @@ export const handleToolCall = async (name, args, context = {}) => {
         const { checkWhatsappLimit, recordDirectWhatsappSend } = await import('../services/ai-feature-limits.js');
         const waLimit = await checkWhatsappLimit(sender);
         if (!waLimit.allowed) {
-          return { content: [{ type: 'text', text: `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${sender.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""}${waLimit.extraOffer || ""} Tell the user exactly this; do not guess other reasons.` }] };
+          return { content: [{ type: 'text', text: `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (${waLimit.limitWhy || "the limit is set by Classgrid admins"}). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${sender.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""}${waLimit.extraOffer || ""} Tell the user exactly this; do not guess other reasons.` }] };
         }
 
         const res = await fetch(`https://graph.facebook.com/v17.0/${process.env.WHATSAPP_PHONE_ID}/messages`, {

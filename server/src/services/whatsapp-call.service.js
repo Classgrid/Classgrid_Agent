@@ -38,6 +38,7 @@ import { planOf, isUnlimited } from "./plan-limits.service.js";
 import Organization from "../models/Organization.js";
 import GlobalAiConfig from "../models/GlobalAiConfig.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
+import { callTimeWords, workTimeNote, askRefusedForUsage } from "../utils/plan-words.js";
 import { hasEnoughTokens, deductTokens, planWording, chargeClaudeOnPlan } from "./ai-credits.service.js";
 import { callRefusedLimitText, callMinutesUsedUpText, callCountLimitText } from "./email-templates.service.js";
 import {
@@ -435,7 +436,8 @@ function systemPrompt(user, call = null) {
         "You are Classgrid AI on a WhatsApp voice call with a Classgrid user.",
         `Caller: ${user.name || "unknown name"} (${user.email}). Time: ${now} (India).`,
         "What you say is read out by a text-to-speech voice. Speak the caller's language: English, Hindi or Marathi (ElevenLabs voices, 2026-11-14). Reply in the language they spoke last; a Hindi-English or Marathi-English mix is fine. Write Hindi and Marathi in Devanagari script, as plain spoken words: short sentences, no markdown, no lists, no emojis, no links.",
-        "The call can last at most 15 minutes.",
+        // (the real time of this call, from the caller's plan: it said 15 minutes on every plan, and a Free call ends at 5)
+        call ? callTimeWords(callTime(call)).line : "The call can last at most 15 minutes.",
         "After the call the Classgrid Agent does the work in the caller's account and sends them the result on WhatsApp.",
         "The work's chat is saved in Studio Mode in the caller's Classgrid app (not in Agent mode or Project Mode): when they ask where to see it, tell them to open Studio Mode.",
         "The caller can also send extra details or files (photos, PDFs, documents) in this WhatsApp chat; the Agent reads their latest WhatsApp messages before it sends the final result.",
@@ -751,13 +753,20 @@ async function reply(call) {
     }
 }
 
+// How long this call may last and what ends it: the plan's call minutes of the period, or its longest call
+const callTime = (call) => {
+    const maxMs = call.maxMs || MAX_CALL_MS;
+    return { maxMs, planName: call.planName || "", minutesRunOut: !!call.freeUntil && maxMs <= Math.max(10000, call.freeUntil - call.startedAt) + 1000 };
+};
+
 function wrapUp(call) {
     if (call.ended) return;
     const run = async () => {
         while (call.busy && !call.ended) await new Promise((r) => setTimeout(r, 100));
         if (call.ended) return;
         // Added only between turns, so it never lands between a tool request and its answer
-        call.messages.push({ role: "user", content: "[The call ends in about 15 seconds.]" });
+        // (with the reason, so the AI can tell the caller why the call is ending)
+        call.messages.push({ role: "user", content: callTimeWords(callTime(call)).ends });
         call.busy = true;
         try { await reply(call); } catch (e) { console.error("[WA call] wrap-up failed:", e.message); } finally {
             call.busy = false;
@@ -1012,7 +1021,8 @@ async function runCallJob(job, { resumed = false, lockToken = null } = {}) {
         const rec = record.runRecorder(job.taskId, { reason: resumed ? "restart" : "call", attempt: job.attempts });
         // The run's minutes start here, right before the run (its finally stops the clock)
         const clock = workClock({ _id: job.taskId, ...(work || {}) }, stop, tasks.addWorkTime);
-        const result = await runAgentTask(user, question, job.projectId, (sessionId) => {
+        // (the AI doing the task is told the minutes of work the caller's plan gives it: the run was cut mid-work without a word)
+        const result = await runAgentTask(user, question + workTimeNote(workLeftMs(work), work?.work_cap_ms), job.projectId, (sessionId) => {
             tasks.setTaskSession(job.taskId, sessionId);
             if (job.sessionId) return;
             job.sessionId = sessionId;
@@ -1148,6 +1158,8 @@ async function askClassgridLive(call, request, projectName) {
         return "Still working on it. The answer will be sent to the caller on WhatsApp when it is ready.";
     }
     record.callLiveWork(call.id, { key: result.key, sessionId: result.sessionId, request, startedAt: liveStartedAt, answer: result.answer, error: result.error, late: false });
+    // (the caller's usage is used up: said plainly; it was "Classgrid could not answer: Insufficient tokens.")
+    if (!result.answer && result.quota) return askRefusedForUsage(result.quota.resetDate);
     if (!result.answer) return `Classgrid could not answer${result.error ? `: ${result.error}` : "."}`;
     return result.answer.slice(0, 4000);
 }
@@ -1225,7 +1237,7 @@ async function runAgentTaskOnce(user, question, projectId, onSession, sessionId,
         return { sessionId, answer: "", error: err.message || err.error || `the request failed (${res.status})`, quota, status: res.status, code: String(err.code || err.error || "") };
     }
     let quota = null;
-    let buffer = "", answer = "", streamed = "", error = "";
+    let buffer = "", answer = "", streamed = "", error = "", code = "";
     const toolArgs = {}; // tool name -> its input, for the finished-steps list
     const decoder = new TextDecoder();
     for await (const chunk of res.body) {
@@ -1252,6 +1264,7 @@ async function runAgentTaskOnce(user, question, projectId, onSession, sessionId,
                 if (data.type === "answer" && data.answer) answer = data.answer;
                 if (data.type === "error") {
                     error = data.message || data.error || "unknown error";
+                    if (data.code) code = String(data.code); // (a refusal by the plan, e.g. chats_cap_reached)
                     if (String(data.error || "").startsWith("ai_quota_exceeded")) quota = { resetDate: String(data.error).split("|")[1] || null };
                 }
             } catch { /* not JSON */ }
@@ -1260,7 +1273,7 @@ async function runAgentTaskOnce(user, question, projectId, onSession, sessionId,
     const finalAnswer = String(answer || (error ? "" : streamed)).trim();
     // Tokens ran out partway through: the answer ends with the budget note
     if (!quota && finalAnswer.endsWith(BUDGET_STOP_NOTE)) quota = { resetDate: null };
-    return { sessionId, answer: finalAnswer, error, quota };
+    return { sessionId, answer: finalAnswer, error, quota, ...(code ? { code } : {}) };
 }
 
 // The server's public IPv4, read from AWS (EC2 instance metadata, IMDSv2). Put in the answer as a candidate, so
@@ -1305,12 +1318,12 @@ const candidateSummary = (sdp) => sdp.split("\r\n").filter((l) => l.startsWith("
 
 // taskCaps: the plan's limits for tasks from this call (call-limits.service.js callTaskCaps); taskLimitsLine: the same,
 // told to the AI in its instructions
-export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0, paidOk = true, limitBackAt = null, taskCaps = null, taskLimitsLine = "" }) {
+export async function answerCall({ id, from, sdp, user, tokenSource, callsLine = "", maxMs = MAX_CALL_MS, freeUntil = 0, paidOk = true, limitBackAt = null, taskCaps = null, taskLimitsLine = "", planName = "" }) {
     const { RTCPeerConnection, nonstandard } = await loadWrtc();
     const pc = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }], portRange: { min: 10000, max: 60000 } });
     const source = new nonstandard.RTCAudioSource();
     const call = {
-        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil, paidOk, limitBackAt, taskCaps: taskCaps || callTaskCaps(null), taskLimitsLine,
+        id, from, user, pc, source, tokenSource, callsLine, maxMs, freeUntil, paidOk, limitBackAt, taskCaps: taskCaps || callTaskCaps(null), taskLimitsLine, planName,
         startedAt: Date.now(), ended: false, busy: false, tasks: [],
         messages: [], transcript: [],
         outQueue: [], outCurrent: null, outPos: 0, speechEndedAt: 0,
@@ -1518,7 +1531,7 @@ export async function handleCallsWebhook(value) {
             const freeUntil = free.left > 0 ? Date.now() + free.left * 1000 : 0;
             markBusy(number, maxMs / 1000 + 120);
             const callsLine = callsLineText(countCaps, callTimes);
-            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: free.resetAt, taskCaps, taskLimitsLine: callTaskLimitsLine(taskCaps, callPlan) });
+            const answered = await answerCall({ id: c.id, from, sdp: c.session.sdp, user, tokenSource: enough?.source || "personal", callsLine, maxMs, freeUntil, paidOk: !!enough?.allowed, limitBackAt: free.resetAt, taskCaps, taskLimitsLine: callTaskLimitsLine(taskCaps, callPlan), planName: callPlan?.name || "" });
             if (answered) redis.zadd(CALLS_KEY(number), Date.now(), c.id).then(() => redis.expire(CALLS_KEY(number), 2 * 24 * 60 * 60)).catch(() => {});
         } catch (e) {
             console.error(`[WA call] ${c.id} failed:`, e.message);

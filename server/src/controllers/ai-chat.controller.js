@@ -6081,7 +6081,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const { checkWhatsappLimit, recordDirectWhatsappSend, normalizeWhatsappNumber, formatResetTime } = await import('../services/ai-feature-limits.js');
                             const waLimit = await checkWhatsappLimit(req.user);
                             if (!waLimit.allowed) {
-                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (the limit is set by Classgrid admins). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""}${waLimit.extraOffer || ""} Tell the user exactly this; do not guess other reasons.`;
+                                return `FAILED: This user has used ${waLimit.used} of ${waLimit.limit} WhatsApp messages allowed in the last ${waLimit.periodText || "7 days"} (${waLimit.limitWhy || "the limit is set by Classgrid admins"}). No message was sent.${waLimit.resetText ? ` Reset time: ${waLimit.resetText}${req.user?.role === "super_admin" ? "" : " (share only if the user asks)"}.` : ""}${waLimit.extraOffer || ""} Tell the user exactly this; do not guess other reasons.`;
                             }
                             const recipient = normalizeWhatsappNumber(toPhoneNumber);
                             if (recipient.length < 11 || recipient.length > 15) {

@@ -71,3 +71,36 @@ test("Deep thinking not in the plan, and older messages left out for the plan's 
     assert.match(w.contextCutNote(12, "Pro"), /The 12 oldest messages of this chat are not in front of you/);
     assert.match(w.contextCutNote(12, "Pro"), /you can read them with recall_chat and search_recall_chat\. Never tell the user that something was not said: look it up first\.$/);
 });
+
+test("a call: the real longest time of this call and why it ends, not '15 minutes' on every plan", () => {
+    const free = w.callTimeWords({ maxMs: 5 * 60000, planName: "Free" });
+    assert.equal(free.line, "The call can last at most 5 minutes (the longest call on the caller's Free plan). If the caller asks why a call ended, that is the reason.");
+    assert.equal(free.ends, "[The call ends in about 15 seconds, because 5 minutes are the longest one call can be on the caller's Free plan. Tell the caller that in a few words and say goodbye.]");
+    const out = w.callTimeWords({ maxMs: 2 * 60000, planName: "Free", minutesRunOut: true });
+    assert.match(out.line, /^The call can last at most 2 minutes \(the call minutes left on the caller's Free plan for this period\)\./);
+    assert.match(out.ends, /because the call minutes of the caller's Free plan for this period are used up\./);
+    const max = w.callTimeWords({ maxMs: 15 * 60000, planName: "Max" });
+    assert.match(max.line, /^The call can last at most 15 minutes\. /);
+    assert.match(max.ends, /because 15 minutes is the longest a call can be\./);
+    assert.match(w.callTimeWords({ maxMs: 60000 }).line, /^The call can last at most 1 minute \(the longest call on the caller's plan\)\./);
+});
+
+test("a task from a call is told its minutes of work; a task with no cap is told nothing", () => {
+    assert.match(w.workTimeNote(9 * 60000, 10 * 60000), /\[The caller's plan gives this task 10 minutes of work, and 9 minutes are left\. The work is stopped when the time runs out: do the most important part first, and send what you have before the time ends\.\]$/);
+    assert.match(w.workTimeNote(40000, 10 * 60000), /and 1 minute is left\./);
+    assert.equal(w.workTimeNote(Infinity, 0), "");
+    assert.equal(w.workTimeNote(Infinity, undefined), "");
+});
+
+test("ask_classgrid on a call when the caller's usage is used up: plain words", () => {
+    assert.equal(w.askRefusedForUsage(null), "Classgrid could not do it: the caller's plan usage limit is used up. Tell the caller that plainly, and do not ask Classgrid again on this call.");
+    assert.match(w.askRefusedForUsage(new Date(Date.now() + 3600000).toISOString()), /is used up and comes back on .+ \(India time\)\. Tell the caller that plainly/);
+});
+
+test("a background task's run refused by the plan is told apart from a failed run and from the usage limit", () => {
+    for (const code of ["chats_cap_reached", "model_locked", "claude_cap_reached", "fable_cap_reached"]) assert.equal(w.isPlanRefusal({ answer: "", error: "x", code }), true, code);
+    // (the usage limit has its own pause, with the time it comes back)
+    assert.equal(w.isPlanRefusal({ answer: "", error: "Insufficient tokens.", code: "ai_quota_exceeded", quota: { resetDate: null } }), false);
+    assert.equal(w.isPlanRefusal({ answer: "", error: "the request failed (500)" }), false);
+    assert.equal(w.isPlanRefusal({ answer: "Done.", code: "model_locked" }), false);
+});

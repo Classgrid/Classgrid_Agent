@@ -69,3 +69,44 @@ export const thinkingNotInPlanNote = (planName = "") => `\n\n--- THINKING LEVEL 
 
 /** Older messages of the chat are not in front of the AI because of the plan's context size */
 export const contextCutNote = (dropped, planName = "") => `\n\n--- OLDER MESSAGES ---\nThe ${dropped} oldest message${dropped === 1 ? "" : "s"} of this chat ${dropped === 1 ? "is" : "are"} not in front of you: the user's ${planName ? `${planName} ` : ""}plan carries a limited amount of a chat at once. They are covered by the chat's summary, and you can read them with recall_chat and search_recall_chat. Never tell the user that something was not said: look it up first.`;
+
+// ── Calls and the work that comes from them ──
+
+/**
+ * How long a call may last, for the call's AI. It was told "at most 15 minutes" on every plan, while a Free call ends
+ * at 5, and when the time was nearly up only "[The call ends in about 15 seconds.]", with no reason to give the caller.
+ * minutesRunOut: the call ends because the plan's call minutes of the period run out, not because of the longest call.
+ */
+export function callTimeWords({ maxMs = 15 * 60000, minutesRunOut = false, planName = "" } = {}) {
+    const minutes = Math.max(1, Math.round(Number(maxMs) / 60000));
+    const plan = planName ? `the caller's ${planName} plan` : "the caller's plan";
+    const why = minutesRunOut
+        ? `the call minutes of ${plan} for this period are used up`
+        : minutes < 15 ? `${minutes} minute${minutes === 1 ? " is" : "s are"} the longest one call can be on ${plan}` : "15 minutes is the longest a call can be";
+    return {
+        line: `The call can last at most ${minutes} minute${minutes === 1 ? "" : "s"}${minutesRunOut ? ` (the call minutes left on ${plan} for this period)` : minutes < 15 ? ` (the longest call on ${plan})` : ""}. If the caller asks why a call ended, that is the reason.`,
+        ends: `[The call ends in about 15 seconds, because ${why}. Tell the caller that in a few words and say goodbye.]`,
+    };
+}
+
+/** For the AI that does a task from a call: how many minutes of work the caller's plan gives it. "" when there is no cap */
+export function workTimeNote(leftMs, capMs) {
+    const cap = Number(capMs);
+    if (!(cap > 0) || !Number.isFinite(Number(leftMs))) return "";
+    const mins = (ms) => { const m = Math.max(1, Math.round(Number(ms) / 60000)); return `${m} minute${m === 1 ? "" : "s"}`; };
+    return `\n\n[The caller's plan gives this task ${mins(cap)} of work, and ${mins(leftMs)} ${Math.round(Number(leftMs) / 60000) <= 1 ? "is" : "are"} left. The work is stopped when the time runs out: do the most important part first, and send what you have before the time ends.]`;
+}
+
+/** ask_classgrid on a call when the caller's usage is used up */
+export function askRefusedForUsage(resetAt) {
+    const when = comesBackText(resetAt);
+    return `Classgrid could not do it: the caller's plan usage limit is used up${when ? ` and comes back on ${when}` : ""}. Tell the caller that plainly, and do not ask Classgrid again on this call.`;
+}
+
+// ── A background task (from WhatsApp, a call or an email) whose run the plan refuses ──
+
+// The codes of a request refused by the person's plan, before the AI ran (ai-chat.controller.js). A task took such a
+// refusal for a failed run: it tried again every 5 minutes and after 5 tries told the person it was "stuck".
+export const PLAN_REFUSAL_CODES = new Set(["chats_cap_reached", "model_locked", "claude_cap_reached", "fable_cap_reached", "files_per_message"]);
+/** The result of a run (whatsapp-call.service.js runAgentTask) that the plan refused; not the usage limit, which has its own pause */
+export const isPlanRefusal = (result) => !String(result?.answer || "").trim() && !result?.quota && PLAN_REFUSAL_CODES.has(String(result?.code || ""));
