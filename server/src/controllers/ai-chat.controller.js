@@ -47,7 +47,7 @@
 // Triggering test deployment for GitHub Actions (Backend) and Vercel (Frontend)
 import { usageStorage } from "../utils/fetch-interceptor.js";
 import { createLLMClient } from "@classgrid/ai/core";
-import { streamChat, TERMINAL_RULE } from "../services/llm-stream.js";
+import { streamChat, TERMINAL_RULE, BUDGET_STOP_NOTE } from "../services/llm-stream.js";
 import { streamClaudeChat, CLAUDE_CHAT_MODELS, toImageUrlParts } from "../services/llm-stream-anthropic.js";
 import { isFableModel, planAllowsModel } from "../services/model-access.service.js";
 import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSticky, stickyKey, LOAD_TOOLS_NAME, promptBlock, filterPromptBlocks, promptBlocksForGroups, isStaffRole } from "../services/ai-tool-groups.js";
@@ -103,6 +103,7 @@ import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
 import { setHelperJobSink } from "../utils/helper-jobs.js";
 import { notStartedNote } from "../utils/helper-room.js";
+import { helperLimitReport, READER_LIMIT_ERROR, usageUsedUpText, helpersBusyText, helpersNotInPlanText, helperModelWhy, helperModelNote, thinkingNotInPlanNote, contextCutNote } from "../utils/plan-words.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -2057,9 +2058,10 @@ export const streamAskAi = async (req, res) => {
         }
     }
     // Plans on: a thinking level outside the plan (Deep on Free) answers at Normal instead
+    let deepNotInPlan = false; // (the AI is told: utils/plan-words.js thinkingNotInPlanNote)
     if (planRow && Array.isArray(planRow.thinking_modes) && planRow.thinking_modes.length) {
         const mode = thinking === "high" ? "deep" : thinking === "low" ? "fast" : "normal";
-        if (!planRow.thinking_modes.includes(mode)) thinking = null;
+        if (!planRow.thinking_modes.includes(mode)) { deepNotInPlan = mode === "deep"; thinking = null; }
     }
     if (planRow && typeof body.selectedModel === "string" && body.selectedModel !== "auto" && !planAllowsModel(planRow.models_allowed, body.selectedModel)) {
         res.writeHead(402, { "Content-Type": "application/json" });
@@ -2613,6 +2615,8 @@ export const streamAskAi = async (req, res) => {
                 let total = messages.reduce((n, m) => n + size(m), 0);
                 let droppedForPlan = 0;
                 while (total > ctxTokens * 4 && messages.length > 2) { total -= size(messages.shift()); droppedForPlan++; }
+                // (the AI is told they are missing and where to find them: it said "you never told me that" before)
+                if (droppedForPlan) tailPrompt += contextCutNote(droppedForPlan, planRow.name || "");
                 if (droppedForPlan && (await redis.set(`compact:auto:${sessionId}`, "1", "EX", 600, "NX").catch(() => null))) {
                     import("../services/ai-chat.service.js").then((m) => m.triggerMemoryAgent(sessionId, { force: true })).catch(() => {});
                 }
@@ -2965,6 +2969,7 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "S
         if (!body.taskOrigin) volatilePrompt += `\n\n${TERMINAL_RULE}`;
         // (the command and the speed the user picked change from one message to the next: they go with the message)
         if (slashCommand && (slashCommand !== "compact" || compacted)) tailPrompt += `\n\n--- COMMAND ---\nThe user started this message with /${body.command}. ${SLASH_COMMAND_LINES[slashCommand]}`;
+        if (deepNotInPlan) tailPrompt += thinkingNotInPlanNote(planRow?.name || "");
         if (thinking === "low") tailPrompt += "\n\n--- SPEED ---\nThe user picked Fast: answer quickly and keep it short. Don't plan at length or double-check things that are clearly right; use as few steps as the task needs.";
         if (thinking === "high" && slashCommand !== "boost") tailPrompt += "\n\n--- SPEED ---\nThe user picked Deep thinking: think carefully, check your work twice and look for mistakes before you answer.";
         // Project Mode: snapshot the project before this answer, so its changes can be reviewed, rejected or undone
@@ -4434,10 +4439,14 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 // (capStandIn: the cap had no room for this read, or was reached in the middle of it: Claude Haiku reads on)
                                 : await streamChat({ ...readerArgs, provider: cloudflareStreamProvider(model), temperature: 0.2, capStandIn: capStandInFor("small", "File reader") });
                             if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource, { label: { model: part.model, what: "Chat" } }).catch(() => {});
+                            // The person's usage ran out in the middle: what was written so far is not a read or a file.
+                            // It was taken as the answer, and the file writer saved the cut code with the stop note in it.
+                            if (r.stoppedForBudget) throw Object.assign(new Error(READER_LIMIT_ERROR), { planLimit: true });
                             const answer = String(r.answer || "").trim();
                             if (answer) return { answer, model: r.standIn?.model || model };
                             lastError = "no answer";
                         } catch (e) {
+                            if (e?.planLimit) throw e; // (the next model would stop the same way)
                             // (the cap refused it and no Claude model could read instead: said plainly, CAP_REFUSED_WHY)
                             lastError = isCfNeuronCapError(e) ? CAP_REFUSED_WHY : String(e?.message || e);
                             // (a read that failed is charged for what it used, like a helper's failed try)
@@ -4520,6 +4529,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             const readLines = [...String(text).matchAll(/^=== (.+?) ===\n.*?\(lines \d+-(\d+) of \d+\)/gm)].map((m) => `${m[1]}:1-${m[2]}`);
                             return `File reader (${MODEL_DISPLAY_NAMES[model] || model}) read ${paths.length - skipped.length} file${paths.length - skipped.length === 1 ? "" : "s"}:\n${readLines.length ? `Files read: ${readLines.join("; ")}\n` : ""}${answer}${skipped.length ? `\n\nNot read (too much text in one go; ask again for these): ${skipped.join(", ")}` : ""}`;
                         } catch (e) {
+                            if (e?.planLimit) return `Error: ${e.message}.`;
                             return `Error: the file reader failed (${e.message}). Read the parts you need with view_project_file start_line and end_line.`;
                         }
                     },
@@ -4538,6 +4548,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 `FILE TO WRITE: ${target}\n\nSPEC:\n${spec}${ref ? `\n\nREFERENCE FILES:\n\n${ref}` : ""}`
                             );
                         } catch (e) {
+                            if (e?.planLimit) return `Error: ${e.message}.`;
                             return `Error: the file writer failed (${e.message}). Write the file yourself with write_project_file.`;
                         }
                         const code = written.answer.replace(/^\s*```[\w.+-]*[ \t]*\n/, "").replace(/\n```\s*$/, "").replace(/\n*$/, "\n");
@@ -4579,9 +4590,9 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         // (plans on: the plan says how many helpers may work at once, up to the 5 the board holds)
                         const helperPlan = await planOf(req.user).catch(() => null);
                         const maxHelpers = helperPlan && !isUnlimited(helperPlan.helpers_per_chat) ? Math.max(0, Math.min(5, Number(helperPlan.helpers_per_chat) || 0)) : 5;
-                        if (!maxHelpers) return `Error: helpers are not included in the ${helperPlan?.name || ""} plan. Do the work yourself in this chat.`;
+                        if (!maxHelpers) return helpersNotInPlanText(helperPlan?.name || "");
                         const room = Math.max(0, maxHelpers - board.helpers.filter((h) => h.state === "running").length);
-                        if (!room) return `Error: ${maxHelpers} helper${maxHelpers === 1 ? " is" : "s are"} already working. Use check_helpers to wait for one to finish first.`;
+                        if (!room) return helpersBusyText({ maxHelpers, planName: helperPlan?.name || "" });
                         // Helpers stop only when the user stops the chat (the request is cut). If the answer itself ends or
                         // breaks, they keep working; when they finish, a waiting background task is woken to read their reports.
                         // Stop only stops the answer: helpers keep working and the chat is woken with their reports
@@ -4623,6 +4634,20 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             const id = allowed.find((m) => m.toLowerCase() === w) || (byName && allowed.includes(byName) ? byName : "");
                             const defaults = [CF_FLASH_MODEL, "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5", HELPER_GLM_MODEL];
                             return id || [defaults[i], ...defaults].find((m) => m && !offModels.includes(m) && helperMayUse(m)) || HELPER_GLM_MODEL;
+                        };
+                        // Why a helper runs on another model than the one the main AI asked for (the plan has no Claude, the
+                        // model is not in the plan, the week's Claude credits are used up...). It was swapped without a word.
+                        const modelWhy = (wanted, ran) => {
+                            const w = String(wanted || "").trim().toLowerCase();
+                            if (!w) return "";
+                            const every = [...CF_PICKER_MODELS.keys(), ...CLAUDE_CHAT_MODELS];
+                            const askedId = every.find((m) => m.toLowerCase() === w) || Object.entries(MODEL_DISPLAY_NAMES).find(([id, name]) => name.toLowerCase() === w && every.includes(id))?.[0] || null;
+                            const claude = !!askedId && CLAUDE_CHAT_MODELS.has(askedId);
+                            return helperModelWhy({
+                                asked: wanted, askedId, ran, fable: !!askedId && /claude-fable/.test(askedId), off: !!askedId && offModels.includes(askedId), claude,
+                                planName: helperPlan?.name || "", planHasClaude: !helperPlan || Number(helperPlan.claude_credits_per_week) !== 0,
+                                planAllows: !askedId || !helperPlan || !claude || planAllowsModel(helperPlan.models_allowed, askedId), claudeLeft: claudeHelpers,
+                            });
                         };
                         const readOnly = ["list_project_files", "view_project_file", "search_project", "find_project_files"];
                         const editTools = ["write_project_file", "edit_project_file", "start_background_command", "check_background_command", "stop_background_command"];
@@ -4872,6 +4897,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         };
                                         let r = await askHelper();
                                         chargeHelper(r);
+                                        // The person's usage ran out while it worked: not a finished report (it came back as one,
+                                        // ending with the note written for the person), and no other model is tried
+                                        if (r.stoppedForBudget) return { state: "failed", text: helperLimitReport(r.answer, BUDGET_STOP_NOTE) };
                                         if (!String(r.answer || "").trim()) { onlyCapRefusals = false; lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
                                         // A message from the main AI that came after the helper's last step (while it was writing
                                         // its report) used to be lost: it reaches a helper with the result of a step, and there
@@ -4930,7 +4958,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), state: "running", report: "", reportTaken: false, inbox: [], jobsDone: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), askedModel: s.model, state: "running", report: "", reportTaken: false, inbox: [], jobsDone: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             // (everything the helper does is marked as a helper's: utils/step-scope.js)
                             h.promise = helperScope.run({ helper: h.no }, () => runHelper(h, i)).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
@@ -4959,7 +4987,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             // the plan allows one at a time, and the AI wrote "Helpers 2 and 3 didn't launch, so I'll
                             // start them again in a moment", which is refused while the first one works).
                             const leftOut = notStartedNote({ asked: specs, started: batch.length, maxHelpers, planName: helperPlan?.name || "" });
-                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}${leftOut}\nTalk to them with message_helper and read their notes and reports with check_helpers. Now tell the user what the helpers are doing and end your answer, so the user can keep talking to you: each helper's report reaches you by itself when it finishes, and you tell the user then.`;
+                            const otherModel = helperModelNote(batch.map((h) => ({ no: h.no, askedName: h.askedModel, ranName: MODEL_DISPLAY_NAMES[h.model] || h.model, why: modelWhy(h.askedModel, h.model) })));
+                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}${otherModel}${leftOut}\nTalk to them with message_helper and read their notes and reports with check_helpers. Now tell the user what the helpers are doing and end your answer, so the user can keep talking to you: each helper's report reaches you by itself when it finishes, and you tell the user then.`;
                         }
                         await Promise.all(batch.map((h) => h.promise));
                         let resultRoom = HELPER_RESULT_ROOM;
@@ -4973,7 +5002,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             h.reportTaken = true;
                             told.push(h);
                             return line;
-                        }).join("\n\n") + helperChangesText(told);
+                        }).join("\n\n") + helperChangesText(told)
+                            // (a step with more helpers than the plan allows at once: the rest did not run, and it was not said)
+                            + notStartedNote({ asked: specs, started: batch.length, maxHelpers, planName: helperPlan?.name || "" });
                     },
                     // The user's own helper types (kept per user)
                     define_helper: async (args) => {
@@ -5712,6 +5743,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                     // The weekly image limit is final: no retries and no other way of making the picture
                                     return `IMAGE LIMIT REACHED. ${json.error}${req.user?.role === "super_admin" ? "" : " (share the reset time only if the user asks)"}\n\nDo NOT call generate_image again in this conversation, and do NOT create the image any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their image generation limit is used up (${json.limit} images) and that they can create images again after the reset. You may still help with everything else.`;
                                 }
+                                if (json.error === "ai_quota_exceeded") return usageUsedUpText("made", json.resetDate);
                                 return `FAILED to generate image: ${json.error || json.message || text}`;
                             } catch (e) {
                                 return `FAILED to generate image: Non-JSON error response from internal server.`;
@@ -5742,8 +5774,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 return `The edited image is ready and the app already shows it to the user at the top of your reply. Do not write its link or any marker; just tell the user what was changed.`;
                             }
                             if (json.code === 'IMAGE_LIMIT_REACHED') {
-                                return `IMAGE LIMIT REACHED. ${json.error}${req.user?.role === "super_admin" ? "" : " (share the reset time only if the user asks)"}\n\nDo NOT call edit_image or generate_image again in this answer.`;
+                                return `IMAGE LIMIT REACHED. ${json.error}${req.user?.role === "super_admin" ? "" : " (share the reset time only if the user asks)"}\n\nDo NOT call edit_image or generate_image again in this conversation, and do NOT make or change the picture any other way (no code, SVG, canvas, HTML, uploaded files or external image links/websites). Tell the user plainly that their image limit is used up${json.limit ? ` (${json.limit} images)` : ""} and that they can make and edit pictures again after the reset. You may still help with everything else.`;
                             }
+                            if (json.error === "ai_quota_exceeded") return usageUsedUpText("edited", json.resetDate);
                             return `FAILED to edit image: ${json.error || json.message || text}`;
                         } catch (e) {
                             return `FAILED to edit image: ${e.message}`;
