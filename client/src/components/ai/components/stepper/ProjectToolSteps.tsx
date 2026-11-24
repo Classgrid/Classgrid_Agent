@@ -724,18 +724,45 @@ export function ProjectHelpersStep({ step }: { step: Step }) {
   if (started) return <BackgroundHelpers result={String(step.result)} tasks={tasks} titles={titles} />;
   const results = loading ? [] : parseHelpers(step.result);
   const n = loading ? tasks.length : results.length || tasks.length;
+  // Refused: nothing started (every helper the plan allows is already working, helpers are not in the plan, no such
+  // helper type). There is no helper of this step to show, so it is one line with the reason. It used to fall into
+  // the old view below ("2 helpers explored"), and the work of a helper that was ALREADY running showed under this
+  // step's tasks, as if these had started (owner, 2026-11-24: "this old UI that shows the helper working in the main
+  // chat was removed, how is it showing here").
+  if (!loading && !results.length) {
+    const why = (String(step.result || '').replace(/^(Error|Tool error):\s*/i, '').split(/(?<=\.)\s/)[0] ?? '').trim();
+    return (
+      <div className="flex flex-col">
+        <Row>
+          <span className="shrink-0">{n === 1 ? 'Helper not started' : `${n} helpers not started`}</span>
+        </Row>
+        {why && <div className="ml-10 mb-1 text-[13px] text-slate-500 dark:text-[#8a8a8a]">{why.charAt(0).toUpperCase() + why.slice(1)}</div>}
+      </div>
+    );
+  }
+  // While the helpers are being started: one line. Their work is in the Agent map, never under this step (the old
+  // view drew each task with a live "WORK" box here; a helper that was already running showed in it).
+  if (loading) {
+    return (
+      <div className="flex flex-col">
+        <Row>
+          <ShimmerText active className="shrink-0">{`Sending ${n} helper${n === 1 ? '' : 's'}`}</ShimmerText>
+          <Spinner className="size-3.5 shrink-0" />
+        </Row>
+      </div>
+    );
+  }
+  // What is left of the old view: a saved chat from before helpers worked in the background, whose step holds the
+  // helpers' reports themselves (parseHelpers). Each report under its task, nothing live.
   const isOpen = open ?? true;
   return (
     <div className="flex flex-col">
       <Row onClick={() => setOpen(!isOpen)} open={isOpen}>
-        <ShimmerText active={loading} className="shrink-0">{loading ? `Sending ${n} helper${n === 1 ? '' : 's'}` : `${n} helper${n === 1 ? '' : 's'} explored`}</ShimmerText>
-        {loading && <Spinner className="size-3.5 shrink-0" />}
+        <span className="shrink-0">{`${n} helper${n === 1 ? '' : 's'} explored`}</span>
       </Row>
       {isOpen && (
         <div className="ml-10 flex flex-col">
-          {loading || !results.length
-            ? tasks.map((t, i) => <HelperItem key={i} task={t} loading={loading} live={step.helpers?.[i]} answer={loading ? undefined : String(step.result || '')} />)
-            : results.map((r, i) => <HelperItem key={i} task={r.task} answer={r.answer} failed={r.failed} live={step.helpers?.[i]} />)}
+          {results.map((r, i) => <HelperItem key={i} task={r.task} answer={r.answer} failed={r.failed} />)}
         </div>
       )}
     </div>
