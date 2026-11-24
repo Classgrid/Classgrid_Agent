@@ -164,6 +164,20 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
       flushThoughts();
       rows.forEach((m, i) => elements.push(<HelperMessageLine key={`agent-${step.id}-${i}`} no={m.helper} text={m.text} />));
     };
+    // The websites of a web search whose saved result was cut in the middle: every result that is whole in it
+    const cutSearchResults = (text: string): any[] => {
+      const start = text.indexOf('"results":[');
+      if (start < 0) return [];
+      const body = text.slice(start + '"results":'.length);
+      let cut = body.lastIndexOf('},{');
+      for (let tries = 0; cut > 0 && tries < 60; tries++, cut = body.lastIndexOf('},{', cut - 1)) {
+        try {
+          const list = JSON.parse(`${body.slice(0, cut + 1)}]`);
+          if (Array.isArray(list)) return list;
+        } catch { /* that "},{" was inside a page's text: an earlier one */ }
+      }
+      return [];
+    };
     const drawStep = (step: any) => {
       if (step.type === 'thought') {
         thoughtGroup.push(step);
@@ -351,7 +365,10 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
                   searchResults = parsed.results;
                 }
               } catch (e) {
-                searchError = "Could not parse search results.";
+                // The search worked, and this is a copy of its result that was cut in the middle (a helper's step
+                // saved before 2026-11-24 was cut at 6,000 characters): not a failure. The websites that are whole
+                // in the copy are shown. It used to say "Could not parse search results. Failed".
+                searchResults = cutSearchResults(step.result);
               }
             }
           }

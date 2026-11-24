@@ -35,8 +35,18 @@ export function OpenPageView({ url, result, status }: OpenPageViewProps) {
       const heading = String(parsed?.content || "").match(/^#{1,3}\s+(.+)$/m)?.[1] || "";
       title = heading.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/[*_`#]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
     } catch {
-      // Not JSON: the tool returned an error sentence
-      if (status !== "loading") error = result;
+      if (result.trimStart().startsWith("{")) {
+        // The page was opened and read, and this is a copy of its result that was cut in the middle (a helper's
+        // step saved before 2026-11-24 was cut at 6,000 characters): not a failure. Its address and title are read
+        // from what is there. It used to show "Failed" with the raw text (owner: "don't show failed at any step").
+        const cutUrl = result.match(/"url":"((?:[^"\\]|\\.)*)"/)?.[1];
+        if (cutUrl) { try { pageUrl = JSON.parse(`"${cutUrl}"`); } catch { /* the address the step asked for stays */ } }
+        const cutHeading = result.match(/"content":"(?:\[Part[^\]]*\](?:\\n)+)?#{1,3} ((?:[^"\\]|\\[^n])*)/)?.[1] || "";
+        try { title = JSON.parse(`"${cutHeading}"`).replace(/[*_`#]/g, "").replace(/\s+/g, " ").trim().slice(0, 120); } catch { title = ""; }
+      } else if (status !== "loading") {
+        // Not JSON: the tool returned an error sentence
+        error = result;
+      }
     }
   }
 
