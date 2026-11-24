@@ -8,6 +8,7 @@ import { SettingsUsageSection } from "@/features/shared/components/settings/Sett
 import { SettingsStorageSection } from "@/features/shared/components/settings/SettingsStorageSection";
 import { SettingsBillingSection } from "@/features/shared/components/settings/SettingsBillingSection";
 import { SettingsDesktopNotificationsCard } from "@/features/shared/components/settings/SettingsDesktopNotificationsCard";
+import { SettingsInputBoxCard } from "@/features/shared/components/settings/SettingsInputBoxCard";
 import { useTheme } from "next-themes";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
 import { AnimatePresence } from "framer-motion";
@@ -208,6 +209,8 @@ export function EditorSettingsPage() {
           {section === "notifications" && (
             <div className="max-w-2xl"><SettingsDesktopNotificationsCard /></div>
           )}
+          {/* What happens to a message sent while the AI is working (Queue / Send immediately) */}
+          {section === "profile" && <div className="max-w-2xl"><SettingsInputBoxCard /></div>}
           {section === "usage" && <SettingsUsageSection />}
           {section === "storage" && <SettingsStorageSection noLibraryLink />}
           {section === "billing" && <SettingsBillingSection />}

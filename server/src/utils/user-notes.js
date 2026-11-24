@@ -17,6 +17,22 @@
 /** The longest message taken this way */
 export const USER_NOTE_MAX = 20000;
 
+/**
+ * The messages that go with a question (the app's `saidBefore`): the ones the person sent while the last answer
+ * worked and the AI did not get to. Clean texts, in the order sent, at most 30.
+ */
+export function earlierMessages(list) {
+    return (Array.isArray(list) ? list : [])
+        .map((t) => (typeof t === "string" ? t.trim().slice(0, USER_NOTE_MAX) : ""))
+        .filter(Boolean)
+        .slice(0, 30);
+}
+
+/** What the model reads for this turn: the earlier messages and the question, in order, as the person's one turn */
+export function turnWithEarlier(earlier, question) {
+    return [...(earlier || []), String(question ?? "")].filter((t) => String(t).trim()).join("\n\n");
+}
+
 /** What the model reads with its tools' results */
 export function userNotesText(notes) {
     const list = (notes || []).map((n) => String(n?.text || "").trim()).filter(Boolean);

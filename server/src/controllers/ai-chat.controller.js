@@ -103,7 +103,7 @@ import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
 import { setHelperJobSink } from "../utils/helper-jobs.js";
 import { notStartedNote } from "../utils/helper-room.js";
-import { makeUserNotes } from "../utils/user-notes.js";
+import { makeUserNotes, earlierMessages, turnWithEarlier } from "../utils/user-notes.js";
 import { keptHelpers, forgetOldWork, helperToRestart, restartHint, limitRestartHint, stillUsedUpText, resumeFrom, reviveHelper } from "../utils/helper-restart.js";
 import { shownStepResult, plainModelError } from "../utils/shown-step.js";
 import { comesBackText, limitStopNote, libraryFullNote, paidFromCreditsNote, notTranscribedText, helperLimitReport, READER_LIMIT_ERROR, usageUsedUpText, helpersBusyText, helpersNotInPlanText, helperModelWhy, helperModelNote, thinkingNotInPlanNote, contextCutNote } from "../utils/plan-words.js";
@@ -2773,9 +2773,21 @@ export const streamAskAi = async (req, res) => {
                 return;
             }
         }
+        // Messages the person sent while the last answer worked and the AI did not get to (the app's saidBefore,
+        // "Send immediately"; utils/user-notes.js). Each is saved as its own message, one after the other, in front
+        // of this one: they are separate messages in the chat (owner, 2026-11-24: "they were separate messages, you
+        // are merging them into one"). The model reads them with this one, as the person's one turn (below).
+        const saidBefore = earlierMessages(body.saidBefore);
+        const savedEarlier = (async () => {
+            if (isIncognito || !sessionId || resumeState) return;
+            for (const text of saidBefore) {
+                await saveMessage(sessionId, "user", text, [], gridSender?.email || null).catch((err) => console.error("Failed to save an earlier message:", err));
+                await appendToHistory(sessionId, "user", gridSender ? `${gridSender.name}: ${text}` : text, []).catch((err) => console.error("Failed to append an earlier message to Redis:", err));
+            }
+        })();
         // 2b. Save user message: to Supabase (source of truth) + Redis (cache) in parallel
         if (!isIncognito && sessionId && body.question && !resumeState) {
-            saveMessage(sessionId, "user", body.question, body.fileUrls || [], gridSender?.email || null)
+            savedEarlier.then(() => saveMessage(sessionId, "user", body.question, body.fileUrls || [], gridSender?.email || null))
                 .then((saved) => {
                     if (gridSender) req.app.get("io")?.to(`aigrid:${sessionId}`).emit("aigrid:update", { sessionId, kind: "messages", by: gridSender.email });
                     // (in the background: the AI already has the pictures in this request)
@@ -2788,7 +2800,7 @@ export const streamAskAi = async (req, res) => {
             // pushed as one either (the answer to it is pushed where the answer is saved, below)
             if (gridSender && !body.wakeUp && !body.taskOrigin && !String(body.question).trim().startsWith("[SYSTEM:")) import("../services/user-push.service.js").then((m) => m.pushSharedChat({ sessionId, fromEmail: gridSender.email, fromName: gridSender.name, text: body.question })).catch(() => {});
             // The file links go into the AI's history too, so follow-ups can re-open an uploaded file.
-            appendToHistory(sessionId, "user", gridSender ? `${gridSender.name}: ${body.question}` : body.question, body.fileUrls || []).catch(err => console.error("Failed to append user msg to Redis:", err));
+            savedEarlier.then(() => appendToHistory(sessionId, "user", gridSender ? `${gridSender.name}: ${body.question}` : body.question, body.fileUrls || [])).catch(err => console.error("Failed to append user msg to Redis:", err));
 
             // Every TITLE_REFRESH_EVERY user messages, re-title the chat from its recent messages,
             // unless the user renamed it themselves.
@@ -2812,6 +2824,8 @@ export const streamAskAi = async (req, res) => {
             // Include image URLs in the SDK's expected format if needed
             // Currently, simple string content is supported by the AI core, but if they had fileUrls, we append them as context.
             let content = gridSender ? `${gridSender.name}: ${body.question}` : body.question;
+            // (the messages sent before this one while the last answer worked: read with it, in order)
+            if (saidBefore.length) content = turnWithEarlier(saidBefore.map((t) => (gridSender ? `${gridSender.name}: ${t}` : t)), content);
             if (body.fileUrls && body.fileUrls.length > 0) {
                 content += "\n\nAttached Files:\n" + body.fileUrls.join('\n');
                 // Only in the AI's copy of this message (not saved): how to look at a desktop app picture

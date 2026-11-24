@@ -59,7 +59,7 @@ FakeAnthropic.APIError = class extends Error {};
 FakeAnthropic.RateLimitError = class extends FakeAnthropic.APIError {};
 mock.module("@anthropic-ai/sdk", { defaultExport: FakeAnthropic });
 
-const { makeUserNotes, userNotesText, answerWithUserNotes, USER_NOTE_MAX } = await import("../src/utils/user-notes.js");
+const { makeUserNotes, userNotesText, answerWithUserNotes, earlierMessages, turnWithEarlier, USER_NOTE_MAX } = await import("../src/utils/user-notes.js");
 const { makeLocalLoopDriver, handleTurnCommand } = await import("../src/services/local-loop.service.js");
 const { streamChat } = await import("../src/services/llm-stream.js");
 const { streamClaudeChat } = await import("../src/services/llm-stream-anthropic.js");
@@ -113,6 +113,17 @@ test("in later turns the AI still knows what the person wrote in the middle of a
     assert.equal(answerWithUserNotes({ content: "Hello.", steps: [saved.steps[0]] }), "Hello.");
     assert.equal(answerWithUserNotes({ content: "Hello." }), "Hello.");
     assert.equal(answerWithUserNotes(null), "");
+});
+
+test("messages that waited for the answer to end: cleaned, kept in order, and read by the model as one turn", () => {
+    assert.deepEqual(earlierMessages(["gg", " gg ", "", "g", 5, null]), ["gg", "gg", "g"]);
+    assert.deepEqual(earlierMessages(undefined), []);
+    assert.deepEqual(earlierMessages("gg"), []);
+    assert.equal(earlierMessages(Array.from({ length: 50 }, (_, i) => `m${i}`)).length, 30);
+    assert.equal(earlierMessages(["x".repeat(USER_NOTE_MAX + 9)])[0].length, USER_NOTE_MAX);
+    // the model's turn: every message, in order (they are saved as separate messages, see streamAskAi)
+    assert.equal(turnWithEarlier(["gg", "gg", "g"], "g"), ["gg", "gg", "g", "g"].join("\n\n"));
+    assert.equal(turnWithEarlier([], "only this"), "only this");
 });
 
 // ── 2. The app's command ──

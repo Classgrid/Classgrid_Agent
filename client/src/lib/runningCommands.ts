@@ -8,6 +8,7 @@
 // The chat screen notes each command step it hands to this computer while it runs (the step's own id on the answer's
 // stream); the command's box finds its id here by the command's text.
 import { useSyncExternalStore } from "react";
+import { runningCommandFor } from "./followUpParts";
 
 const COMMAND_TOOLS = new Set(["execute_terminal_command", "run_code", "computer_terminal"]);
 type Running = { id: string; command: string };
@@ -40,8 +41,7 @@ const snapshot = () => running;
 export function useRunningCommandId(command: string, active: boolean): string | null {
   const list = useSyncExternalStore(subscribe, snapshot, snapshot);
   if (!active || !canBackgroundCommands()) return null;
-  const text = String(command || "").trim();
-  return list.find((r) => r.command === text)?.id ?? null;
+  return runningCommandFor(list, command);
 }
 
 /** Moves it to the background. False: it had already ended. */

@@ -11,8 +11,32 @@ export function plainFollowUp(m: { text: string; files?: number; pasted?: number
   return !(m.files || m.pasted || m.codeNotes);
 }
 
-/** Every message that waited goes out as one message, in the order they were sent */
-export const combinedNotes = (notes: SentNote[]): string => notes.map((n) => n.text.trim()).filter(Boolean).join("\n\n");
+/**
+ * The messages that waited for the answer to end go out together, and stay separate messages: the last one is the
+ * message that is sent, the ones before it go with it (`earlier`) and are drawn and saved as their own messages in
+ * front of it. The AI reads them all and gives one answer. (They were joined into one bubble at first: owner,
+ * 2026-11-24, "they were separate messages, you are merging them into one".)
+ */
+export function waitedMessages(notes: SentNote[]): { earlier: string[]; last: string } | null {
+  const texts = notes.map((n) => n.text.trim()).filter(Boolean);
+  if (!texts.length) return null;
+  return { earlier: texts.slice(0, -1), last: texts[texts.length - 1]! };
+}
+
+/**
+ * The id of the running command a command's box stands for, or null. The box has the command as the AI wrote it;
+ * the computer got it from the server, which puts its own words in front of a PowerShell command
+ * ("$ProgressPreference='SilentlyContinue'; ", server local-runner.service.js withQuietProgress). So the running
+ * command is the same when it is the box's text, or ends with it. (Compared for the exact text only, the box never
+ * found its command and went on showing "Waiting for output...": owner's test, 2026-11-24.)
+ */
+export function runningCommandFor(running: { id: string; command: string }[], shown: string): string | null {
+  const text = String(shown || "").trim();
+  if (!text) return null;
+  const exact = running.find((r) => r.command === text);
+  if (exact) return exact.id;
+  return running.find((r) => r.command.endsWith(text))?.id ?? null;
+}
 
 /** The step an answer keeps for a message the person sent while it worked (the server saves the same one) */
 export const USER_NOTE_TOOL = "user_message";

@@ -6,7 +6,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-const { plainFollowUp, combinedNotes, partsAtUserNotes, isUserNoteStep, USER_NOTE_TOOL } = await import("../../client/src/lib/followUpParts.ts");
+const { plainFollowUp, waitedMessages, runningCommandFor, partsAtUserNotes, isUserNoteStep, USER_NOTE_TOOL } = await import("../../client/src/lib/followUpParts.ts");
 
 const tool = (id, name, args = {}) => ({ id, type: "tool", tool: name, args, status: "success", result: "ok" });
 const said = (id, message, thoughtAt) => ({ id: `said-${id}`, type: "tool", tool: USER_NOTE_TOOL, args: { message, thoughtAt }, status: "success", result: "Read." });
@@ -22,10 +22,28 @@ test("only plain words join a running answer; files, pasted text, code comments 
     assert.equal(plainFollowUp({ text: "" }), false);
 });
 
-test("the messages that waited go out as one message, in the order they were sent", () => {
-    assert.equal(combinedNotes([{ id: "a", text: "f" }, { id: "b", text: " dvadvdv " }, { id: "c", text: "njkk" }]), "f\n\ndvadvdv\n\nnjkk");
-    assert.equal(combinedNotes([{ id: "a", text: "one" }]), "one");
-    assert.equal(combinedNotes([]), "");
+test("the messages that waited go out together and stay separate messages (never joined into one)", () => {
+    // what the owner typed while an answer worked, 2026-11-24: four messages, shown as one bubble "gg gg g g"
+    const waited = waitedMessages([{ id: "a", text: "gg" }, { id: "b", text: "gg" }, { id: "c", text: " g " }, { id: "d", text: "g" }]);
+    assert.deepEqual(waited, { earlier: ["gg", "gg", "g"], last: "g" });
+    assert.equal(waited.earlier.length + 1, 4, "four messages stay four");
+    assert.deepEqual(waitedMessages([{ id: "a", text: "one" }]), { earlier: [], last: "one" });
+    assert.equal(waitedMessages([]), null);
+    assert.equal(waitedMessages([{ id: "a", text: "   " }]), null);
+});
+
+test("a command's box finds its running command, also with the words the server puts in front of it", () => {
+    const shown = "Start-Sleep -Seconds 40; Write-Host \"hello\"";
+    // (what the computer really gets for a PowerShell command: server local-runner.service.js withQuietProgress)
+    const sent = "$ProgressPreference='SilentlyContinue'; " + shown;
+    assert.equal(runningCommandFor([{ id: "call-1", command: sent }], shown), "call-1", "the owner's test: the box showed 'Waiting for output...'");
+    assert.equal(runningCommandFor([{ id: "call-1", command: shown }], `  ${shown}  `), "call-1");
+    // the exact command wins over one that only ends with it
+    assert.equal(runningCommandFor([{ id: "a", command: `echo first; ${shown}` }, { id: "b", command: shown }], shown), "b");
+    // another command, nothing running, an empty box
+    assert.equal(runningCommandFor([{ id: "a", command: "npm install" }], shown), null);
+    assert.equal(runningCommandFor([], shown), null);
+    assert.equal(runningCommandFor([{ id: "a", command: sent }], ""), null);
 });
 
 test("an answer with no such message is one part with everything, drawn as before", () => {

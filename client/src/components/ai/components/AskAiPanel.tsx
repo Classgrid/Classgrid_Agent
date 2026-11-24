@@ -249,7 +249,7 @@ import { usePlanOverview } from "@/features/shared/queries/usePlanOverview";
 const DEFAULT_FILES_PER_MESSAGE = 6;
 import { fetchWithRescue } from "@/lib/rescue";
 import { commandStarted, commandEnded } from "@/lib/runningCommands";
-import { combinedNotes, partsAtUserNotes, plainFollowUp, sayToAnswer, useFollowUpMode, USER_NOTE_TOOL, type SentNote } from "@/lib/followUps";
+import { waitedMessages, partsAtUserNotes, plainFollowUp, sayToAnswer, useFollowUpMode, USER_NOTE_TOOL, type SentNote } from "@/lib/followUps";
 import { ANSWER_FEEDBACK_ASK, ANSWER_FEEDBACK_SET, closeReading, getReading, startReading, useReadingOf, useReadingOn } from "../reading";
 import { ReadingBar } from "./ReadingBar";
 import { docContextLine, getOpenDoc, openDocInStudio, splitDocContext, type OpenDoc } from "@/features/live-docs/docContext";
@@ -4795,7 +4795,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     }
   }
 
-  async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null; codeNotes?: CodeNote[]; meta?: ChatMessage["meta"] }) {
+  // (saidBefore: messages sent while the last answer worked that the AI did not get to. They go with this one, each
+  // drawn and saved as its own message in front of it; lib/followUpParts.ts waitedMessages)
+  async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null; codeNotes?: CodeNote[]; meta?: ChatMessage["meta"]; saidBefore?: string[] }) {
     if (chatEnded) { setSubmitting(false); return; } // ended chats take no new messages
     // Desktop app: a chat another account on this computer had goes on under this account. Its messages are
     // copied into a new chat of this account first, then the message is sent there (the AI has the whole chat)
@@ -4934,6 +4936,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     const userMsgId = createMessageId("user");
     const nextMessages: ChatMessage[] = [
       ...messages,
+      // (each earlier message is its own bubble, in the order it was sent)
+      ...(options?.saidBefore || []).map((text): ChatMessage => ({ id: createMessageId("user"), role: "user", content: text, createdAt: Date.now() })),
       {
         id: userMsgId,
         role: "user",
@@ -5261,6 +5265,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       let requestBodyText = "";
       requestBodyText = JSON.stringify({
           question: apiQuestion,
+          saidBefore: options?.saidBefore?.length ? options.saidBefore : undefined,
           // The app runs the AI's steps on this computer itself (see runPcToolCall above) and drives the loop
           pcTools: canRunPcTools ? true : undefined,
           localLoop: canRunPcTools ? true : undefined,
@@ -5948,13 +5953,15 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         setSubmitting(true);
         setTimeout(() => askQuestionRef.current?.(hiddenNext.text, { hidden: true }), 50);
       }
-      // Messages sent while the AI worked that it did not get to (no step came after them): all of them go out
-      // now as ONE message, so several messages get one answer, never one each
+      // Messages sent while the AI worked that it did not get to (no step came after them): they go out now,
+      // together. Each stays its own message in the chat, and the AI gives ONE answer to all of them.
       else if (sentNotes.length > 0) {
-        setSubmitting(true);
-        const together = combinedNotes(sentNotes);
+        const waited = waitedMessages(sentNotes);
         setSentNotes([]);
-        setTimeout(() => { askQuestionRef.current?.(together); }, 50);
+        if (waited) {
+          setSubmitting(true);
+          setTimeout(() => { askQuestionRef.current?.(waited.last, waited.earlier.length ? { saidBefore: waited.earlier } : undefined); }, 50);
+        }
       }
       // Then check if there is a priority message
       else if (priorityMessage) {
