@@ -77,6 +77,44 @@ export function spillPastPool(meter, need = 1) {
     return true;
 }
 
+// The meter follows the person's real balance while the answer and its helpers work (owner, 2026-11-24: "when my
+// usage gets over the helpers stop, but if I have credits they should continue"). What an answer may use was read
+// once, when it started, and its helpers go on for hours after that. On 2026-11-23 17:51 and 2026-11-24 07:39 UTC he
+// gifted the account credits while its helpers were working near the end of the plan's session: minutes later every
+// helper stopped with "the user's tokens ran out", 9 crore credits unused, because the number they were held to was
+// the one from the start. A new session window that began meanwhile was not seen either.
+// Now, before a round that the meter might stop, the real balance is read again (ai-chat.controller.js meterHooks
+// beforeRound, at most every METER_REFRESH_MS) and the meter is raised to it. It is never lowered from it.
+//
+// `left` is what the account holds now. What this answer used and has not been charged yet (a helper is charged when
+// it ends, the answer when it ends) is still to come out of it, so the answer may use in all: left + what it has had
+// settled already (meter.settled: every cost of it that was charged, or dropped because nothing was left to charge).
+
+/** How often the real balance is read again while the meter is low */
+export const METER_REFRESH_MS = 15000;
+/** The meter is "low" under this many credits, whatever the last round cost */
+export const METER_LOW_FLOOR = 200000;
+
+/** A cost of this answer was charged (or could not be: nothing was left): it is no longer waiting to be charged */
+export function noteSettled(meter, cost) {
+    meter.settled = (meter.settled || 0) + Math.max(0, Number(cost) || 0);
+}
+
+/** Whether the next round might be stopped by the meter (`lastRoundCost`: what the last round of this worker cost) */
+export function meterLow(meter, lastRoundCost = 0, floor = METER_LOW_FLOOR) {
+    if (meter.spendable === undefined) return false;
+    return meter.spendable - meter.spent < Math.max(floor, 4 * (Number(lastRoundCost) || 0));
+}
+
+/** The real balance was read again (`left`): the meter is raised to it. Returns true when it went up. */
+export function refillMeter(meter, left) {
+    if (meter.spendable === undefined || !Number.isFinite(Number(left))) return false;
+    const real = Math.max(0, Number(left)) + (meter.settled || 0);
+    if (real <= meter.spendable) return false;
+    meter.spendable = real;
+    return true;
+}
+
 /**
  * A Claude answer on the plan's Claude credits is inside the plan's session limit and weekly limit too (owner,
  * 2026-11-21: "session limit and weekly limit are for every model; the Claude limit is only a cap inside them").

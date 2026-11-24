@@ -14,7 +14,8 @@
 // check_helpers, which gives it in full.
 
 const who = (h) => `Helper ${h.no} (${String(h.task || "").slice(0, 120)}) ${h.state === "done" ? "finished" : "failed"}`;
-const whole = (h) => `${who(h)}:\n${h.report}${h.notes?.length ? `\nNotes it sent: ${h.notes.join(" | ")}` : ""}`;
+// (mainNote: what only the main AI is told with a report, e.g. how to start a stopped helper again; utils/helper-restart.js)
+const whole = (h) => `${who(h)}:\n${h.report}${h.notes?.length ? `\nNotes it sent: ${h.notes.join(" | ")}` : ""}${h.mainNote || ""}`;
 const pointer = (h) => `${who(h)}. Its report (${String(h.report || "").length} characters) is too long for this message and is NOT in it: read it in full with check_helpers before you answer.`;
 const BETWEEN = "\n\n";
 

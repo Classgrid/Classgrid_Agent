@@ -10,9 +10,10 @@ const STOP = "_(Stopped here: your plan's limit ran out while I was working. Whe
 
 test("a helper cut by the limit: not a finished report, the note for the person is taken off, what it wrote is kept", () => {
     const text = w.helperLimitReport(`I read 3 of the 8 files.\nauth.js checks the token at line 10.\n\n${STOP}`, STOP);
-    assert.ok(text.startsWith("the person's plan usage limit ran out while this helper was working, so it stopped before it finished. This is not a finished report."));
-    assert.match(text, /Do not start this helper or any other again now: it is refused until the limit comes back\./);
-    assert.match(text, /Tell the user plainly that their plan's usage limit ran out and that this part is not finished\./);
+    assert.ok(text.startsWith("the person's usage ran out while this helper was working, so it stopped before it finished. This is not a finished report."));
+    // (it no longer forbids starting the helper again: the main AI starts the same helper again when the usage is
+    // back, utils/helper-restart.js; tests/helper-goes-on.test.mjs)
+    assert.equal(/do not start/i.test(text), false);
     assert.ok(text.endsWith("What it had written before it stopped:\nI read 3 of the 8 files.\nauth.js checks the token at line 10."));
     assert.equal(text.includes("ask me to continue"), false);
     // (it had written nothing yet)

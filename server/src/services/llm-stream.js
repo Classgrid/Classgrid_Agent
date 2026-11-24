@@ -393,6 +393,9 @@ export async function streamChat({
     tokensLeft,
     maxOutputTokens,
     inputTooBig,
+    // beforeRound(): awaited before every round, in front of the token check (the caller reads the person's real
+    // balance again there when the meter is low: answer-meter.js refillMeter)
+    beforeRound = null,
     signal,
     onToken,
     onThought,
@@ -493,6 +496,7 @@ export async function streamChat({
                 tokensLeft: stand.tokensLeft || tokensLeft,
                 maxOutputTokens: stand.maxOutputTokens || maxOutputTokens,
                 inputTooBig: stand.inputTooBig || inputTooBig,
+                beforeRound: stand.beforeRound || beforeRound,
                 // (Deep thinks harder, Fast less; Normal is the model's own default. Only what the caller asked for:
                 // a title, a summary, a file read or a helper gives no thinking level, and "all" is only this loop's
                 // own default; it used to make every such stand-in work at effort high, slower and dearer than the
@@ -531,6 +535,7 @@ export async function streamChat({
     try {
         for (;;) {
             if (signal?.aborted) throw new StreamChatError("Request aborted");
+            if (beforeRound) { try { await beforeRound(); } catch { /* the round goes on with what the meter holds */ } }
             const left = tokensLeft?.();
             if (left !== undefined && left !== null && left <= 0) return budgetStop("nothing left");
             const roundMax = roundMaxTokens();

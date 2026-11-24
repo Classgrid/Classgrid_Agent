@@ -596,26 +596,26 @@ export const getMcpTools = () => [
   },
   {
     name: 'run_project_helpers',
-    description: 'Send 1 to 5 helper agents to work on the open Project Mode project at the same time (at most 5 working at once). For each helper you choose its task, its model, and whether it may change the project. A read-only helper explores (list, read, search) and returns a full report with file paths and line numbers. Every helper also has your other tools: the web (search_web, open_url) from the start, and connected apps, pictures, documents and the rest through its own load_tools, so a helper can research on the web or work in a connected app. A helper cannot start helpers of its own or message other sessions or chats. A helper with can_edit also writes and edits files and runs commands to really do the work; give each one its own files so helpers do not edit the same file. Helpers never push to GitHub. They always work in the background and you stay free: tell the user what the helpers are doing and end your answer; the user can keep talking to you, you can send helpers messages with message_helper and read their notes and reports with check_helpers, and the report of each helper reaches you by itself when it finishes, to tell the user. A helper that fails restarts by itself and falls back to other models. Never tell the user helpers are working unless this tool answered "Started" in this run (check_helpers shows who is really working). Their tokens are charged like the chat.',
+    description: 'Send 1 to 5 helper agents to work on the open Project Mode project at the same time (at most 5 working at once). For each helper you choose its task, its model, and whether it may change the project. A read-only helper explores (list, read, search) and returns a full report with file paths and line numbers. Every helper also has your other tools: the web (search_web, open_url) from the start, and connected apps, pictures, documents and the rest through its own load_tools, so a helper can research on the web or work in a connected app. A helper cannot start helpers of its own or message other sessions or chats. A helper with can_edit also writes and edits files and runs commands to really do the work; give each one its own files so helpers do not edit the same file. Helpers never push to GitHub. They always work in the background and you stay free: tell the user what the helpers are doing and end your answer; the user can keep talking to you, you can send helpers messages with message_helper and read their notes and reports with check_helpers, and the report of each helper reaches you by itself when it finishes, to tell the user. A helper that fails restarts by itself and falls back to other models. If one still stops before it finished (a model problem, the connection, the person\'s usage), start that same helper again with restart_helper: it keeps everything it did and carries on from where it stopped; never start a new helper for the same work. Never tell the user helpers are working unless this tool answered "Started" in this run (check_helpers shows who is really working). Their tokens are charged like the chat.',
     inputSchema: {
       type: 'object',
       properties: {
         helpers: {
           type: 'array',
-          description: 'One entry per helper (1-5).',
+          description: 'One entry per helper (1-5). Each has a task, or restart_helper to start a stopped helper again.',
           items: {
             type: 'object',
             properties: {
               title: { type: 'string', description: 'A short name for this helper job, 3 to 6 words, shown to the user (e.g. "Check the login page", "Research context.dev guides").' },
-              task: { type: 'string', description: 'One clear task for this helper, with the files it owns when it edits.' },
+              task: { type: 'string', description: 'One clear task for this helper, with the files it owns when it edits. With restart_helper it is not needed: give it only to tell the helper something new.' },
+              restart_helper: { type: 'number', description: 'The number of a helper of this chat that stopped or failed before it finished: that same helper is started again (same number, task, tools and model) and carries on from where it stopped, with everything it did still in front of it. Give nothing else with it, or task with new words for it.' },
               model: { type: 'string', description: 'Model for this helper, by its name in the model list (e.g. "DeepSeek V4.1 Flash", "Claude Sonnet 5.5", "GLM 5.3", "Kimi K2.7 Code"). Pick a cheap fast model for simple work and a stronger one for hard work. Empty = a default.' },
               can_edit: { type: 'boolean', description: 'true = it may write and edit files and run commands; false (default) = read only.' },
               browser: { type: 'boolean', description: 'Studio Mode: true = this helper is the Browser worker. It drives the user\'s live browser (open, click, type, read pages) instead of working on files.' },
               type: { type: 'string', description: 'A helper type made with define_helper (its name): the helper gets that type\'s role and, unless given here, its model and can_edit.' },
               with_chat: { type: 'boolean', description: 'true = the helper also gets this chat\'s recent conversation (what the user asked and what was done so far), so you don\'t have to explain it all in the task.' },
               worktree: { type: 'boolean', description: 'A project from a folder on the user\'s computer (a Git repository), with can_edit: true = this helper works in its own copy of the project (git worktree) on its own branch, so helpers never edit the same files. Its report says the branch; merge it afterwards with git merge in the terminal.' }
-            },
-            required: ['task']
+            }
           }
         },
         tasks: { type: 'array', items: { type: 'string' }, description: 'Older form: one read-only task per helper. Use helpers instead.' }

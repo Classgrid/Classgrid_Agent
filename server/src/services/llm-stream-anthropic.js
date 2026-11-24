@@ -651,6 +651,8 @@ export async function streamClaudeChat({
     tokensLeft,
     maxOutputTokens,
     inputTooBig,
+    // beforeRound(): awaited before every round, in front of the token check (same as streamChat)
+    beforeRound = null,
     signal,
     onToken,
     onThought,
@@ -812,6 +814,7 @@ export async function streamClaudeChat({
     try {
         for (;;) {
             if (signal?.aborted) throw new StreamChatError("Request aborted");
+            if (beforeRound) { try { await beforeRound(); } catch { /* the round goes on with what the meter holds */ } }
             const left = tokensLeft?.();
             if (left !== undefined && left !== null && left <= 0) return budgetStop("nothing left");
             const roundMax = budgetMaxTokens();

@@ -24,7 +24,11 @@ export function comesBackText(at) {
  */
 export function helperLimitReport(answer, stopNote = "") {
     const soFar = String(answer || "").split(stopNote || "\u0000")[0].trim();
-    return `the person's plan usage limit ran out while this helper was working, so it stopped before it finished. This is not a finished report. Do not start this helper or any other again now: it is refused until the limit comes back. Tell the user plainly that their plan's usage limit ran out and that this part is not finished.${soFar ? `\n\nWhat it had written before it stopped:\n${soFar}` : ""}`;
+    // (what the main AI may do about it, starting the same helper again, comes with the report as its own note:
+    // utils/helper-restart.js limitRestartHint. This text said "do not start this helper or any other again now: it
+    // is refused until the limit comes back", which was not true once the person had usage again, and the main AI
+    // answered "I can't restart it right now"; owner, 2026-11-24)
+    return `the person's usage ran out while this helper was working, so it stopped before it finished. This is not a finished report.${soFar ? `\n\nWhat it had written before it stopped:\n${soFar}` : ""}`;
 }
 
 /** The file reader or file writer was cut by the limit: nothing of it is used (a cut file was written before) */

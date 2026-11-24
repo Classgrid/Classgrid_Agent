@@ -48,13 +48,13 @@
 import { usageStorage } from "../utils/fetch-interceptor.js";
 import { createLLMClient } from "@classgrid/ai/core";
 import { streamChat, TERMINAL_RULE, BUDGET_STOP_NOTE } from "../services/llm-stream.js";
-import { streamClaudeChat, CLAUDE_CHAT_MODELS, toImageUrlParts } from "../services/llm-stream-anthropic.js";
+import { streamClaudeChat, CLAUDE_CHAT_MODELS, toImageUrlParts, toClaudeConversation } from "../services/llm-stream-anthropic.js";
 import { isFableModel, planAllowsModel } from "../services/model-access.service.js";
 import { planToolsForMessage, buildLoadToolsTool, orderTools, groupOfTool, ageSticky, stickyKey, LOAD_TOOLS_NAME, promptBlock, filterPromptBlocks, promptBlocksForGroups, isStaffRole } from "../services/ai-tool-groups.js";
 import { safetyRulesFor } from "../services/ai-safety-rules.js";
 import { cfModel } from "../services/cf-retired-models.js";
 import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
-import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, claudeInsidePlan } from "../services/answer-meter.js";
+import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, claudeInsidePlan, noteSettled, meterLow, refillMeter, METER_REFRESH_MS } from "../services/answer-meter.js";
 import { withMadePictures as withMadePicturesOf } from "../utils/made-pictures.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
@@ -103,8 +103,9 @@ import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
 import { setHelperJobSink } from "../utils/helper-jobs.js";
 import { notStartedNote } from "../utils/helper-room.js";
+import { keptHelpers, forgetOldWork, helperToRestart, restartHint, limitRestartHint, stillUsedUpText, resumeFrom, reviveHelper } from "../utils/helper-restart.js";
 import { shownStepResult, plainModelError } from "../utils/shown-step.js";
-import { limitStopNote, libraryFullNote, paidFromCreditsNote, notTranscribedText, helperLimitReport, READER_LIMIT_ERROR, usageUsedUpText, helpersBusyText, helpersNotInPlanText, helperModelWhy, helperModelNote, thinkingNotInPlanNote, contextCutNote } from "../utils/plan-words.js";
+import { comesBackText, limitStopNote, libraryFullNote, paidFromCreditsNote, notTranscribedText, helperLimitReport, READER_LIMIT_ERROR, usageUsedUpText, helpersBusyText, helpersNotInPlanText, helperModelWhy, helperModelNote, thinkingNotInPlanNote, contextCutNote } from "../utils/plan-words.js";
 import { parseHTML } from "linkedom";
 import { Readability } from "@mozilla/readability";
 import TurndownService from "turndown";
@@ -1925,6 +1926,35 @@ export const streamAskAi = async (req, res) => {
     // The answer's own first round is a normal round, never cut to the credits left (services/answer-meter.js): a
     // message that was allowed to start is answered like any other, and the limit ends at 100 percent.
     const liveMeter = { spent: 0, spendable: undefined, stopped: false, firstRoundDone: false };
+    // What the person can use right now, read again while the answer and its helpers work (set once the answer's
+    // own usage check is made; services/answer-meter.js refillMeter). A helper works for hours after the check that
+    // let its answer start: credits gifted meanwhile, or a new session window, were never seen and it stopped with
+    // "the user's tokens ran out" (owner, 2026-11-24).
+    let balanceNow = null;
+    const refreshMeter = (who, lastCost) => {
+        if (!balanceNow || !meterLow(liveMeter, lastCost)) return null;
+        if (liveMeter.refreshing) return liveMeter.refreshing; // (one read at a time, shared by everyone waiting)
+        if (Date.now() - (liveMeter.refreshedAt || 0) < METER_REFRESH_MS) return null;
+        const reading = (async () => {
+            try {
+                const now = await balanceNow();
+                if (!now) return;
+                // (an answer on the plan's Claude credits: the person's credits come after them, see spillPastPool)
+                if (now.afterPool !== undefined && !liveMeter.pastPool) liveMeter.afterPool = now.afterPool;
+                const before = liveMeter.spendable;
+                if (refillMeter(liveMeter, now.left)) console.log(`[AI-TOKEN] The person has more to use than when this answer started (${who}): it goes on (${before} -> ${liveMeter.spendable}, used ${liveMeter.spent})`);
+            } catch (e) {
+                console.warn("[AI-TOKEN] the balance could not be read again:", e?.message || e);
+            } finally {
+                liveMeter.refreshedAt = Date.now();
+            }
+        })();
+        liveMeter.refreshing = reading;
+        reading.finally(() => { if (liveMeter.refreshing === reading) liveMeter.refreshing = null; });
+        return reading;
+    };
+    // A cost of this answer that was charged is no longer waiting to be charged (the meter's refill counts on it)
+    const settled = (charge, cost) => charge.then((r) => { noteSettled(liveMeter, cost); return r; });
     // Saves what an answer that broke with an error did so far, its pictures included (set once the answer starts;
     // used by the catch at the end, which is outside the block that knows the answer)
     let keepAnswerOnError = null;
@@ -1959,9 +1989,13 @@ export const streamAskAi = async (req, res) => {
     };
     const meterHooks = (model, who = "Agent") => {
         const outputWeight = chargeableTokens({ prompt_tokens: 0, completion_tokens: 1000 }, model) / 1000;
+        let lastCost = 0; // what this worker's last round cost
         return {
+            // (before a round the meter might stop: the real balance is read again)
+            beforeRound: () => refreshMeter(who, lastCost),
             onRoundUsage: (u, { cut } = {}) => {
                 const cost = chargeableTokens(u, model);
+                lastCost = cost;
                 addRound(liveMeter, who, cost, !!cut);
                 if (playgroundRun) {
                     flushPlaygroundText();
@@ -2084,6 +2118,7 @@ export const streamAskAi = async (req, res) => {
     // week alone. The answer itself, a stopped answer, and a helper on a Claude model are all charged this way.
     const chargeClaudePool = async (cost, model) => {
         const r = await chargeClaudeOnPlan(userId, orgId, cost, { fable: /claude-fable/.test(model), label: { model, what: "Chat" } });
+        noteSettled(liveMeter, cost);
         // (the session and the week just moved: the next message's usage check is made for real, not taken from the
         // one kept for half a minute)
         forgetKept(`quota:${userId}:${orgId || "-"}:0`);
@@ -4442,7 +4477,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 ? await streamClaudeChat({ ...readerArgs, model })
                                 // (capStandIn: the cap had no room for this read, or was reached in the middle of it: Claude Haiku reads on)
                                 : await streamChat({ ...readerArgs, provider: cloudflareStreamProvider(model), temperature: 0.2, capStandIn: capStandInFor("small", "File reader") });
-                            if (userId) for (const part of usageParts(r, model)) deductTokens(userId, orgId, chargeableTokens(part.usage, part.model), tokenSource, { label: { model: part.model, what: "Chat" } }).catch(() => {});
+                            if (userId) for (const part of usageParts(r, model)) { const cost = chargeableTokens(part.usage, part.model); settled(deductTokens(userId, orgId, cost, tokenSource, { label: { model: part.model, what: "Chat" } }), cost).catch(() => {}); }
                             // The person's usage ran out in the middle: what was written so far is not a read or a file.
                             // It was taken as the answer, and the file writer saved the cut code with the stop note in it.
                             if (r.stoppedForBudget) throw Object.assign(new Error(READER_LIMIT_ERROR), { planLimit: true });
@@ -4454,7 +4489,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             // (the cap refused it and no Claude model could read instead: said plainly, CAP_REFUSED_WHY)
                             lastError = isCfNeuronCapError(e) ? CAP_REFUSED_WHY : String(e?.message || e);
                             // (a read that failed is charged for what it used, like a helper's failed try)
-                            if (userId && e?.usage?.total_tokens > 0) deductTokens(userId, orgId, chargeableTokens(e.usage, model), tokenSource, { label: { model, what: "Chat" } }).catch(() => {});
+                            if (userId && e?.usage?.total_tokens > 0) { const cost = chargeableTokens(e.usage, model); settled(deductTokens(userId, orgId, cost, tokenSource, { label: { model, what: "Chat" } }), cost).catch(() => {}); }
                         }
                     }
                     throw new Error(plainModelError(lastError)); // (the main AI gets plain words, never the provider's raw error)
@@ -4568,8 +4603,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         const raw = Array.isArray(args?.helpers) && args.helpers.length ? args.helpers : (Array.isArray(args?.tasks) ? args.tasks : []);
                         const specs = raw
                             .map((h) => (typeof h === "string" ? { task: h } : (h || {})))
-                            .map((h) => ({ task: String(h.task || "").trim(), title: String(h.title || "").replace(/\s+/g, " ").trim().slice(0, 80), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", canEditGiven: h.can_edit !== undefined, browser: h.browser === true || h.browser === "true", type: String(h.type || "").trim(), worktree: h.worktree === true || h.worktree === "true", withChat: h.with_chat === true || h.with_chat === "true" }))
-                            .filter((h) => h.task);
+                            .map((h) => ({ restart: Math.max(0, Math.floor(Number(h.restart_helper ?? h.restart) || 0)), task: String(h.task || "").trim(), title: String(h.title || "").replace(/\s+/g, " ").trim().slice(0, 80), model: String(h.model || "").trim(), canEdit: h.can_edit === true || h.can_edit === "true", canEditGiven: h.can_edit !== undefined, browser: h.browser === true || h.browser === "true", type: String(h.type || "").trim(), worktree: h.worktree === true || h.worktree === "true", withChat: h.with_chat === true || h.with_chat === "true" }))
+                            .filter((h) => h.task || h.restart);
                         // Helper types made with define_helper: their role, and their model and edit rights unless given here
                         if (specs.some((h) => h.type) && userId) {
                             const types = await redis.hgetall(HELPER_TYPES_KEY(String(userId))).catch(() => ({}));
@@ -4590,7 +4625,28 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                         if (specs.some((h) => h.browser) && userId && body.clientApp !== "desktop") ensureBrowser(String(userId)).catch(() => {});
                         const board = helperBoard(sessionId);
                         board.userId = userId ? String(userId) : board.userId; // whose helpers these are (Agents board)
-                        board.helpers = board.helpers.filter((h) => h.state === "running" || !h.reportTaken);
+                        // A helper that stopped before it finished, started again as the same helper (owner, 2026-11-24:
+                        // "it should restart the same one, not start a new one"; utils/helper-restart.js). Found before
+                        // the board is tidied below.
+                        for (const s of specs) {
+                            if (!s.restart) continue;
+                            if (specs.filter((x) => x.restart === s.restart).length > 1) return `Error: Helper ${s.restart} is named more than once.`;
+                            const found = helperToRestart(board.helpers, s.restart);
+                            if (found.error) return found.error;
+                            // The person's usage stopped it: it is started again only when they have usage now, and not a
+                            // second time in the same answer when it stopped that way again
+                            if (found.helper.limitStop) {
+                                const usage = found.helper.restartedBy === liveMeter ? { allowed: false } : await hasEnoughTokens(userId, orgId, 1).catch(() => ({ allowed: true }));
+                                if (!usage?.allowed) return stillUsedUpText(found.helper.no, comesBackText(usage?.resetAt));
+                            }
+                            s.old = found.helper;
+                            s.said = s.task; // (the main AI's new words for it, if any)
+                            s.task = s.task || found.helper.task;
+                            s.title = s.title || found.helper.title || "";
+                        }
+                        for (const kept of HELPER_BOARDS.values()) forgetOldWork(kept.helpers);
+                        board.helpers = keptHelpers(board.helpers);
+                        for (const s of specs) if (s.old && !board.helpers.includes(s.old)) board.helpers.push(s.old);
                         // (plans on: the plan says how many helpers may work at once, up to the 5 the board holds)
                         const helperPlan = await planOf(req.user).catch(() => null);
                         const maxHelpers = helperPlan && !isUnlimited(helperPlan.helpers_per_chat) ? Math.max(0, Math.min(5, Number(helperPlan.helpers_per_chat) || 0)) : 5;
@@ -4661,6 +4717,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
 
                         const runHelper = async (h, i) => {
                             let stepNo = 0;
+                            // (a helper started again keeps its earlier steps: the new ones get their own ids)
+                            const stepId = () => `h${i}${h.restarts ? `r${h.restarts}` : ""}-${stepNo++}`;
                             // Its own copy of a folder project on the user's computer (git worktree), on its own branch
                             if (h.worktree) {
                                 const project = fromWebsite ? null : await localProjectFor(sessionId);
@@ -4689,7 +4747,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             const takeInbox = () => {
                                 const got = h.inbox.splice(0);
                                 for (const m of got) {
-                                    const id = `h${i}-${stepNo++}`;
+                                    const id = stepId();
                                     emitHelper({ helper: i, id, tool: "main_message", args: { message: m } });
                                     emitHelper({ helper: i, id, result: "Read." });
                                     helperStepDone(helperStep(h, id, "main_message", { message: m }), "Read.");
@@ -4715,7 +4773,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             };
                             const liveHandlers = Object.fromEntries(names.map((n) => [n, async (a) => {
                                 if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
-                                const id = `h${i}-${stepNo++}`;
+                                const id = stepId();
                                 emitHelper({ helper: i, id, tool: n, args: a });
                                 const step = helperStep(h, id, n, a);
                                 playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
@@ -4740,7 +4798,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                     const n = t.function.name;
                                     liveHandlers[n] = async (a) => {
                                         if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
-                                        const id = `h${i}-${stepNo++}`;
+                                        const id = stepId();
                                         emitHelper({ helper: i, id, tool: n, args: a });
                                         const step = helperStep(h, id, n, a);
                                         const out = await browserHandlers[n](a);
@@ -4752,7 +4810,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                             }
                             liveHandlers.tell_main = async (a) => {
                                 const note = String(a?.message || "").trim().slice(0, 4000);
-                                const id = `h${i}-${stepNo++}`;
+                                const id = stepId();
                                 emitHelper({ helper: i, id, tool: "tell_main", args: a });
                                 const step = helperStep(h, id, "tell_main", a);
                                 let out = "Delivered to the main AI.";
@@ -4793,7 +4851,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 const n = t.function.name;
                                 liveHandlers[n] = async (a) => {
                                     if (Date.now() > deadline) return "Time is up: do not call any more tools. Write your full final answer now from what you already did.";
-                                    const id = `h${i}-${stepNo++}`;
+                                    const id = stepId();
                                     emitHelper({ helper: i, id, tool: n, args: a });
                                     const step = helperStep(h, id, n, a);
                                     playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
@@ -4858,6 +4916,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 .map((m) => `${m.role === "user" ? "User" : "Main AI"}: ${m.content.slice(0, 1500)}`).join("\n\n").slice(-12000) : "";
                             const withChat = chatSoFar ? `The conversation in this chat so far (for context):\n${chatSoFar}\n\nYour task:\n` : "";
                             const task = withChat + (round === 0 ? h.task : `${h.task}\n\n(This is restart ${round} of this job: it stopped with an error before. First check which of your files already exist and what is done, then carry on from there.)`);
+                            // Started again by the main AI (h.again, utils/helper-restart.js): it goes on from its kept
+                            // conversation, or, without one this model can take, from the record of its steps
+                            const again = h.restarts > 0 ? h.again : null;
                             for (const model of models) {
                                 for (let attempt = 1; attempt <= 2; attempt++) {
                                     if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
@@ -4869,8 +4930,14 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         // minutes for a helper that edits or browses and 4 for one that reads: a helper writing and testing
                                         // a 3,000-line program ran out before its speed test)
                                         deadline = Date.now() + HELPER_TRY_MS;
+                                        const shape = CLAUDE_CHAT_MODELS.has(model) ? "claude" : "cf";
+                                        const goOn = again ? resumeFrom(h.saved, shape, again.note, (kept) => toClaudeConversation(kept, { toolNames: new Set(defs.map((d) => d.function.name)) })) : null;
                                         const helperArgs = {
-                                            messages: [{ role: "system", content: system }, { role: "user", content: task }],
+                                            messages: [{ role: "system", content: system }, { role: "user", content: again && !goOn ? `${task}\n\n${again.text}` : task }],
+                                            ...(goOn || {}),
+                                            // (its conversation after every finished round is kept, so the same helper can be
+                                            // started again from there; in Claude's shape once a Claude model works on it)
+                                            onConversation: (kept, _usage, more) => { h.saved = { shape: more?.standIn ? "claude" : shape, conversation: kept.slice() }; },
                                             tools: defs,
                                             toolHandlers: liveHandlers,
                                             onToken: (piece) => { emitHelper({ helper: i, text: piece }); if (h.live.length < 40000) h.live += piece; },
@@ -4895,7 +4962,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             const helperOnPlanClaude = !r.standIn && model !== helperStand && helperOnPlan(model);
                                             if (userId) for (const part of usageParts(r, model)) {
                                                 const cost = chargeableTokens(part.usage, part.model);
-                                                (helperOnPlanClaude ? chargeClaudePool(cost, part.model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model: part.model, what: "Chat" } })).catch(() => {});
+                                                (helperOnPlanClaude ? chargeClaudePool(cost, part.model) : settled(deductTokens(userId, orgId, cost, tokenSource, { label: { model: part.model, what: "Chat" } }), cost)).catch(() => {});
                                             }
                                             h.tokens = (h.tokens || 0) + (r.usage?.total_tokens || 0) + (r.standIn?.before?.usage?.total_tokens || 0); // shown in the chat's Agent map
                                         };
@@ -4903,7 +4970,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         chargeHelper(r);
                                         // The person's usage ran out while it worked: not a finished report (it came back as one,
                                         // ending with the note written for the person), and no other model is tried
-                                        if (r.stoppedForBudget) return { state: "failed", text: helperLimitReport(r.answer, BUDGET_STOP_NOTE) };
+                                        if (r.stoppedForBudget) { h.limitStop = true; return { state: "failed", text: helperLimitReport(r.answer, BUDGET_STOP_NOTE) }; }
                                         if (!String(r.answer || "").trim()) { onlyCapRefusals = false; lastError = "no answer"; h.switches = [...(h.switches || []), { from: model, why: "it gave no answer" }]; break; } // try the next model
                                         // A message from the main AI that came after the helper's last step (while it was writing
                                         // its report) used to be lost: it reaches a helper with the result of a step, and there
@@ -4914,7 +4981,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                             try {
                                                 emitHelper({ helper: i, state: "restart" }); // (its report is written again)
                                                 h.live = "";
-                                                const next = await askHelper({ messages: [...helperArgs.messages, { role: "assistant", content: said }, { role: "user", content: `${msgs}\n\nThis reached you after your last step. Do what it asks, with your tools if needed, then write your full final report again: it takes the place of the one above.` }] });
+                                                const next = await askHelper({ resumeProvider: null, resumeConversation: null, messages: [...helperArgs.messages, { role: "assistant", content: said }, { role: "user", content: `${msgs}\n\nThis reached you after your last step. Do what it asks, with your tools if needed, then write your full final report again: it takes the place of the one above.` }] });
                                                 chargeHelper(next);
                                                 if (!String(next.answer || "").trim()) break; // (the report it already wrote stays)
                                                 r = next;
@@ -4922,7 +4989,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                                 // (what the round really used is charged, like a failed try's below; the report it already wrote stays)
                                                 if (userId && e?.usage?.total_tokens > 0) {
                                                     const cost = chargeableTokens(e.usage, model);
-                                                    (model !== helperStand && helperOnPlan(model) ? chargeClaudePool(cost, model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model, what: "Chat" } })).catch(() => {});
+                                                    (model !== helperStand && helperOnPlan(model) ? chargeClaudePool(cost, model) : settled(deductTokens(userId, orgId, cost, tokenSource, { label: { model, what: "Chat" } }), cost)).catch(() => {});
                                                 }
                                                 h.live = said;
                                                 break;
@@ -4945,7 +5012,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         // next model took over, were free.
                                         if (userId && e?.usage?.total_tokens > 0) {
                                             const cost = chargeableTokens(e.usage, model);
-                                            (model !== helperStand && helperOnPlan(model) ? chargeClaudePool(cost, model) : deductTokens(userId, orgId, cost, tokenSource, { label: { model, what: "Chat" } })).catch(() => {});
+                                            (model !== helperStand && helperOnPlan(model) ? chargeClaudePool(cost, model) : settled(deductTokens(userId, orgId, cost, tokenSource, { label: { model, what: "Chat" } }), cost)).catch(() => {});
                                         }
                                         if (h.abort.signal.aborted) return { state: "failed", text: "stopped because the user stopped the chat" };
                                         // "Too many requests", a timeout or a busy server: wait once and retry this model, then move to the next one
@@ -4962,11 +5029,14 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         };
 
                         const batch = specs.slice(0, room).map((s, i) => {
-                            const h = { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), askedModel: s.model, state: "running", report: "", reportTaken: false, inbox: [], jobsDone: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
+                            // (started again: the same record on the board goes on, with a new model or edit right only when given)
+                            const h = s.old ? Object.assign(reviveHelper(s.old, { said: s.said }), { restartedBy: liveMeter, ...(s.model ? { model: pickModel(s.model, i), askedModel: s.model } : {}), ...(s.canEditGiven ? { canEdit: s.canEdit } : {}) }) : { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), askedModel: s.model, state: "running", report: "", reportTaken: false, inbox: [], jobsDone: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             // (everything the helper does is marked as a helper's: utils/step-scope.js)
                             h.promise = helperScope.run({ helper: h.no }, () => runHelper(h, i)).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.endedAt = Date.now();
+                                // (only the main AI is told how to start it again; not when the user stopped the helpers)
+                                h.mainNote = out.state === "failed" && !h.abort.signal.aborted ? (h.limitStop ? limitRestartHint(h.no) : restartHint(h.no)) : "";
                                 h.report = out.text
                                     + (h.wt ? `\n\n[Its work is in its own copy ${h.wt.dir} on the branch ${h.wt.branch}. To bring it into the project: execute_terminal_command "git merge ${h.wt.branch}" in the project, then remove the copy with "git worktree remove --force '${h.wt.dir}'".]` : "")
                                     + (h.wtError ? `\n\n[It worked in the project itself: it couldn't get its own copy (${h.wtError}).]` : "");
@@ -4977,9 +5047,12 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 sendHelperReports(userId, sessionId).catch(() => {});
                                 noteHelpersHere(sessionId); // (the last one finished: kept half an hour more, for the reports)
                             });
-                            board.helpers.push(h);
+                            if (!s.old) board.helpers.push(h);
+                            // (the main AI's words for a helper it starts again show among its steps, like any message to it)
+                            else if (s.said) helperStepDone(helperStep(h, `h${i}r${h.restarts}-said`, "main_message", { message: s.said }), "Read.");
                             return h;
                         });
+                        const startedAgain = batch.filter((h) => h.restarts > 0 && h.restartedBy === liveMeter && specs.some((s) => s.old === h));
                         noteHelpersHere(sessionId); // this copy holds this chat's helpers (see HELPERS_AT)
                         const label = (h) => `Helper ${h.no} (${MODEL_DISPLAY_NAMES[h.usedModel || h.model] || h.usedModel || h.model}, ${h.canEdit ? "can edit" : "read only"}): ${h.task.slice(0, 80)}`;
                         // Helpers always work in the background (owner, 2026-11-18: "from now on make it a rule: helpers only
@@ -4992,14 +5065,15 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             // start them again in a moment", which is refused while the first one works).
                             const leftOut = notStartedNote({ asked: specs, started: batch.length, maxHelpers, planName: helperPlan?.name || "" });
                             const otherModel = helperModelNote(batch.map((h) => ({ no: h.no, askedName: h.askedModel, ranName: MODEL_DISPLAY_NAMES[h.model] || h.model, why: modelWhy(h.askedModel, h.model) })));
-                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}${otherModel}${leftOut}\nTalk to them with message_helper and read their notes and reports with check_helpers. Now tell the user what the helpers are doing and end your answer, so the user can keep talking to you: each helper's report reaches you by itself when it finishes, and you tell the user then.`;
+                            const againNote = startedAgain.length ? `\nStarted again as the same helper, from where it stopped: ${startedAgain.map((h) => h.no).join(", ")}.` : "";
+                            return `Started ${batch.length} helper(s), working in the background:\n${batch.map(label).join("\n")}${againNote}${otherModel}${leftOut}\nTalk to them with message_helper and read their notes and reports with check_helpers. Now tell the user what the helpers are doing and end your answer, so the user can keep talking to you: each helper's report reaches you by itself when it finishes, and you tell the user then.`;
                         }
                         await Promise.all(batch.map((h) => h.promise));
                         let resultRoom = HELPER_RESULT_ROOM;
                         const told = [];
                         return batch.map((h) => {
                             const notes = h.notes.length ? `\nNotes it sent you: ${h.notes.join(" | ")}` : "";
-                            const line = h.state === "done" ? `${label(h)}:\n${h.report}${notes}` : `${label(h)} failed: ${h.report}${notes}`;
+                            const line = h.state === "done" ? `${label(h)}:\n${h.report}${notes}` : `${label(h)} failed: ${h.report}${notes}${h.mainNote || ""}`;
                             // (a workflow's helpers are read here only: there is no later call for them)
                             if (line.length > resultRoom && !h.quiet) return `${label(h)} ${h.state === "done" ? "finished" : "failed"}. Its report did not fit in this result: read it in full with check_helpers.`;
                             resultRoom -= line.length;
@@ -5098,8 +5172,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             h.notesRead = h.notes.length;
                             const noteText = notes.length ? `\n  New notes: ${notes.join(" | ")}` : "";
                             if (h.state === "running") return `${name}: still working.${noteText}`;
-                            if (h.reportTaken) return `${name}: finished (report already given).${noteText}`;
-                            const line = h.state === "done" ? `${name}: finished.${noteText}\n  Report:\n${h.report}` : `${name}: failed (${h.report}).${noteText}`;
+                            // (a helper that stopped before it finished stays here for a while, so it can be started again)
+                            if (h.reportTaken) return h.state === "done" ? `${name}: finished (report already given).${noteText}` : `${name}: stopped before it finished (report already given). It can be started again as the same helper: run_project_helpers with restart_helper: ${h.no}.${noteText}`;
+                            const line = h.state === "done" ? `${name}: finished.${noteText}\n  Report:\n${h.report}` : `${name}: failed (${h.report}).${noteText}${h.mainNote || ""}`;
                             // Never a cut report: one that does not fit whole in this result is given by the next call
                             if (line.length > room) return `${name}: ${h.state === "done" ? "finished" : "failed"}.${noteText}\n  Its report did not fit in this result: call check_helpers again to read it in full.`;
                             room -= line.length;
@@ -7252,6 +7327,39 @@ If a tool fails, never show the error message; say only: "Something went wrong o
             if (spendable !== undefined) llmConfig.defaultMaxTokens = Math.max(FIRST_ROUND_OUTPUT, Math.min(8192, spendable));
             quotaRemaining = answerOutputRoom(spendable);
             liveMeter.spendable = spendable;
+            liveMeter.refreshedAt = Date.now();
+            // (the same reading as the checks above, made again later: see refreshMeter)
+            balanceNow = async () => {
+                if (claudeOnCredits) {
+                    const { creditsAvailable } = await import("../services/ai-credits.service.js");
+                    return { left: (await creditsAvailable(userId))?.total || 0 };
+                }
+                if (claudeSeparate && !fablePaidOnly) {
+                    // An answer on the plan's Claude credits: what they, the session and the week have left now, and
+                    // the person's credits after them
+                    const { weekCounters, creditsAvailable } = await import("../services/ai-credits.service.js");
+                    const pool = Number(planRow.claude_credits_per_week);
+                    const [fresh, planCheck, credits] = await Promise.all([User.findById(userId).select("ai_tokens").lean(), hasEnoughTokens(userId, orgId, 1), creditsAvailable(userId)]);
+                    let poolLeft;
+                    if (pool > 0) {
+                        const counters = await weekCounters(userId, fresh?.ai_tokens);
+                        poolLeft = Math.max(0, /claude-fable/.test(String(body.selectedModel || ""))
+                            ? Math.min(pool - counters.claude_week_used, Math.round(pool * Number(planRow.fable_share_percent) / 100) - counters.fable_week_used)
+                            : pool - counters.claude_week_used);
+                    }
+                    const planLeft = planCheck?.allowed && planCheck.source === "weekly_free" ? (planCheck.planLeft ?? planCheck.remaining) : 0;
+                    const room = Math.min(poolLeft === undefined ? Infinity : poolLeft, planLeft === undefined ? Infinity : planLeft);
+                    if (!Number.isFinite(room)) return null; // (no end to the plan: nothing to follow)
+                    const creditsTotal = credits?.total || 0;
+                    return liveMeter.pastPool ? { left: room + creditsTotal } : { left: room, afterPool: creditsTotal };
+                }
+                const now = await hasEnoughTokens(userId, orgId, 1, { paidOnly: fablePaidOnly });
+                if (!now?.allowed) return { left: 0 };
+                // (the plan has room again, e.g. a new session window: what is used from here is counted on it first)
+                if (!fablePaidOnly && now.source) tokenSource = now.source;
+                const left = now.spendable ?? now.remaining;
+                return left === undefined ? null : { left };
+            };
             playground("start", { question: String(body.question || "").slice(0, 300), model: typeof body.selectedModel === "string" ? body.selectedModel : "auto", spendable: liveMeter.spendable ?? null });
         } catch (err) {
             console.error("Quota check error:", err);
@@ -7521,7 +7629,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     if (claudePooled(m)) {
                         await chargeClaudePool(cost, m);
                     } else {
-                        await deductTokens(userId, orgId, cost, tokenSource, { label: { model: m, what: "Chat" } });
+                        await settled(deductTokens(userId, orgId, cost, tokenSource, { label: { model: m, what: "Chat" } }), cost);
                     }
                     console.log(`[AI-TOKEN] Stopped answer charged: ${cost} (${m}, real tokens ${u.total_tokens})`);
                 } catch (err) {
@@ -7611,7 +7719,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             chargeClaudePool(detachedTokens, claudeModel)
                                 .catch((err) => console.error("[AI-TOKEN] Claude week count (detached) failed:", err.message));
                         } else {
-                            deductTokens(userId, orgId, detachedTokens, tokenSource, { label: { model: claudeModel, what: "Chat" } })
+                            settled(deductTokens(userId, orgId, detachedTokens, tokenSource, { label: { model: claudeModel, what: "Chat" } }), detachedTokens)
                                 .catch(err => console.error("[AI-TOKEN] Failed to deduct detached Claude usage:", err));
                         }
                         AiUsageLog.create({
@@ -7994,7 +8102,7 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                             .catch((err) => { console.error("[AI-TOKEN] Claude week count failed:", err.message); return null; });
                         deductionResult = { success: true, uncharged: planCharge?.uncharged || 0, type: "claude_pool" };
                     } else {
-                        deductionResult = await deductTokens(userId, orgId, poolTokens, tokenSource, { label: { model: usedModel, what: "Chat" } });
+                        deductionResult = await settled(deductTokens(userId, orgId, poolTokens, tokenSource, { label: { model: usedModel, what: "Chat" } }), poolTokens);
                     }
                     flushPlaygroundText();
                     playground("end", {
