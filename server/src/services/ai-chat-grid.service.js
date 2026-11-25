@@ -20,6 +20,7 @@
 import crypto from "crypto";
 import { primarySupabaseClient as sb } from "../config/supabaseClient.js";
 import User from "../models/User.js";
+import { MAX_REPORT } from "./live-doc.helpers.js";
 
 export const GRID_MAX_PEOPLE = 4;
 
@@ -277,6 +278,46 @@ export async function leaveSharedChat(session, email) {
     // The old owner's invite link stops working; the new owner can make a new one
     await sb.from("ai_chat_grid_invites").update({ status: "revoked" }).eq("session_id", session.id).eq("invite_type", "link").eq("status", "pending");
     return "transferred";
+}
+
+/**
+ * Someone in a shared chat reports a message another person in it sent (2026-11-25: Google Play asks that offensive
+ * content can be reported inside the app). Only a person in the chat may report, and never their own message; a
+ * message with no sender is the owner's, as everywhere in Share Grid. It is kept as a ContentReport of the kind
+ * chat_message, so it shows in the super admin's Content Moderation next to the doc and comment reports, with the
+ * same reasons and the same preview length. The reported person is not told who reported it. Reporting the same
+ * message again while the first report waits changes nothing.
+ * Returns { ok } or { error, status }.
+ */
+export async function reportGridMessage(session, messageId, user, { reason, description } = {}) {
+    const me = norm(user?.email);
+    if (!session || session.is_incognito || !me || !(await canAccessSession(session, me))) return { error: "Chat not found.", status: 404 };
+    const ContentReport = (await import("../models/ContentReport.js")).default;
+    if (!ContentReport.schema.path("reason").enumValues.includes(reason)) return { error: "Pick what is wrong with this message.", status: 400 };
+    const { data: message } = await sb
+        .from("ai_chat_messages")
+        .select("id, role, content, sender_email")
+        .eq("id", messageId)
+        .eq("session_id", session.id)
+        .maybeSingle();
+    if (!message || message.role !== "user") return { error: "That message was not found.", status: 404 };
+    const sender = norm(message.sender_email) || norm(session.user_email);
+    if (sender === me) return { error: "You can't report your own message.", status: 400 };
+    const contentId = `${session.id}:${message.id}`;
+    if (await ContentReport.exists({ reportedBy: user._id, contentId, status: "pending" })) return { ok: true };
+    const account = await User.findOne({ email: sender }).select("_id name").lean();
+    await ContentReport.create({
+        reportedBy: user._id,
+        reportedByName: user.name || user.email || "",
+        contentType: "chat_message",
+        contentId,
+        contentPreview: `Message in the shared chat "${session.title || "Chat"}": ${String(message.content || "").replace(/\s+/g, " ").slice(0, 240)}`,
+        reportedUser: account?._id || null,
+        reportedUserName: account?.name || sender,
+        reason,
+        description: String(description || "").trim().slice(0, MAX_REPORT),
+    });
+    return { ok: true };
 }
 
 /** Ids of the chats this person is in that are shared right now (2 or more people), for the star in the chat list. */

@@ -26,6 +26,7 @@ import User from "../models/User.js";
 import redis from "../config/redis.js";
 import {
     GRID_MAX_PEOPLE, newInviteToken, canAccessSession, gridSummary, ensureOwnerMember, addMember, profilesFor, getActiveMembers,
+    reportGridMessage,
 } from "../services/ai-chat-grid.service.js";
 
 const router = express.Router();
@@ -213,6 +214,23 @@ router.delete("/:sessionId/members/:email", isAuthenticated, async (req, res) =>
         res.json({ ok: true });
     } catch (e) {
         res.status(500).json({ error: "Could not remove." });
+    }
+});
+
+// Report a message someone else sent in this shared chat: { reason, description } (2026-11-25; the rules are in
+// reportGridMessage). The Classgrid team reads it in the super admin's Content Moderation.
+router.post("/:sessionId/messages/:messageId/report", isAuthenticated, async (req, res) => {
+    try {
+        const session = await getSessionById(req.params.sessionId);
+        const result = await reportGridMessage(session, String(req.params.messageId), req.user, {
+            reason: String(req.body?.reason || ""),
+            description: req.body?.description,
+        });
+        if (result.error) return res.status(result.status).json({ error: result.error });
+        res.json({ ok: true });
+    } catch (e) {
+        console.error("[ShareGrid] report failed:", e);
+        res.status(500).json({ error: "Could not send the report." });
     }
 });
 
