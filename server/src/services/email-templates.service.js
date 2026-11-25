@@ -2400,6 +2400,46 @@ If you did not attempt to log in, please reset your password immediately.
 &copy; ${new Date().getFullYear()} Classgrid. All rights reserved.`;
 };
 
+// The code that confirms Delete Account for an account with no password of its own
+// (services/account-delete-confirm.service.js). The name is shown as plain text, never as HTML.
+export const getDeleteAccountCodeHtml = (userName, code) => {
+  const name = String(userName || "there").replace(/[<>&"]/g, "");
+  const content = `
+    <p>Hi <strong>${name}</strong>,</p>
+    <p>You asked to delete your Classgrid account. Enter this code in Classgrid to confirm.</p>
+
+    <div class="box" style="text-align:center; margin: 24px 0;">
+      <div class="meta">Your Code</div>
+      <span class="code" style="font-size:32px; letter-spacing:8px; color:#111111;">${code}</span>
+      <p style="margin-top:12px; font-size:13px; color:#6b7280;">This code expires in <strong style="color:#111111;">10 minutes</strong>.</p>
+    </div>
+
+    <p>Deleting your account removes your chats, files and projects for good.</p>
+    <p>If you did not ask for this, ignore this email. Your account stays as it is.</p>
+  `;
+  return baseTemplate({
+    content,
+    title: 'Delete Account Code',
+    ignoreText: 'If you did not ask to delete your account, ignore this email. Your account stays as it is.'
+  });
+};
+
+export const getDeleteAccountCodePlainText = (userName, code) => {
+  return `Hi ${String(userName || "there")},
+
+You asked to delete your Classgrid account. Enter this code in Classgrid to confirm.
+
+Your Code: ${code}
+
+This code expires in 10 minutes.
+
+Deleting your account removes your chats, files and projects for good.
+
+If you did not ask for this, ignore this email. Your account stays as it is.
+
+(c) ${new Date().getFullYear()} Classgrid. All rights reserved.`;
+};
+
 // ------------- BILLING EMAIL OTP -------------
 export const getBillingVerificationOtpHtml = (orgName, userName, otp) => {
   const content = `

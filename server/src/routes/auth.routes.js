@@ -415,6 +415,8 @@ router.post("/faculty-activate", resetPasswordLimiter, authController.facultyAct
 router.post("/force-reset-password", isAuthenticated, authController.forceResetPassword);
 router.post("/change-password", isAuthenticated, authController.changePassword);
 router.post("/delete-account", isAuthenticated, authController.deleteAccount);
+// (an account with no password of its own confirms Delete Account with a code sent to its email)
+router.post("/delete-account/code", isAuthenticated, authController.sendDeleteAccountCode);
 
 // Google OAuth
 router.get(

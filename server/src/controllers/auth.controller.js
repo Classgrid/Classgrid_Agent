@@ -56,6 +56,8 @@ import { getJwtSecret } from "../utils/jwt-secret.js";
  */
 
 import { findByAnyEmail, cleanEmail as cleanAccountEmail, codeEmailFor } from "../utils/account-email.js";
+import { isRealPasswordHash } from "../utils/password-hash.js";
+import { accountHasPassword, confirmAccountDeletion, sendDeleteAccountCode as sendDeleteCodeTo } from "../services/account-delete-confirm.service.js";
 import User from "../models/User.js";
 import DemoRequest from "../models/DemoRequest.js";
 import Verification from "../models/Verification.js";
@@ -2598,6 +2600,10 @@ export const getCurrentUser = async (req, res) => {
             linkedProviders: req.user.linkedProviders,
             lastLoginAt: req.user.lastLoginAt,
             createdAt: req.user.createdAt,
+            // Whether the account has a password of its own (never the password or its hash): Delete Account asks
+            // for the password when it has one, and for a code sent to its email when it has none. null = could
+            // not be read just now (the apps then ask for the password, as before).
+            hasPassword: await accountHasPassword(req.user._id).catch(() => null),
             prn: req.user.prn || null,
             organization: orgData,
             mustResetPassword: req.user.mustResetPassword || false,
@@ -2953,29 +2959,37 @@ export const changePassword = async (req, res) => {
     }
 };
 
+// POST /api/auth/delete-account/code — an account with no password of its own (it signs in with Google, GitHub or
+// an email code) asks for the 6-digit code that confirms Delete Account; it goes to the account's main email.
+// An account with a password is told to use its password; administrators are refused as in deleteAccount.
+// The rules of the code (10 minutes, five tries, one use, one a minute, five a day) are in
+// services/account-delete-confirm.service.js.
+export const sendDeleteAccountCode = async (req, res) => {
+    try {
+        await connectDB();
+        const user = await User.findById(req.user._id).select("+password");
+        if (!user) return res.status(404).json({ message: "User not found." });
+        const answer = await sendDeleteCodeTo(user);
+        res.status(answer.status).json(answer.body);
+    } catch (err) {
+        console.error("Delete Account Code Error:", err);
+        res.status(500).json({ message: "Server error." });
+    }
+};
+
 export const deleteAccount = async (req, res) => {
     try {
         await connectDB();
-        const { password } = req.body;
-        
-        if (!password) {
-            return res.status(400).json({ message: "Password is required to confirm deletion." });
-        }
-
         const user = await User.findById(req.user._id).select("+password");
         if (!user) return res.status(404).json({ message: "User not found." });
-        
-        if (user.role === "org_admin" || user.role === "super_admin") {
-            return res.status(403).json({ message: "Administrators must use the organization deletion process." });
-        }
 
-        const dummyHash = '$2a$10$abcdefghijklmnopqrstuv';
-        const hashToCompare = user.password || dummyHash;
-        let isMatch = false;
-        try { isMatch = await bcrypt.compare(password, hashToCompare); } catch (e) { isMatch = false; }
-
-        if (!isMatch) {
-            return res.status(401).json({ message: "Incorrect password." });
+        // The confirmation, before anything is sent or deleted: the account's password, or for an account that has
+        // none the 6-digit code sent to its email (services/account-delete-confirm.service.js; administrators are
+        // refused there too). Until 2026-11-25 only a password was taken, so an account without one could never
+        // delete itself. Such an account is never deleted without its code, and no password is compared for it.
+        const refused = await confirmAccountDeletion(user, { password: req.body?.password, code: req.body?.code });
+        if (refused) {
+            return res.status(refused.status).json({ message: refused.message, ...(refused.code ? { code: refused.code } : {}) });
         }
 
         // Logic for sending emails to superiors
@@ -3304,10 +3318,8 @@ const OTP_TTL_MS = 10 * 60 * 1000;
 const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 
 // Passwords are only ever checked with bcrypt, so anything else (null, or the plain random placeholder older
-// chat sign-ups stored) is "no password yet".
-function isRealPasswordHash(value) {
-    return typeof value === 'string' && /^\$2[aby]\$\d{2}\$/.test(value);
-}
+// chat sign-ups stored) is "no password yet": isRealPasswordHash (utils/password-hash.js), the same rule Delete
+// Account uses to tell which confirmation an account gives.
 
 // The same rules the sign-up screen shows.
 function isStrongChatPassword(pw) {
@@ -3676,7 +3688,11 @@ export const chatFinalizeOnboarding = async (req, res) => {
             user = new User({
                 email: email.toLowerCase(),
                 name: name || 'AI User',
-                password: await bcrypt.hash(password || crypto.randomBytes(16).toString('hex'), 10),
+                // No password chosen: none is stored. (A random one was stored here until 2026-11-25. Nobody knew
+                // it, and the account then counted as having a password: it could not sign in with it, and Delete
+                // Account asked for a password it never had. An account without a password signs in with a code
+                // and confirms Delete Account with a code: utils/password-hash.js.)
+                password: password ? await bcrypt.hash(password, 10) : null,
                 role: 'user',
                 organization_id: orgId,
                 metadata: { age, job_role: role, ...whatsappMeta },

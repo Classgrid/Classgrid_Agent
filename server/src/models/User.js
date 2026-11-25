@@ -878,6 +878,17 @@ const userSchema = new mongoose.Schema(
       codes_day: { type: String },
       codes_today: { type: Number, default: 0 },
     },
+    // Delete Account for an account with no password of its own (it signs in with Google, GitHub or an email code):
+    // the 6-digit code sent to its main email (services/account-delete-confirm.service.js). Only the code's keyed
+    // hash is kept; it lasts 10 minutes, takes five tries and works once; at most one code a minute and five a day.
+    account_delete_code: {
+      code_hash: { type: String },
+      code_expires_at: { type: Date },
+      code_attempts: { type: Number, default: 0 },
+      code_sent_at: { type: Date },
+      codes_day: { type: String },
+      codes_today: { type: Number, default: 0 },
+    },
     // Student prices (Settings > Billing): an approved student application (method "review"), set by a super admin
     // ("admin"), or an earlier school email confirmed with a code ("email", before 2026-11-15)
     student_verification: {

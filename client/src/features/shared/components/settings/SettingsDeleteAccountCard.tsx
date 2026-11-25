@@ -57,24 +57,33 @@
 import React, { useState } from "react";
 import { Button } from "@/components/marketing_ui/button";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/apiClient";
 import { toast } from "sonner";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
+import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useNavigate } from "react-router-dom";
 
 export function SettingsDeleteAccountCard() {
   const { data: profileData } = useUserProfile();
+  const { data: currentUser } = useCurrentUser();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState("");
+  // An account with no password of its own (it signs in with Google, GitHub or an email code) finalizes with a
+  // 6-digit code sent to its email, in place of the password (GET /api/auth/me `hasPassword`; the server decides
+  // again when the code is asked for and when the account is deleted). Anything but `false` keeps the password box.
+  const usesCode = currentUser?.hasPassword === false;
+  const [code, setCode] = useState("");
+  const [codeSent, setCodeSent] = useState(false);
 
   const orgName = profileData?.organization_id?.name || "";
 
   const deleteAccountMutation = useMutation({
     mutationFn: async () => {
-      const response = await apiClient.post("/api/auth/delete-account", {
+      const response = await apiClient.post("/api/auth/delete-account", usesCode ? { code } : {
         password,
       });
       return response.data;
@@ -86,6 +95,23 @@ export function SettingsDeleteAccountCard() {
     },
     onError: (err: any) => {
       toast.error(err.response?.data?.message || "Failed to delete account.");
+    },
+  });
+
+  const sendCodeMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post("/api/auth/delete-account/code");
+      return response.data;
+    },
+    onSuccess: (data: any) => {
+      setCodeSent(true);
+      setCode("");
+      toast.success(data?.message || "We sent a 6-digit code to your email.");
+    },
+    onError: (err: any) => {
+      // (the account got a password since this page was loaded: the password box comes back)
+      if (err.response?.data?.code === "use_password") queryClient.invalidateQueries({ queryKey: ["current-user"] });
+      toast.error(err.response?.data?.message || "Failed to send the code.");
     },
   });
 
@@ -131,8 +157,34 @@ export function SettingsDeleteAccountCard() {
         isLoading={deleteAccountMutation.isPending}
         onConfirm={handleConfirm}
         variant="danger"
-        isConfirmDisabled={password.length < 8}
+        isConfirmDisabled={usesCode ? code.length !== 6 : password.length < 8}
       >
+        {usesCode ? (
+          <div className="flex flex-col gap-2.5 pt-2">
+            <label className="text-sm text-foreground/80">Type the 6-digit code from your email to finalize</label>
+            <div className="flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                value={code}
+                onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                className="h-10 w-full rounded-md border bg-background dark:bg-black px-3 text-sm text-foreground outline-none transition-all duration-200 focus:ring-1 focus:ring-emerald-500/50 focus:border-emerald-500/50 border-input"
+                disabled={deleteAccountMutation.isPending}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                className="shrink-0"
+                onClick={() => sendCodeMutation.mutate()}
+                disabled={sendCodeMutation.isPending || deleteAccountMutation.isPending}
+              >
+                {codeSent ? "Send a new code" : "Send code"}
+              </Button>
+            </div>
+          </div>
+        ) : (
         <div className="flex flex-col gap-2.5 pt-2">
           <label className="text-sm text-foreground/80">Type your password to finalize</label>
           <input
@@ -143,6 +195,7 @@ export function SettingsDeleteAccountCard() {
             disabled={deleteAccountMutation.isPending}
           />
         </div>
+        )}
       </DangerConfirmDialog>
     </>
   );
