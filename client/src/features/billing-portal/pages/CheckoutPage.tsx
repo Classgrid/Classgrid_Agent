@@ -62,8 +62,13 @@ import { apiClient } from "@/lib/apiClient";
 import { fetchWithRescue } from "@/lib/rescue";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { NotFoundPage } from "@/features/system/pages/NotFoundPage";
+import { CODE_TTL_SECONDS } from "@/lib/codeLifetime";
 
-const OTP_TTL_SECONDS = 600;
+// (2026-11-25) Every code sent here (the first one and each new one) gives the session a full 10 minutes, and the
+// server answers with the session's end (expiresAt): the timer counts to that end. A new code can be asked for 60 s
+// after the last one, while the session is still open (the server refuses sooner, and after three new codes).
+const OTP_TTL_SECONDS = CODE_TTL_SECONDS;
+const RESEND_COOLDOWN_SECONDS = 60;
 const API_BASE = import.meta.env.VITE_API_URL || "https://api.classgrid.in";
 
 function formatCountdown(seconds: number) {
@@ -95,10 +100,18 @@ export function CheckoutPage() {
   const [otpExpired, setOtpExpired] = useState(false);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
-  const startCountdown = () => {
-    setCountdown(OTP_TTL_SECONDS);
-    setOtpExpired(false);
+  // Counts down to the session's end given by the server; with none given, a full 10 minutes from now
+  const startCountdown = (expiresAt?: string | null) => {
+    const end = expiresAt ? new Date(expiresAt).getTime() : NaN;
+    const left = Number.isFinite(end) ? Math.min(OTP_TTL_SECONDS, Math.ceil((end - Date.now()) / 1000)) : OTP_TTL_SECONDS;
     if (timerRef.current) clearInterval(timerRef.current);
+    if (left <= 0) {
+      setCountdown(0);
+      setOtpExpired(true);
+      return;
+    }
+    setCountdown(left);
+    setOtpExpired(false);
     timerRef.current = setInterval(() => {
       setCountdown((prev) => {
         if (prev <= 1) {
@@ -110,6 +123,10 @@ export function CheckoutPage() {
       });
     }, 1000);
   };
+
+  // Seconds until "Resend code" works: each code moves the session's end to 10 minutes after it was sent, so the
+  // last code went out (10 minutes - what is left) ago. 0 once the cooldown is over or the code has run out.
+  const resendWait = otpExpired ? 0 : Math.max(0, countdown - (OTP_TTL_SECONDS - RESEND_COOLDOWN_SECONDS));
 
   useEffect(() => {
     const localTheme = localStorage.getItem("vite-ui-theme");
@@ -134,7 +151,7 @@ export function CheckoutPage() {
           if (res.data?.success) {
             setStep("otp_step");
             setEmail(res.data.data?.email || res.data.data?.maskedEmail || res.data.email || "your registered email");
-            startCountdown();
+            startCountdown(res.data.data?.expiresAt);
           } else {
             setStep("invalid");
           }
@@ -185,7 +202,7 @@ export function CheckoutPage() {
       
       setToken(newToken);
       setStep("otp_step");
-      startCountdown();
+      startCountdown(data.data?.expires_at || data.data?.expiresAt);
       toast.success(`Verification code sent to ${payerEmail.trim()}`);
     } catch (err: any) {
       setError(err.message || "Failed to send OTP. Try again.");
@@ -656,15 +673,15 @@ export function CheckoutPage() {
                     setOtp("");
                     setLoading(true);
                     try {
-                      await apiClient.post("/api/billing/handoff/resend-otp", { token });
-                      startCountdown();
+                      const res = await apiClient.post("/api/billing/handoff/resend-otp", { token });
+                      startCountdown(res.data?.data?.expiresAt);
                     } catch (err: any) {
                       setError(err.response?.data?.error || "Failed to resend");
                     } finally {
                       setLoading(false);
                     }
                   }}
-                  disabled={loading || (countdown > 0 && !otpExpired)}
+                  disabled={loading || resendWait > 0}
                   className="text-slate-900 underline underline-offset-2 transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-30 dark:text-[#f1f1f1]"
                 >
                   Resend code

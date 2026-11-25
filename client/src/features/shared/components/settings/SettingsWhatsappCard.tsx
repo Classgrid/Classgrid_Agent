@@ -9,6 +9,7 @@ import { Button } from "@/components/marketing_ui/button";
 import { apiClient } from "@/lib/apiClient";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
 import { WHATSAPP_HELLO_TEXT, WHATSAPP_HELP_NUMBER_SHOWN, normalizeWhatsappInput, whatsappHelloLink } from "@/lib/whatsappVerify";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export function SettingsWhatsappCard() {
   const { data: profileData, isLoading } = useUserProfile();
@@ -114,7 +115,7 @@ export function SettingsWhatsappCard() {
             </Button>
           </div>
         )}
-        <p className="text-xs text-muted-foreground">The code is valid for 10 minutes. You can ask for a new one after 60 seconds.</p>
+        <p className="text-xs text-muted-foreground">The code is valid for {CODE_TTL_MINUTES} minutes. You can ask for a new one after 60 seconds.</p>
       </div>
     </div>
   );

@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { apiClient } from "@/lib/apiClient";
 import { clearEditorSignIn, editorLink, editorScheme, pendingEditorSignIn, type EditorSignIn } from "../editorHandoff";
 import { DeviceLimitDevices } from "@/features/shared/components/settings/DeviceLimitDevices";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 const ON_WEBSITE = import.meta.env.VITE_EDITOR !== "1" && import.meta.env.VITE_DESKTOP !== "1";
 const PAGE = "/editor-signed-in";
@@ -92,7 +93,7 @@ export default function EditorSignedInPage() {
             >
               {copied ? "Copied" : status.code}
             </button>
-            <p className="mt-2 text-xs text-muted-foreground">The code works for 5 minutes, once, and only in the editor that asked for it.</p>
+            <p className="mt-2 text-xs text-muted-foreground">The code works for {CODE_TTL_MINUTES} minutes, once, and only in the editor that asked for it.</p>
           </>
         )}
         {status.kind === "none" && (

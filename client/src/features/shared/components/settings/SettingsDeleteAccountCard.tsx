@@ -63,6 +63,7 @@ import { toast } from "sonner";
 import { useUserProfile } from "@/features/shared/queries/useUserProfile";
 import { useCurrentUser } from "@/features/auth/queries/useCurrentUser";
 import { useNavigate } from "react-router-dom";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export function SettingsDeleteAccountCard() {
   const { data: profileData } = useUserProfile();
@@ -106,7 +107,7 @@ export function SettingsDeleteAccountCard() {
     onSuccess: (data: any) => {
       setCodeSent(true);
       setCode("");
-      toast.success(data?.message || "We sent a 6-digit code to your email.");
+      toast.success(data?.message || `We sent a 6-digit code to your email. It works for ${CODE_TTL_MINUTES} minutes.`);
     },
     onError: (err: any) => {
       // (the account got a password since this page was loaded: the password box comes back)
@@ -183,6 +184,8 @@ export function SettingsDeleteAccountCard() {
                 {codeSent ? "Send a new code" : "Send code"}
               </Button>
             </div>
+            {/* (how long the code works, once a code was sent: 2026-11-25) */}
+            {codeSent && <p className="text-xs text-muted-foreground">The code works for {CODE_TTL_MINUTES} minutes. You can ask for a new one after 60 seconds.</p>}
           </div>
         ) : (
         <div className="flex flex-col gap-2.5 pt-2">

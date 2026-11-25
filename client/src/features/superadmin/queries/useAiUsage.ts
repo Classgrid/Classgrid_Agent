@@ -14,6 +14,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { apiClient as api } from "@/lib/apiClient";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 import type { UsageHistory, PlanOverview } from "@/features/shared/queries/usePlanOverview";
 import type { UserPlan } from "@/features/superadmin/components/ai-usage/planText";
 
@@ -234,7 +235,7 @@ export const useRequestSecurityCode = () => {
   return useMutation({
     mutationFn: ({ action, orgId, plan }: { action: string, orgId?: string, plan?: string }) => aiUsageApi.requestSecurityCode(action, orgId, plan),
     onSuccess: () => {
-      toast.success("Security code sent to your email.");
+      toast.success(`Security code sent to your email. It works for ${CODE_TTL_MINUTES} minutes.`);
     },
     onError: (error) => toast.error("Failed to request security code. " + error.message),
   });
@@ -243,7 +244,9 @@ export const useRequestSecurityCode = () => {
 export const useVerifySecurityCode = () => {
   return useMutation({
     mutationFn: ({ code, action, orgId }: { code: string, action: string, orgId?: string }) => aiUsageApi.verifySecurityCode(code, action, orgId),
-    onError: (error: any) => toast.error(error.response?.data?.error || "Invalid or expired security code."),
+    // (apiClient hands back the server's answer itself, so its `error` is read too: "Too many wrong tries. Ask for a
+    // new code." showed as "Invalid or expired security code." before, 2026-11-25)
+    onError: (error: any) => toast.error(error.response?.data?.error || error?.error || "Invalid or expired security code."),
   });
 };
 

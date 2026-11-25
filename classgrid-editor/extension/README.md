@@ -19,7 +19,7 @@ Works in VS Code, Cursor, Windsurf and VSCodium, and comes built into Classgrid 
 2. Your browser opens the Classgrid sign-in page. Sign in with Google, GitHub or your email, or create a free account.
 3. Your browser sends you back to the editor, and you're signed in.
 
-If your browser doesn't open the editor, copy the code it shows and run **Classgrid: Paste sign-in code**.
+If your browser doesn't open the editor, copy the code it shows and run **Classgrid: Paste sign-in code**. The code works for 10 minutes.
 
 ## Commands
 

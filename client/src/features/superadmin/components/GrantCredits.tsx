@@ -21,6 +21,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectGroup, SelectI
 import { NikhilDateCalendar } from "@/components/marketing_ui/nikhil_date_calendar";
 import { Switch } from "@/components/marketing_ui/switch";
 import { useGrantAiCredits, useGrantOrgAiCredits, useRequestSecurityCode, useVerifySecurityCode } from "@/features/superadmin/queries/useAiUsage";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 // ── Types ──────────────────────────────────────────────────────
 export interface OrgRow {
@@ -491,7 +492,7 @@ export function GrantCreditsModal({ isOpen, onClose, orgs = [], isOrgMode = fals
                 </svg>
               </div>
               <p className="text-sm text-center text-muted-foreground mb-6">
-                A 6-digit security code has been sent to your Super Admin email address. Enter it below to authorize this action.
+                A 6-digit security code has been sent to your Super Admin email address. Enter it below to authorize this action. The code works for {CODE_TTL_MINUTES} minutes.
               </p>
               
               <input

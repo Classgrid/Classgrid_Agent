@@ -75,9 +75,9 @@
  * billing-demo.routes.js
  *
  * Demo checkout session for Razorpay architecture review.
- * Creates a real BillingHandoff with OTP=123456 and 48-hour expiry.
- * GUARDED by BILLING_DEMO_ENABLED=true env var.
- * Disable by setting BILLING_DEMO_ENABLED=false — session expires automatically.
+ * Creates a real BillingHandoff with a random 6-digit code emailed to the payer. The session and its code last
+ * 10 minutes (utils/code-lifetime.js; it was 48 hours while the email said 60 seconds, changed 2026-11-25). Each
+ * Send makes a new session. At most five sends an hour per email address (otpSendLimiter, as the other code sends).
  */
 
 import express from "express";
@@ -94,11 +94,12 @@ import razorpayService from "../services/razorpay.service.js";
 import { hashHandoffToken } from "../services/billing-handoff.service.js";
 import { PAYMENT_ATTEMPT_STAGE } from "../utils/billing.utils.js";
 import connectDB from "../../config/db.js";
+import { otpSendLimiter } from "../middleware/rateLimiter.js";
+import { CODE_TTL_MINUTES, codeExpiresAt } from "../utils/code-lifetime.js";
 
 const router = express.Router();
 
 const DEMO_AMOUNT_PAISE = 200; // ₹2 live test
-const DEMO_48H = 48 * 60 * 60 * 1000;
 
 function isDemoEnabled() {
     return true; // Hardcoded for Razorpay review. See cleanup plan to remove.
@@ -113,12 +114,12 @@ function checkoutUrl(rawToken) {
 
 /**
  * POST /api/billing/demo/session
- * Creates (or refreshes) a 48-hour demo billing session.
+ * Creates a 10-minute demo billing session and emails its code.
  * Returns the checkout URL + demo credentials.
- * 
+ *
  * Protected: BILLING_DEMO_ENABLED must be "true"
  */
-router.post("/session", async (req, res) => {
+router.post("/session", otpSendLimiter, async (req, res) => {
     try {
         await connectDB(); // Ensure DB is connected in serverless
         if (!isDemoEnabled()) {
@@ -128,7 +129,7 @@ router.post("/session", async (req, res) => {
             });
         }
 
-        // Previous demo sessions expire naturally via MongoDB TTL (48h).
+        // Previous demo sessions expire naturally via MongoDB TTL (10 minutes).
         // No cleanup needed — multiple sessions can coexist safely.
 
         const { email, payerName } = req.body;
@@ -245,7 +246,7 @@ router.post("/session", async (req, res) => {
             },
             clientIp: req.ip || "127.0.0.1",
             userAgent: String(req.headers["user-agent"] || "demo").slice(0, 300),
-            expiresAt: new Date(Date.now() + DEMO_48H),
+            expiresAt: codeExpiresAt(),
         });
 
         // Send real OTP via AWS SES
@@ -259,7 +260,7 @@ router.post("/session", async (req, res) => {
                 <div class="box" style="margin-bottom: 24px;">
                     <div class="meta">Verification Code</div>
                     <div class="code" style="color: #3b82f6;">${realOtp}</div>
-                    <p style="margin: 12px 0 0; font-size: 13px; color: #6b7280;">This code will expire in 60 seconds.</p>
+                    <p style="margin: 12px 0 0; font-size: 13px; color: #6b7280;">This code will expire in ${CODE_TTL_MINUTES} minutes.</p>
                 </div>
                 
                 <p style="font-size: 13px; color: #6b7280; margin-bottom: 0;">For your security, do not share this code with anyone.</p>
@@ -270,17 +271,19 @@ router.post("/session", async (req, res) => {
                 to: demoEmail,
                 subject: "Your Payment Verification Code — Classgrid",
                 html: compiledHtml,
+                text: `Your Classgrid payment verification code is ${realOtp}. This code will expire in ${CODE_TTL_MINUTES} minutes. For your security, do not share this code with anyone.`,
                 fromName: "Classgrid Billing",
                 fromEmail: "billing@classgrid.in",
             });
-            console.log(`[Demo] Real OTP sent to ${demoEmail}`);
+            console.log(`[Demo] Code email sent to ${demoEmail}`);
         } catch (emailErr) {
             console.error("[Demo] Failed to send OTP email:", emailErr.message);
         }
 
         const url = checkoutUrl(rawToken);
 
-        console.log(`[Demo] Session created → ${url} | Expires: ${handoff.expiresAt}`);
+        // (the link carries the session's secret: never in the log)
+        console.log(`[Demo] Session created | Expires: ${handoff.expiresAt}`);
 
         return res.status(201).json({
             success: true,

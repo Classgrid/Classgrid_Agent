@@ -127,8 +127,15 @@ import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp, readabl
 import { isWebsiteOrigin } from "../utils/client-app.js";
 import { isFeatureOn, sendFeatureOff } from "../services/feature-flag.service.js";
 import { ageGiven, ageProblem } from "../utils/min-age.js";
+import { CODE_TTL_MINUTES, CODE_TTL_MS, CODE_MAX_TRIES, codeExpiresAt } from "../utils/code-lifetime.js";
+import { checkSignupCode } from "../services/signup-code.service.js";
+import { saveLoginCode } from "../services/desktop-login-code.service.js";
+import { hashResetToken } from "../utils/reset-token.js";
 
 const JWT_SECRET = getJwtSecret();
+// Wrong tries a sign-in or sign-up code takes (utils/code-lifetime.js), and what the person is told after them
+const MAX_CODE_TRIES = CODE_MAX_TRIES;
+const TOO_MANY_CODE_TRIES = "Too many wrong tries. Ask for a new code.";
 const getFrontendUrl = () => {
     return process.env.FRONTEND_URL?.trim() || (process.env.NODE_ENV === "production" ? "https://classgrid.in" : "https://classgrid.in");
 };
@@ -629,7 +636,7 @@ export const initiateSignup = async (req, res) => {
             // Update existing verification
             verification.verificationToken = token;
             verification.name = name;
-            verification.expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
+            verification.expiresAt = codeExpiresAt(); // 10 minutes (24 hours before 2026-11-25)
             verification.resendCount = recentSendCount + 1;
             verification.lastResentAt = new Date();
             await verification.save();
@@ -639,7 +646,7 @@ export const initiateSignup = async (req, res) => {
                 name,
                 email,
                 verificationToken: token,
-                expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+                expiresAt: codeExpiresAt(), // 10 minutes (24 hours before 2026-11-25)
                 resendCount: 1,
                 lastResentAt: new Date(),
             });
@@ -1701,7 +1708,7 @@ export const login = async (req, res) => {
                     });
                 }
 
-                const otp = Math.floor(100000 + Math.random() * 900000).toString();
+                const otp = crypto.randomInt(100000, 1000000).toString();
 
                 await DeviceVerification.findOneAndUpdate(
                     { email: user.email },
@@ -1714,7 +1721,7 @@ export const login = async (req, res) => {
                         failedAttempts: 0,
                         resendCount: 0,
                         lastResentAt: new Date(),
-                        expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes, as the screen shows (resend wait stays 60 s via lastResentAt)
+                        expiresAt: codeExpiresAt() // 10 minutes, as the screen shows (resend wait stays 60 s via lastResentAt)
                     },
                     { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true, sort: { createdAt: -1 } }
                 );
@@ -1854,8 +1861,8 @@ export const requestLoginOtp = async (req, res) => {
             }
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        
+        const otp = crypto.randomInt(100000, 1000000).toString();
+
         await DeviceVerification.findOneAndUpdate(
             { email: user.email },
             {
@@ -1867,7 +1874,7 @@ export const requestLoginOtp = async (req, res) => {
                 failedAttempts: 0,
                 resendCount: newResendCount,
                 lastResentAt: new Date(),
-                expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes, as the screen shows (resend wait stays 60 s via lastResentAt)
+                expiresAt: codeExpiresAt() // 10 minutes, as the screen shows (resend wait stays 60 s via lastResentAt)
             },
             { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true }
         );
@@ -2185,10 +2192,12 @@ export const oauthCallback = async (req, res) => {
     }
 
     // Started from the Classgrid desktop app: the browser can't hand the login to the app directly, so it gets a
-    // one-time code (60 seconds, single use) that the app swaps for the same in-app page through /desktop-exchange
+    // one-time code (10 minutes, single use; 60 seconds before 2026-11-25) that the app swaps for the same in-app
+    // page through /desktop-exchange. The person presses the page's button to send it, so it lasts as long as every
+    // other code; /desktop-exchange takes it in one step, so it works once (services/desktop-login-code.service.js).
     if (req.oauthState?.desktop) {
         const code = crypto.randomBytes(24).toString("base64url");
-        await redis.set(`desktoplogin:${code}`, `${target}${qs}`, "EX", 60);
+        await saveLoginCode(redis, code, `${target}${qs}`);
         return res.redirect(`/api/auth/desktop-done?code=${code}`);
     }
 
@@ -2231,10 +2240,10 @@ export const forgotPassword = async (req, res) => {
 
         // Generate a cryptographically secure token
         const rawToken = crypto.randomBytes(32).toString("hex");
-        const hashedToken = crypto.createHash("sha256").update(rawToken).digest("hex");
+        const hashedToken = hashResetToken(rawToken);
 
         user.resetPasswordToken = hashedToken;
-        user.resetPasswordExpires = Date.now() + 5 * 60 * 1000; // 5 minutes
+        user.resetPasswordExpires = Date.now() + CODE_TTL_MS; // 10 minutes (utils/code-lifetime.js; 5 before 2026-11-25)
         await user.save();
 
         const resetLink = `${resetLinkBase(origin)}/reset-password?token=${rawToken}`;
@@ -2259,8 +2268,8 @@ export const verifyResetToken = async (req, res) => {
     try {
         const { token } = req.params;
         if (!token) return res.status(400).json({ valid: false, message: "No token provided" });
-        
-        const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+
+        const hashedToken = hashResetToken(token);
         const user = await User.findOne({
             $or: [
                 { resetPasswordToken: hashedToken, resetPasswordExpires: { $gt: Date.now() } },
@@ -2294,7 +2303,7 @@ export const resetPassword = async (req, res) => {
             });
         }
 
-        const hashedToken = crypto.createHash("sha256").update(token).digest("hex");
+        const hashedToken = hashResetToken(token);
 
         const user = await User.findOneAndUpdate(
             {
@@ -2699,8 +2708,8 @@ export const resendDeviceOtp = async (req, res) => {
             }
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
-        
+        const otp = crypto.randomInt(100000, 1000000).toString();
+
         await DeviceVerification.findOneAndUpdate(
             { email: user.email },
             {
@@ -2710,7 +2719,7 @@ export const resendDeviceOtp = async (req, res) => {
                     failedAttempts: 0,
                     resendCount: newResendCount,
                     lastResentAt: new Date(),
-                    expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes, as the screen shows (resend wait stays 60 s via lastResentAt)
+                    expiresAt: codeExpiresAt() // 10 minutes, as the screen shows (resend wait stays 60 s via lastResentAt)
                 }
             },
             { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true, sort: { createdAt: -1 } }
@@ -2766,20 +2775,33 @@ export const verifyDeviceOtp = async (req, res) => {
         // request replace the fingerprint that originally received the OTP.
         deviceFingerprint = verification.deviceFingerprint;
 
+        // Each try is counted in one step before the code is compared, so tries sent all at once still stop at five
+        // (2026-11-25; before, a wrong try was counted after the compare and wrong tries never ended the code). The
+        // count belongs to this code: a resent code starts again at zero. failedAttempts now counts every try.
+        if (verification.isUsed || !verification.expiresAt || new Date(verification.expiresAt) <= new Date()) {
+            return res.status(400).json({ message: "OTP Expired" });
+        }
+        const counted = await DeviceVerification.findOneAndUpdate(
+            { _id: verification._id, otp: verification.otp, isUsed: false, failedAttempts: { $lt: MAX_CODE_TRIES } },
+            { $inc: { failedAttempts: 1 } },
+            { projection: { _id: 1 } }
+        );
+        if (!counted) {
+            return res.status(400).json({ message: TOO_MANY_CODE_TRIES });
+        }
+
         // Check code
-        if (verification.otp !== otp) {
-            // Increment failed attempts
-            await DeviceVerification.updateOne({ _id: verification._id }, { $inc: { failedAttempts: 1 } });
+        if (verification.otp !== String(otp)) {
             return res.status(400).json({ message: "Invalid OTP code." });
         }
 
-        // Atomically verify expiry, usage, and attempt limits, then mark as used
+        // Atomically verify expiry and usage, then mark as used
         const updatedVerification = await DeviceVerification.findOneAndUpdate(
             {
                 _id: verification._id,
+                otp: verification.otp,
                 isUsed: false,
                 expiresAt: { $gt: new Date() },
-                failedAttempts: { $lt: 5 }
             },
             { $set: { isUsed: true } },
             { returnDocument: 'after' }
@@ -3314,7 +3336,7 @@ export const chatOnboard = async (req, res) => {
 
 const CHAT_PUBLIC_ORG_ID = '6ac4b95e0f8a97f45e98b0ff';
 const CHAT_EMAIL_TICKET_PURPOSE = 'chat_email_verified';
-const OTP_TTL_MS = 10 * 60 * 1000;
+const OTP_TTL_MS = CODE_TTL_MS;
 const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 
 // Passwords are only ever checked with bcrypt, so anything else (null, or the plain random placeholder older
@@ -3341,7 +3363,7 @@ export const chatSendEmailOtp = async (req, res) => {
         await connectDB();
         const { email } = req.body;
         if (!email) return res.status(400).json({ message: 'Email required' });
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp = crypto.randomInt(100000, 1000000).toString();
         
         const OnboardingOTP = (await import('../models/OnboardingOTP.js')).default;
         const waitSeconds = await otpResendWaitSeconds(OnboardingOTP, email.toLowerCase(), 'email');
@@ -3382,17 +3404,11 @@ export const chatVerifyEmailOtp = async (req, res) => {
         const { email, otp, name, editor } = req.body;
         if (!email || !otp) return res.status(400).json({ message: 'Email and OTP are required' });
 
-        const OnboardingOTP = (await import('../models/OnboardingOTP.js')).default;
-        const record = await OnboardingOTP.findOne({ target: email.toLowerCase(), type: 'email' });
-        
-        if (!record || record.otp !== otp) {
-            return res.status(400).json({ message: 'Invalid or expired OTP' });
-        }
-        if (record.expires_at && record.expires_at < new Date()) {
-            await OnboardingOTP.deleteOne({ _id: record._id });
-            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
-        }
-        await OnboardingOTP.deleteOne({ _id: record._id });
+        // Five tries, counted before the compare; used up when it fits (services/signup-code.service.js)
+        const state = await checkSignupCode({ target: email.toLowerCase(), type: 'email', code: otp });
+        if (state === 'expired') return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+        if (state === 'tries') return res.status(400).json({ message: TOO_MANY_CODE_TRIES });
+        if (state !== 'ok') return res.status(400).json({ message: 'Invalid or expired OTP' });
 
         // Find or create user (an added email of an account is that account)
         let user = await findByAnyEmail(User, email);
@@ -3508,7 +3524,7 @@ export const chatSendWhatsappOtp = async (req, res) => {
             }
         }
 
-        const otp = Math.floor(100000 + Math.random() * 900000).toString();
+        const otp = crypto.randomInt(100000, 1000000).toString();
         const OnboardingOTP = (await import('../models/OnboardingOTP.js')).default;
         const waitSeconds = await otpResendWaitSeconds(OnboardingOTP, phoneNumber, 'phone');
         if (waitSeconds > 0) {
@@ -3537,14 +3553,15 @@ export const chatSendWhatsappOtp = async (req, res) => {
                     type: 'text',
                     text: {
                         preview_url: false,
-                        body: `*${otp}* is your verification code. For your security, do not share this code.`
+                        body: `*${otp}* is your verification code. It works for ${CODE_TTL_MINUTES} minutes. For your security, do not share this code.`
                     }
                 })
             });
             const data = await waRes.json();
             if (data.error) throw new Error(data.error.message || 'WhatsApp API Error');
         } else {
-            console.warn('WHATSAPP CREDENTIALS MISSING. OTP was generated but not sent:', otp);
+            // (never the code itself in the log)
+            console.warn('WHATSAPP CREDENTIALS MISSING. A sign-up code was made but not sent.');
         }
 
         res.json({ message: 'OTP sent to WhatsApp' });
@@ -3560,19 +3577,12 @@ export const chatVerifyWhatsappOtpStep = async (req, res) => {
         const { phone, otp } = req.body;
         if (!phone || !otp) return res.status(400).json({ message: 'Phone and OTP required' });
 
-        const OnboardingOTP = (await import('../models/OnboardingOTP.js')).default;
-        const record = await OnboardingOTP.findOne({ target: phone, type: 'phone' });
-        
-        if (!record || record.otp !== otp) {
-            return res.status(400).json({ message: 'Invalid WhatsApp OTP' });
-        }
-        if (record.expires_at && record.expires_at < new Date()) {
-            await OnboardingOTP.deleteOne({ _id: record._id });
-            return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
-        }
-        
-        // We DO NOT delete the OTP here because it needs to be verified again in chatFinalizeOnboarding.
-        // Or we could mark it as verified, but since this is just a quick pre-check, we leave it as is.
+        // A look before the account is finished: the code is not used up here (chatFinalizeOnboarding needs it once
+        // more), but every wrong try counts toward its five (services/signup-code.service.js)
+        const state = await checkSignupCode({ target: phone, type: 'phone', code: otp, use: false });
+        if (state === 'expired') return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+        if (state === 'tries') return res.status(400).json({ message: TOO_MANY_CODE_TRIES });
+        if (state !== 'ok') return res.status(400).json({ message: 'Invalid WhatsApp OTP' });
         res.json({ message: 'WhatsApp OTP verified' });
     } catch (e) {
         console.error('chatVerifyWhatsappOtpStep Error:', e);
@@ -3647,16 +3657,11 @@ export const chatFinalizeOnboarding = async (req, res) => {
         }
 
         if (!skipWhatsapp) {
-            const OnboardingOTP = (await import('../models/OnboardingOTP.js')).default;
-            const record = await OnboardingOTP.findOne({ target: whatsappPhone, type: 'phone' });
-            if (!record || record.otp !== whatsappOtp) {
-                return res.status(400).json({ message: 'Invalid WhatsApp OTP' });
-            }
-            if (record.expires_at && record.expires_at < new Date()) {
-                await OnboardingOTP.deleteOne({ _id: record._id });
-                return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
-            }
-            await OnboardingOTP.deleteOne({ _id: record._id });
+            // Five tries, counted before the compare; used up when it fits (services/signup-code.service.js)
+            const state = await checkSignupCode({ target: whatsappPhone, type: 'phone', code: whatsappOtp });
+            if (state === 'expired') return res.status(400).json({ message: 'OTP has expired. Please request a new one.' });
+            if (state === 'tries') return res.status(400).json({ message: TOO_MANY_CODE_TRIES });
+            if (state !== 'ok') return res.status(400).json({ message: 'Invalid WhatsApp OTP' });
         }
 
         const User = (await import('../models/User.js')).default;
@@ -3865,7 +3870,7 @@ async function sendNewDeviceCode(user, req, how) {
     const { fingerprint } = getDeviceFingerprint(req);
     const existing = await DeviceVerification.findOne({ email });
     if (existing && existing.lastResentAt && Date.now() - existing.lastResentAt.getTime() < 45000) return;
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = crypto.randomInt(100000, 1000000).toString();
     await DeviceVerification.findOneAndUpdate(
         { email },
         {
@@ -3877,7 +3882,7 @@ async function sendNewDeviceCode(user, req, how) {
             failedAttempts: 0,
             resendCount: 0,
             lastResentAt: new Date(),
-            expiresAt: new Date(Date.now() + 10 * 60 * 1000) // 10 minutes, same as password login and the email
+            expiresAt: codeExpiresAt() // 10 minutes, same as password login and the email
         },
         { upsert: true, returnDocument: 'after', setDefaultsOnInsert: true, sort: { createdAt: -1 } }
     );

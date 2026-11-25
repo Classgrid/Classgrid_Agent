@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { useAccountEmails, useAddAccountEmail, useConfirmAccountEmail } from "@/features/shared/queries/useAccountEmails";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export const btn = "inline-flex items-center h-8 px-3.5 rounded-full text-[13px] font-medium cursor-pointer whitespace-nowrap transition-colors disabled:opacity-50 disabled:cursor-default";
 export const btnGrey = `${btn} bg-black/[0.06] dark:bg-white/[0.09] text-foreground hover:bg-black/[0.1] dark:hover:bg-white/[0.14]`;
@@ -27,7 +28,7 @@ export function AddEmailForm({ requiredDomains, onAdded, onCancel }: { requiredD
   const [err, setErr] = useState("");
   const needs = (requiredDomains || []).filter(Boolean);
 
-  // A code already sent (in the last 15 minutes) goes straight to the code step
+  // A code already sent (in the last 10 minutes) goes straight to the code step
   useEffect(() => {
     if (data?.pending_email && step === "email" && !email) {
       if (!needs.length || needs.some((d) => inDomain(data.pending_email!, d))) { setEmail(data.pending_email); setStep("code"); }
@@ -37,8 +38,8 @@ export function AddEmailForm({ requiredDomains, onAdded, onCancel }: { requiredD
   const send = async () => {
     const e = email.trim().toLowerCase();
     setErr("");
-    if (needs.length && !needs.some((d) => inDomain(e, d))) { setErr(`Use your school email ending in ${needs.join(" or ")}.`); return; }
-    try { await add.mutateAsync(e); setEmail(e); setCode(""); setStep("code"); toast.success(`Code sent to ${e}`); }
+    if (needs.length && !needs.some((d) => inDomain(e, d))) { setErr(`Use your student email ending in ${needs.join(" or ")}.`); return; }
+    try { await add.mutateAsync(e); setEmail(e); setCode(""); setStep("code"); toast.success(`Code sent to ${e}. It works for ${CODE_TTL_MINUTES} minutes.`); }
     catch (x: any) { setErr(x?.response?.data?.error || "Couldn't send the code. Please try again."); }
   };
   const check = async () => {
@@ -56,9 +57,9 @@ export function AddEmailForm({ requiredDomains, onAdded, onCancel }: { requiredD
     <div>
       {step === "email" ? (
         <>
-          <div className="text-[13px] font-medium">{needs.length ? "School email" : "Email"}</div>
+          <div className="text-[13px] font-medium">{needs.length ? "Student email" : "Email"}</div>
           <div className={`${field} mt-2`}>
-            <input data-no-ring="true" className={input} type="email" autoComplete="email" placeholder={needs.length ? `you@${(needs[0] || "").replace(/^\./, "college")}` : "you@example.com"} value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && email.trim()) send(); }} autoFocus />
+            <input data-no-ring="true" className={input} type="email" autoComplete="email" placeholder={needs.length ? `you@${(needs[0] || "").replace(/^\./, "students.")}` : "you@example.com"} value={email} onChange={(e) => setEmail(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter" && email.trim()) send(); }} autoFocus />
           </div>
         </>
       ) : (
@@ -67,6 +68,7 @@ export function AddEmailForm({ requiredDomains, onAdded, onCancel }: { requiredD
           <div className={`${field} mt-2`}>
             <input data-no-ring="true" className={`${input} tracking-[0.3em]`} inputMode="numeric" maxLength={6} placeholder="123456" value={code} onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))} onKeyDown={(e) => { if (e.key === "Enter" && code.length === 6) check(); }} autoFocus />
           </div>
+          <div className="text-xs text-muted-foreground mt-2">The code works for {CODE_TTL_MINUTES} minutes.</div>
           <button type="button" className="text-xs text-muted-foreground underline mt-2 cursor-pointer" onClick={() => { setStep("email"); setErr(""); }}>Use another email or send a new code</button>
         </>
       )}

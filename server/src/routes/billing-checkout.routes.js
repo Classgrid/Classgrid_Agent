@@ -95,6 +95,9 @@ import { PAYMENT_ATTEMPT_STAGE } from "../utils/billing.utils.js";
 const router = express.Router();
 router.use(generalLimiter);
 
+// Wrong tries a payment code takes before it is locked (as before; now counted in one step)
+const MAX_CODE_TRIES = 3;
+
 function checkoutError(res, error) {
     const status = Number(error?.statusCode) || 500;
     if (status >= 500) console.error("[Billing Checkout]", error);
@@ -159,15 +162,22 @@ router.post("/verify-otp", async (req, res) => {
             return res.status(429).json({ success: false, error: "Too many failed attempts. Try again later." });
         }
 
+        // Each try is counted in one step before the code is compared, so tries sent all at once still stop at three
+        // (2026-11-25; before, the count was written after the compare and several tries at once each saw the same
+        // count). The count belongs to this code: a resent code is another code and starts again at zero.
+        const counted = await BillingHandoff.findOneAndUpdate(
+            { _id: handoff._id, otp: handoff.otp, otpVerifiedAt: null, attempts: { $lt: MAX_CODE_TRIES } },
+            { $inc: { attempts: 1 } },
+            { returnDocument: "after", projection: { attempts: 1 } }
+        );
+        if (!counted) {
+            return res.status(429).json({ success: false, error: "Too many failed attempts. Try again later." });
+        }
         const isMatch = await bcrypt.compare(String(otp), handoff.otp);
         if (!isMatch) {
-            const attempts = handoff.attempts + 1;
-            await BillingHandoff.findByIdAndUpdate(handoff._id, {
-                $set: {
-                    attempts,
-                    lockoutUntil: attempts >= 3 ? new Date(Date.now() + 15 * 60 * 1000) : null,
-                },
-            });
+            if (counted.attempts >= MAX_CODE_TRIES) {
+                await BillingHandoff.updateOne({ _id: handoff._id }, { $set: { lockoutUntil: new Date(Date.now() + 15 * 60 * 1000) } });
+            }
             return res.status(400).json({ success: false, error: "Invalid OTP" });
         }
 

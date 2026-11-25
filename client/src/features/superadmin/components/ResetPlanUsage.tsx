@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/marketing_ui/button";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { useRequestSecurityCode, useResetPlanUsage } from "@/features/superadmin/queries/useAiUsage";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export function ResetPlanUsage({ plan, planName }: { plan: string; planName: string }) {
   const [open, setOpen] = useState(false);
@@ -61,7 +62,7 @@ export function ResetPlanUsage({ plan, planName }: { plan: string; planName: str
         open={open}
         onOpenChange={setOpen}
         title={`Reset ${planName} Usage`}
-        description="Please provide your Super Admin security code to proceed."
+        description={`Please provide your Super Admin security code to proceed. The code works for ${CODE_TTL_MINUTES} minutes.`}
         warningMessage={`This resets the usage of everyone on ${planName} back to 0.`}
         actionLabel="Reset Usage"
         cancelLabel="Cancel"

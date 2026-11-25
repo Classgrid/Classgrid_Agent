@@ -77,6 +77,7 @@ import { getBlogSubscribersSb } from "../config/blogSubscribersSupabaseClient.js
 import UserProfile from "../models/UserProfile.js";
 import { getProfileSchema } from "../utils/profile-schemas.js";
 import { finishedAccountsMatch, unfinishedChatSignupMatch } from "../utils/chat-onboarding.js";
+import { hashResetToken } from "../utils/reset-token.js";
 import {
     broadcastGlobal,
     emailOrgAdmins,
@@ -2577,19 +2578,22 @@ router.post("/users/:id/reset-password", async (req, res) => {
         const user = await User.findById(id).select("name email").lean();
         if (!user) return res.status(404).json({ success: false, message: "User not found" });
 
+        const { CODE_TTL_MINUTES, codeExpiresAt } = await import("../utils/code-lifetime.js");
         const token = crypto.randomBytes(32).toString("hex");
-        const expires = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+        const expires = codeExpiresAt(); // 10 minutes, as every reset link (1 hour before 2026-11-25)
 
+        // Kept as its sha256, as the reset page looks it up (controllers/auth.controller.js verifyResetToken and
+        // resetPassword): before 2026-11-25 the raw token was kept, so this link never worked
         await User.findByIdAndUpdate(id, {
-            $set: { resetPasswordToken: token, resetPasswordExpires: expires }
+            $set: { resetPasswordToken: hashResetToken(token), resetPasswordExpires: expires }
         });
 
         const resetUrl = `${process.env.FRONTEND_URL || "https://classgrid.in"}/reset-password?token=${token}`;
         await sendEmail({
             to: user.email,
             subject: "Password Reset — Classgrid",
-            html: `<p>Hi ${user.name},</p><p>A Super Admin has requested a password reset for your account.</p><p><a href="${resetUrl}">Click here to reset your password</a></p><p>This link expires in 1 hour.</p>`,
-            text: `Password reset link: ${resetUrl}`,
+            html: `<p>Hi ${user.name},</p><p>A Super Admin has requested a password reset for your account.</p><p><a href="${resetUrl}">Click here to reset your password</a></p><p>This link expires in ${CODE_TTL_MINUTES} minutes.</p>`,
+            text: `Password reset link: ${resetUrl}\n\nThis link expires in ${CODE_TTL_MINUTES} minutes.`,
         });
 
         // Written once the email has gone, so the person page lists only resets that were really sent

@@ -93,6 +93,7 @@ import {
     validateReturnUrl,
 } from "../services/billing-handoff.service.js";
 import { PAYMENT_ATTEMPT_STAGE } from "../utils/billing.utils.js";
+import { CODE_TTL_MINUTES } from "../utils/code-lifetime.js";
 
 const router = express.Router();
 
@@ -137,7 +138,7 @@ async function sendOtp({ handoff, otp, organization, user, label, idempotencyKey
         data: {
             payer_name: user?.name || "Payer",
             otp,
-            otp_expiry_minutes: 10,
+            otp_expiry_minutes: CODE_TTL_MINUTES,
             organization_name: organization.name,
             fee_name: label,
             amount: formatPaise(handoff.amountPaise, handoff.currency),
@@ -309,23 +310,44 @@ router.post("/resend-otp", generalLimiter, async (req, res) => {
         if (!organization) return res.status(404).json({ success: false, error: "Organization not found" });
 
         const otp = crypto.randomInt(100000, 1000000).toString();
-        handoff.otp = await bcrypt.hash(otp, 12);
-        handoff.attempts = 0;
-        handoff.lockoutUntil = null;
-        handoff.resendCount += 1;
-        handoff.lastOtpSentAt = new Date();
-        await handoff.save();
+        const now = Date.now();
+        // A new code gets a full 10 minutes, and so does the session it belongs to (2026-11-25: the email said 10
+        // minutes while the session kept its first end). Taken in one step, only while the session is still open,
+        // under the resend limit and past the wait, so two resends at once send one code.
+        const renewed = await BillingHandoff.findOneAndUpdate(
+            {
+                _id: handoff._id,
+                verified: false,
+                consumedAt: null,
+                otpVerifiedAt: null,
+                expiresAt: { $gt: new Date(now) },
+                resendCount: { $lt: MAX_OTP_RESENDS },
+                $or: [{ lastOtpSentAt: null }, { lastOtpSentAt: { $lte: new Date(now - OTP_RESEND_COOLDOWN_MS) } }],
+            },
+            {
+                $set: {
+                    otp: await bcrypt.hash(otp, 12),
+                    attempts: 0,
+                    lockoutUntil: null,
+                    lastOtpSentAt: new Date(now),
+                    expiresAt: new Date(now + HANDOFF_TTL_MS),
+                },
+                $inc: { resendCount: 1 },
+            },
+            { returnDocument: "after" }
+        );
+        if (!renewed) return res.status(429).json({ success: false, error: "Wait before requesting another code" });
 
         await sendOtp({
-            handoff,
+            handoff: renewed,
             otp,
             organization,
-            user: { _id: null, name: handoff.context?.payerName },
-            label: handoff.context?.label || "Payment",
-            idempotencyKey: `payment-otp:${handoff._id}:resend:${handoff.resendCount}`,
+            user: { _id: null, name: renewed.context?.payerName },
+            label: renewed.context?.label || "Payment",
+            idempotencyKey: `payment-otp:${renewed._id}:resend:${renewed.resendCount}`,
         });
 
-        return res.json({ success: true, message: "OTP resent" });
+        return res.json({ success: true, message: "OTP resent", data: { expiresAt: renewed.expiresAt } });
     } catch (error) {
         return publicError(res, error);
     }

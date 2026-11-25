@@ -659,7 +659,9 @@ function followAppSignOut() {
 
 // Browser sign-in (plan/editor-sign-in.md): state + PKCE, kept in the editor's secret storage until the link comes back
 const SIGN_IN_KEY = "classgrid.signIn";
-const SIGN_IN_MAX_AGE = 15 * 60 * 1000;
+// How long a started sign-in is kept: the 15 minutes the browser gives it (client editorHandoff.ts MAX_AGE_MS) plus
+// the 10 minutes the code then works, so a code made at the last moment can still be pasted (2026-11-25; was 15)
+const SIGN_IN_MAX_AGE = 25 * 60 * 1000;
 const sameText = (a, b) => { const x = Buffer.from(String(a)), y = Buffer.from(String(b)); return x.length === y.length && crypto.timingSafeEqual(x, y); };
 async function pendingSignIn() {
   try {
@@ -686,7 +688,7 @@ async function pasteSignInCode() {
     if (pick) startSignIn();
     return;
   }
-  const code = await vscode.window.showInputBox({ title: "Classgrid: Paste sign-in code", prompt: "The code shown on the \"You're signed in\" page in your browser", ignoreFocusOut: true, validateInput: (v) => /^[A-Za-z0-9_-]{16,64}$/.test(v.trim()) ? null : "That doesn't look like a Classgrid sign-in code." });
+  const code = await vscode.window.showInputBox({ title: "Classgrid: Paste sign-in code", prompt: "The code shown on the \"You're signed in\" page in your browser. It works for 10 minutes.", ignoreFocusOut: true, validateInput: (v) => /^[A-Za-z0-9_-]{16,64}$/.test(v.trim()) ? null : "That doesn't look like a Classgrid sign-in code." });
   if (code) finishSignIn(code.trim(), pending.verifier);
 }
 async function finishSignIn(code, verifier) {

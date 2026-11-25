@@ -43,6 +43,7 @@ import {
     hashHandoffToken,
 } from "../services/billing-handoff.service.js";
 import { PAYMENT_ATTEMPT_STAGE } from "../utils/billing.utils.js";
+import { CODE_TTL_MINUTES } from "../utils/code-lifetime.js";
 import { CREDIT_PACKS_INR, topupAmountAllowed, packAtOrAbove } from "../services/google-play-rules.js";
 
 // Credits are sold in fixed packs of ₹500, ₹1,000, ₹2,000 and ₹5,000, on the website and in the phone app alike
@@ -186,7 +187,7 @@ async function startPlatformPayment(req, res, { amountInr, paymentType, label, n
             data: {
                 payer_name: payerName,
                 otp,
-                otp_expiry_minutes: 10,
+                otp_expiry_minutes: CODE_TTL_MINUTES,
                 organization_name: organization.name,
                 fee_name: label,
                 amount: formatPaise(handoff.amountPaise, handoff.currency),

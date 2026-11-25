@@ -173,7 +173,7 @@ export const sendTemplateSMS = async ({ templateName, phoneNumber, data, userId,
             status: result.success ? "SENT" : "FAILED",
             providerMessageId: result.messageId,
             failureReason: result.success ? undefined : result.error,
-            metadata: data
+            metadata: withoutCodeValue(data)
         });
 
         if (!result.success) throw new Error(result.error);
@@ -188,7 +188,7 @@ export const sendTemplateSMS = async ({ templateName, phoneNumber, data, userId,
             recipient: phoneNumber,
             status: "FAILED",
             failureReason: error.message,
-            metadata: { templateName, ...data }
+            metadata: { templateName, ...withoutCodeValue(data) }
         });
         throw error;
     }

@@ -17,6 +17,7 @@ import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-di
 import { BlueSlider } from "@/components/marketing_ui/BlueSlider";
 import { toast } from "sonner";
 import { useResetOrgUsage, useRequestSecurityCode, useVerifySecurityCode } from "@/features/superadmin/queries/useAiUsage";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export interface ResetOrganizationDailyLimitProps {
   orgId: string;
@@ -87,7 +88,7 @@ export function ResetOrganizationDailyLimit({ orgId, orgName }: ResetOrganizatio
         open={open}
         onOpenChange={setOpen}
         title={`Reset ${orgName} Usage`}
-        description="Please provide your Super Admin security code to proceed."
+        description={`Please provide your Super Admin security code to proceed. The code works for ${CODE_TTL_MINUTES} minutes.`}
         warningMessage="This action will instantly overwrite the organization's token consumption tracking, resetting their usage back to 0."
         actionLabel="Reset Usage"
         cancelLabel="Cancel"

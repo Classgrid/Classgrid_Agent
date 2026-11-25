@@ -77,6 +77,7 @@ import NotificationTemplate from "../models/NotificationTemplate.js";
 import NotificationLog from "../models/NotificationLog.js";
 import Handlebars from "handlebars";
 import { baseTemplate } from "./email-templates.service.js";
+import { withoutCodeValue } from "../utils/code-lifetime.js";
 
 // ─────────────────────────────────────────────────
 // AWS SES SMTP TRANSPORTER (STOCKHOLM REGION)
@@ -197,7 +198,7 @@ export const sendTemplateEmail = async ({ templateName, to, data, userId, organi
             recipient: to,
             status: "SENT",
             providerMessageId: info.messageId,
-            metadata: data,
+            metadata: withoutCodeValue(data),
             idempotencyKey,
             retryCount: info.retryCount || 0
         });
@@ -212,7 +213,7 @@ export const sendTemplateEmail = async ({ templateName, to, data, userId, organi
             recipient: to,
             status: "FAILED",
             failureReason: error.message,
-            metadata: { templateName, ...data },
+            metadata: { templateName, ...withoutCodeValue(data) },
             idempotencyKey
         });
         throw error;

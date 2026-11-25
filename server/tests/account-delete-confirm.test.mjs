@@ -295,7 +295,7 @@ test("sending: to the account's main email, one a minute, five a day; a failed e
     fill();
     users[0].account_emails = [{ email: "asha.work@example.com", verified_at: new Date() }];
     const answer = await sendDeleteAccountCode(account(A));
-    assert.deepEqual(answer, { status: 200, body: { message: "We sent a 6-digit code to your email.", expiresInMinutes: 10 } });
+    assert.deepEqual(answer, { status: 200, body: { message: "We sent a 6-digit code to your email. It works for 10 minutes.", expiresInMinutes: 10 } });
     assert.equal(sent.length, 1);
     const email = sent[0];
     assert.equal(email.to, "asha@example.com", "the main email, not an added one");

@@ -88,6 +88,8 @@ import {
     OAUTH_STATE_COOKIE,
     verifyOAuthState,
 } from "../services/oauth-state.service.js";
+import { saveLoginCode, takeLoginCode } from "../services/desktop-login-code.service.js";
+import { CODE_TTL_MINUTES } from "../utils/code-lifetime.js";
 
 const router = express.Router();
 
@@ -331,7 +333,7 @@ router.get("/desktop-done", (req, res) => {
     res.set("Content-Type", "text/html").send(`<!doctype html><meta charset="utf-8"><title>Classgrid</title>
 <body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#ededed;font-family:system-ui,sans-serif">
 <div style="text-align:center;max-width:380px;padding:24px"><h1 style="font-size:22px;font-weight:600;margin:0 0 8px">You're signed in</h1>
-<p style="color:#a1a1a1;font-size:14px;line-height:1.6;margin:0 0 20px">Go back to the Classgrid app. If it didn't open, click the button.</p>
+<p style="color:#a1a1a1;font-size:14px;line-height:1.6;margin:0 0 20px">Go back to the Classgrid app. If it didn't open, click the button. The button works for ${CODE_TTL_MINUTES} minutes.</p>
 <a href="${link}" style="display:inline-block;background:#ededed;color:#0a0a0a;border-radius:999px;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none">Open Classgrid</a></div>
 <script>location.href=${JSON.stringify(link)};</script></body>`);
 });
@@ -346,12 +348,13 @@ router.get("/desktop-verify", (req, res) => {
     res.set("Content-Type", "text/html").send(`<!doctype html><meta charset="utf-8"><title>Classgrid</title>
 <body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;background:#0a0a0a;color:#ededed;font-family:system-ui,sans-serif">
 <div style="text-align:center;max-width:380px;padding:24px"><h1 style="font-size:22px;font-weight:600;margin:0 0 8px">New device detected</h1>
-<p style="color:#a1a1a1;font-size:14px;line-height:1.6;margin:0 0 20px">We emailed a 6-digit code to ${shown}. Go back to the Classgrid app and enter it there. If the app didn't open, click the button.</p>
+<p style="color:#a1a1a1;font-size:14px;line-height:1.6;margin:0 0 20px">We emailed a 6-digit code to ${shown}. Go back to the Classgrid app and enter it there. The code works for ${CODE_TTL_MINUTES} minutes. If the app didn't open, click the button.</p>
 <a href="${link}" style="display:inline-block;background:#ededed;color:#0a0a0a;border-radius:999px;padding:10px 20px;font-size:14px;font-weight:600;text-decoration:none">Open Classgrid</a></div>
 <script>location.href=${JSON.stringify(link)};</script></body>`);
 });
-// Classgrid Code (the full editor): the Classgrid app hands its login to the editor with a one-time code (60 seconds,
-// single use) that the editor swaps through /desktop-exchange, so the editor never shows a login of its own
+// Classgrid Code (the full editor): the Classgrid app hands its login to the editor with a one-time code (10 minutes,
+// single use; services/desktop-login-code.service.js) that the editor swaps through /desktop-exchange, so the editor
+// never shows a login of its own
 router.post("/editor-code", isAuthenticated, async (req, res) => {
     const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "").trim() || req.cookies?.token;
     if (!token) return res.status(400).json({ message: "No login to hand over." });
@@ -360,9 +363,9 @@ router.post("/editor-code", isAuthenticated, async (req, res) => {
     const code = randomBytes(24).toString("base64url");
     // Sign-in started from the editor (browser login, PKCE): the code only works with the editor's secret verifier
     const challenge = String(req.body?.challenge || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 128);
-    // 60 seconds for the Classgrid app's handoff; 5 minutes with PKCE (useless without the verifier), so a code pasted
-    // by hand still works
-    const ttl = challenge ? 300 : 60;
+    // Both kinds last 10 minutes (2026-11-25; before, 60 seconds for the Classgrid app's handoff and 5 minutes with
+    // PKCE): the code with PKCE is pasted by hand and is useless without the editor's verifier, and every code works
+    // once
     // A browser sign-in gets the extension's own login (client: "editor": no WhatsApp number needed there), its own
     // sign-in in Settings > Devices named by the editor (editor: its link scheme, e.g. "cursor"; app and device: the
     // editor's name and own id, when the extension sends them). The Classgrid app's handoff keeps handing over its own
@@ -382,32 +385,19 @@ router.post("/editor-code", isAuthenticated, async (req, res) => {
             return res.status(500).json({ message: "Couldn't finish signing in to your editor." });
         }
     }
-    await redis.set(`desktoplogin:${code}`, `/editor/project?token=${encodeURIComponent(handed)}`, "EX", ttl);
-    if (challenge) await redis.set(`desktoplogin-pkce:${code}`, challenge, "EX", ttl);
+    // (the code and its PKCE challenge are saved in one step, so the code never works without the verifier)
+    await saveLoginCode(redis, code, `/editor/project?token=${encodeURIComponent(handed)}`, challenge);
     res.json({ code });
 });
 router.post("/desktop-exchange", loginLimiter, async (req, res) => {
     const code = String(req.body?.code || "").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64);
     if (!code) return res.status(400).json({ message: "Missing code." });
     const { default: redis } = await import("../config/redis.js");
-    const key = `desktoplogin:${code}`;
-    const path = await redis.get(key).catch(() => null);
-    if (!path) return res.status(400).json({ message: "This sign-in link has expired. Please try again." });
-    // PKCE: a code made for the editor's browser sign-in needs the verifier whose sha256 is the stored challenge
-    const pkceKey = `desktoplogin-pkce:${code}`;
-    const challenge = await redis.get(pkceKey).catch(() => null);
-    if (challenge) {
-        const { createHash, timingSafeEqual } = await import("node:crypto");
-        const verifier = String(req.body?.verifier || "");
-        const got = Buffer.from(createHash("sha256").update(verifier).digest("base64url"));
-        const want = Buffer.from(challenge);
-        if (!verifier || got.length !== want.length || !timingSafeEqual(got, want)) {
-            await redis.del(key, pkceKey).catch(() => {});
-            return res.status(400).json({ message: "This sign-in code doesn't belong to this editor. Please sign in again." });
-        }
-    }
-    await redis.del(key, pkceKey).catch(() => {});
-    res.json({ path });
+    // Taken in one step (read and deleted), so the code works once; PKCE: a code made for the editor's browser
+    // sign-in needs the verifier whose sha256 is the stored challenge
+    const taken = await takeLoginCode(redis, code, String(req.body?.verifier || ""));
+    if (taken.error) return res.status(400).json({ message: taken.error });
+    res.json({ path: taken.path });
 });
 
 router.post("/forgot-password", resetPasswordLimiter, authController.forgotPassword);

@@ -60,6 +60,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { getGoogleAuthUrl, loginWithPassword, verifyDeviceOtp, resendDeviceOtp, getAuthBranding, requestPasswordReset } from "../api";
 import { navigateWithRescue } from "@/lib/rescue";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 import { clearAuthCallbackError, getAuthCallbackFeedback, getDefaultRoleForAudience, getPostLoginPath, isUserRole, readStoredAuthRole, saveStoredAuthRole } from "../auth-helpers";
 import type { AuthUserRole, AuthBranding } from "../types";
 import { toast } from "sonner";
@@ -282,7 +283,8 @@ export function TestFullScreenLoginPage({ preferredRole }: { preferredRole?: Aut
     const toastId = toast.loading("Sending reset link...");
     try {
       const response = await requestPasswordReset(email.trim());
-      toast.success(response?.message || "If the email is registered, a password reset link has been sent.", { id: toastId });
+      // (the server's answer names no time: the link's is said here, 2026-11-25)
+      toast.success(`${response?.message || "If the email is registered, a password reset link has been sent."} The link works for ${CODE_TTL_MINUTES} minutes.`, { id: toastId });
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to send reset link.", { id: toastId });
     }
@@ -483,7 +485,7 @@ export function TestFullScreenLoginPage({ preferredRole }: { preferredRole?: Aut
                     <ArrowLeft className="h-4 w-4" /> Back
                   </button>
                   <h2 className="text-center text-[22px] font-bold text-foreground dark:text-white">Verify this device</h2>
-                  <p className="mt-1 text-center text-[13px] text-muted-foreground dark:text-white/65">Enter the one-time code sent to your email.</p>
+                  <p className="mt-1 text-center text-[13px] text-muted-foreground dark:text-white/65">Enter the one-time code sent to your email. It works for {CODE_TTL_MINUTES} minutes.</p>
                   
                   <div className="mt-5 flex h-[46px] items-center gap-3 rounded-[12px] border border-border dark:border-white/[0.14] bg-background dark:bg-[#141414] px-4 transition-colors focus-within:border-emerald-500/50">
                     <Lock className="h-[18px] w-[18px] shrink-0 text-muted-foreground dark:text-white/70" />

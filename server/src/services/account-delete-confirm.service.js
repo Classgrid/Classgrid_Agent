@@ -22,8 +22,9 @@ import { sendEmail } from "./aws-ses.service.js";
 import { getDeleteAccountCodeHtml, getDeleteAccountCodePlainText } from "./email-templates.service.js";
 import { getJwtSecret } from "../utils/jwt-secret.js";
 import { REAL_PASSWORD_HASH, isRealPasswordHash } from "../utils/password-hash.js";
+import { CODE_TTL_MINUTES, CODE_TTL_MS } from "../utils/code-lifetime.js";
 
-export const CODE_TTL_MS = 10 * 60 * 1000;
+export { CODE_TTL_MS };
 export const RESEND_MS = 60 * 1000;
 export const CODES_PER_DAY = 5;
 export const MAX_TRIES = 5;
@@ -41,7 +42,7 @@ const USE_PASSWORD = "This account has a password. Confirm with your password.";
 const JUST_SENT = "A code was just sent. Wait a minute before asking for a new one.";
 const TOO_MANY_CODES = "Too many codes today. Try again tomorrow.";
 const NOT_SENT = "Couldn't send the code. Please try again.";
-const SENT = "We sent a 6-digit code to your email.";
+const SENT = `We sent a 6-digit code to your email. It works for ${CODE_TTL_MINUTES} minutes.`;
 
 const isAdmin = (user) => user?.role === "org_admin" || user?.role === "super_admin";
 const dayOf = (now) => new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(now));
@@ -174,5 +175,5 @@ export async function sendDeleteAccountCode(user) {
         }).catch(() => {});
         return { status: 500, body: { message: NOT_SENT } };
     }
-    return { status: 200, body: { message: SENT, expiresInMinutes: CODE_TTL_MS / 60000 } };
+    return { status: 200, body: { message: SENT, expiresInMinutes: CODE_TTL_MINUTES } };
 }

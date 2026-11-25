@@ -78,8 +78,10 @@ import SaasInvoice from "../models/SaasInvoice.js";
 import FeeRecord from "../models/FeeRecord.js";
 import CanteenOrder from "../models/CanteenOrder.js";
 import { PAYMENT_FLOW, MERCHANT_TYPE, toPaise } from "../utils/billing.utils.js";
+import { CODE_TTL_MS } from "../utils/code-lifetime.js";
 
-export const HANDOFF_TTL_MS = 10 * 60 * 1000;
+// The payment session lives as long as its code: 10 minutes from the last code sent (a resend starts it again)
+export const HANDOFF_TTL_MS = CODE_TTL_MS;
 export const OTP_RESEND_COOLDOWN_MS = 60 * 1000;
 export const MAX_OTP_RESENDS = 3;
 

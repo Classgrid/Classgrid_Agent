@@ -115,7 +115,9 @@ const deviceVerificationSchema = new mongoose.Schema({
     expiresAt: {
         type: Date,
         required: true,
-        index: { expires: 300 } // 5 minutes TTL
+        // The code lasts 10 minutes (expiresAt, utils/code-lifetime.js; checked in verifyDeviceOtp). This index only
+        // clears the row away 5 minutes after expiresAt (2026-11-25: it was called a "5 minutes TTL", which it is not)
+        index: { expires: 300 }
     },
     createdAt: {
         type: Date,

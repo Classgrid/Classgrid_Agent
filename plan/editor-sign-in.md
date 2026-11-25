@@ -35,7 +35,7 @@ Decisions (Nikhil, 2026-11-10)
 ## Security
 - `state` must match the one the extension made (stops someone sending a link that signs you into their account).
 - PKCE: a stolen code is useless without the verifier, which never leaves the editor.
-- Codes: 60 seconds, single use (as today). Callback limited to the allowed schemes.
+- Codes: 10 minutes, single use (2026-11-25; 60 seconds before, and 5 minutes with PKCE). Callback limited to the allowed schemes.
 
 ## Test
 - Classgrid Code, VS Code, Cursor: sign in with Google, GitHub, email + password, OTP and an already signed-in browser.

@@ -22,6 +22,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/apiClient";
 import { useQueryClient } from "@tanstack/react-query";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 
 const ROLES = [
@@ -128,7 +129,7 @@ export function SuperAdminProfileView({ profileData, isReadOnly }: { profileData
       await apiClient.post("/api/user/send-whatsapp-otp", { phoneNumber: num });
       setOtpSent(true);
       setPendingWhatsappNumber(num);
-      toast.success("OTP sent to WhatsApp!");
+      toast.success(`Code sent on WhatsApp. It works for ${CODE_TTL_MINUTES} minutes.`);
     } catch (error: any) {
       toast.error(error?.message || error?.response?.data?.message || "Failed to send OTP");
     } finally {
@@ -343,6 +344,7 @@ export function SuperAdminProfileView({ profileData, isReadOnly }: { profileData
                 <Button size="sm" variant="ghost" type="button" onClick={() => setOtpSent(false)}>Cancel</Button>
               </div>
             )}
+            {otpSent && isEditing && <p className="text-xs text-muted-foreground">The code works for {CODE_TTL_MINUTES} minutes.</p>}
             <p className="text-xs text-muted-foreground">Used for AI scheduling and important platform notifications.</p>
           </div>
         </div>

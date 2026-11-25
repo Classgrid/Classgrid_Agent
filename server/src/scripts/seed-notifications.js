@@ -650,6 +650,7 @@ const templates = [
 </ul>
 <p>Do not share this code with anyone. Classgrid and {{organization_name}} will never ask you to disclose your OTP by phone, message, or email.</p>
 <p>If you did not initiate this payment, do not use the code.</p>`,
+        textBody: "Your Classgrid payment code is {{otp}}. It works for {{otp_expiry_minutes}} minutes. Item: {{fee_name}}. Amount: {{amount}}. Do not share this code with anyone.",
         requiredPlaceholders: []
     },
     {

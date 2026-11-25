@@ -84,6 +84,9 @@ import { generateR2UploadUrl } from "../services/r2.service.js";
 import { getAwsS3PresignedUploadUrl } from "../config/awsS3Client.js";
 import redis from "../config/redis.js";
 import { normalizeWhatsappNumber } from "../services/ai-feature-limits.js";
+import crypto from "crypto";
+import { CODE_TTL_MINUTES } from "../utils/code-lifetime.js";
+import { keepWhatsappCode, pendingWhatsappCode, checkWhatsappCode } from "../services/whatsapp-code.service.js";
 
 import { getProfileSchema } from "../utils/profile-schemas.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
@@ -256,9 +259,8 @@ router.get("/profile", isAuthenticated, async (req, res) => {
 // =======================
 // The number is stored twice: metadata.whatsappPhone (sign-up; "one number per account" and the chat lock)
 // and metadata.whatsapp_number (profile; read by the AI). A verified change updates both, as "+<digits>".
-const WA_CODE_TTL_SECONDS = 600;
+// The code lasts 10 minutes and takes five wrong tries (services/whatsapp-code.service.js, utils/code-lifetime.js).
 const WA_RESEND_WAIT_MS = 60 * 1000;
-const WA_MAX_WRONG_CODES = 5;
 
 function whatsappVariants(digits) {
   return [`+${digits}`, digits, digits.slice(-10)];
@@ -294,15 +296,14 @@ router.post("/send-whatsapp-otp", isAuthenticated, async (req, res) => {
       return res.status(409).json({ message: "This WhatsApp number is already linked to another account." });
     }
 
-    const key = `whatsapp_otp:${req.user._id}`;
-    const pending = JSON.parse((await redis.get(key)) || "null");
+    const pending = await pendingWhatsappCode(redis, req.user._id);
     if (pending?.sentAt && Date.now() - pending.sentAt < WA_RESEND_WAIT_MS) {
       const retryAfter = Math.ceil((WA_RESEND_WAIT_MS - (Date.now() - pending.sentAt)) / 1000);
       return res.status(429).json({ message: `Please wait ${retryAfter} seconds before requesting a new code.`, retryAfter });
     }
 
     // Generate a random 6-digit OTP
-    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otp = crypto.randomInt(100000, 1000000).toString();
 
     // Send OTP using Meta WhatsApp API
     if (!process.env.WHATSAPP_PHONE_ID || !process.env.WHATSAPP_ACCESS_TOKEN) {
@@ -321,7 +322,7 @@ router.post("/send-whatsapp-otp", isAuthenticated, async (req, res) => {
         type: "text",
         text: {
           preview_url: false,
-          body: `*${otp}* is your Classgrid verification code. For your security, do not share this code.`
+          body: `*${otp}* is your Classgrid verification code. It works for ${CODE_TTL_MINUTES} minutes. For your security, do not share this code.`
         }
       })
     });
@@ -331,8 +332,8 @@ router.post("/send-whatsapp-otp", isAuthenticated, async (req, res) => {
       return res.status(400).json({ message: "Failed to send WhatsApp message. Send 'Hi' to our WhatsApp number first, then check the number (with country code)." });
     }
 
-    // Saved after a successful send (expires in 10 minutes)
-    await redis.set(key, JSON.stringify({ otp, phoneNumber: `+${digits}`, sentAt: Date.now(), wrong: 0 }), "EX", WA_CODE_TTL_SECONDS);
+    // Saved after a successful send (expires in 10 minutes), its tries back at zero
+    await keepWhatsappCode(redis, req.user._id, { otp, phoneNumber: `+${digits}` });
 
     res.json({ message: "OTP sent via WhatsApp" });
   } catch (error) {
@@ -349,26 +350,16 @@ router.post("/verify-whatsapp-otp", isAuthenticated, async (req, res) => {
     const { otp } = req.body;
     if (!otp) return res.status(400).json({ message: "OTP is required" });
 
-    const key = `whatsapp_otp:${req.user._id}`;
-    const storedData = await redis.get(key);
-    if (!storedData) return res.status(400).json({ message: "OTP expired or not requested" });
+    // Each try counted in one step before the compare; the code used up in one step when it fits
+    // (services/whatsapp-code.service.js)
+    const checked = await checkWhatsappCode(redis, req.user._id, String(otp).trim());
+    if (checked.state === "none") return res.status(400).json({ message: "OTP expired or not requested" });
+    if (checked.state === "tries") return res.status(400).json({ message: "Too many wrong codes. Please request a new code." });
+    if (checked.state === "wrong") return res.status(400).json({ message: `Invalid OTP. ${checked.left} tries left.` });
 
-    const pending = JSON.parse(storedData);
-    if (pending.otp !== String(otp).trim()) {
-      const wrong = (pending.wrong || 0) + 1;
-      if (wrong >= WA_MAX_WRONG_CODES) {
-        await redis.del(key);
-        return res.status(400).json({ message: "Too many wrong codes. Please request a new code." });
-      }
-      const ttl = await redis.ttl(key);
-      await redis.set(key, JSON.stringify({ ...pending, wrong }), "EX", ttl > 0 ? ttl : 1);
-      return res.status(400).json({ message: `Invalid OTP. ${WA_MAX_WRONG_CODES - wrong} tries left.` });
-    }
-
-    const phoneNumber = pending.phoneNumber;
+    const phoneNumber = checked.phoneNumber;
     // Checked again here: someone else may have taken the number while the code was pending
     if (await whatsappNumberTaken(normalizeWhatsappNumber(phoneNumber), req.user._id)) {
-      await redis.del(key);
       return res.status(409).json({ message: "This WhatsApp number is already linked to another account." });
     }
 

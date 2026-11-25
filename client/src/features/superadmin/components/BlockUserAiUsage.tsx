@@ -16,6 +16,7 @@ import { Button } from "@/components/marketing_ui/button";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { toast } from "sonner";
 import { useBlockAiUser, useRequestSecurityCode, useVerifySecurityCode } from "@/features/superadmin/queries/useAiUsage";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export interface BlockUserAiUsageProps {
   userId: string;
@@ -88,7 +89,7 @@ export function BlockUserAiUsage({ userId, userName, isBlocked }: BlockUserAiUsa
         open={open}
         onOpenChange={setOpen}
         title={`${isBlocked ? 'Unblock' : 'Block'} AI Usage for ${userName}`}
-        description={`Please provide your security code to proceed with ${isBlocked ? 'unblocking' : 'blocking'}.`}
+        description={`Please provide your security code to proceed with ${isBlocked ? 'unblocking' : 'blocking'}. The code works for ${CODE_TTL_MINUTES} minutes.`}
         warningMessage={isBlocked ? "This will restore AI access for this user." : "This action will instantly block this user from using any AI features."}
         actionLabel={isBlocked ? "Unblock Access" : "Block Access"}
         cancelLabel="Cancel"

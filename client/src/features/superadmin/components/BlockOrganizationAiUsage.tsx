@@ -16,6 +16,7 @@ import { Button } from "@/components/marketing_ui/button";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { toast } from "sonner";
 import { useBlockAiOrg, useRequestSecurityCode, useVerifySecurityCode } from "@/features/superadmin/queries/useAiUsage";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export interface BlockOrganizationAiUsageProps {
   orgId: string;
@@ -87,7 +88,7 @@ export function BlockOrganizationAiUsage({ orgId, orgName, isBlocked }: BlockOrg
         open={open}
         onOpenChange={setOpen}
         title={`${isBlocked ? 'Unblock' : 'Block'} AI Usage for ${orgName}`}
-        description={`Please provide your security code to proceed with ${isBlocked ? 'unblocking' : 'blocking'}.`}
+        description={`Please provide your security code to proceed with ${isBlocked ? 'unblocking' : 'blocking'}. The code works for ${CODE_TTL_MINUTES} minutes.`}
         warningMessage={isBlocked ? "This will restore AI access for all users in this organization." : "This action will instantly block all users in this organization from using any AI features."}
         actionLabel={isBlocked ? "Unblock Access" : "Block Access"}
         cancelLabel="Cancel"

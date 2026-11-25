@@ -42,7 +42,8 @@ test("both sign-up endpoints check the age before they save anything", () => {
         assert.ok(at > 0, name);
         // before the account is made or changed, and before the WhatsApp code is used up
         assert.ok(at < body.indexOf("new User("), `${name}: before the account is made`);
-        const otpUsed = body.indexOf("OnboardingOTP.deleteOne");
+        // (the code is used up by checkSignupCode, services/signup-code.service.js, since 2026-11-25)
+        const otpUsed = body.indexOf("checkSignupCode(");
         if (name === "chatFinalizeOnboarding") assert.ok(at < otpUsed, "before the WhatsApp code is used up");
     }
 });

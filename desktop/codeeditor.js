@@ -129,7 +129,8 @@ async function register() {
   }
 }
 
-// A one-time code (60 seconds) for the user's login, so the editor opens signed in
+// A one-time code (10 minutes, single use; 60 seconds before 2026-11-25) for the user's login, so the editor opens
+// signed in
 async function loginCode() {
   if (!token) return null;
   try {

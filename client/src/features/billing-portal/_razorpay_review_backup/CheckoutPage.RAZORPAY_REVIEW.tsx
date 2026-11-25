@@ -59,8 +59,10 @@ import { useNavigate, useLocation, Link } from "react-router-dom";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/apiClient";
 import { Spinner } from "@/components/marketing_ui/spinner";
+import { CODE_TTL_SECONDS } from "@/lib/codeLifetime";
 
-const OTP_TTL_SECONDS = 60;
+// (2026-11-25: every code lasts 10 minutes, lib/codeLifetime.ts; this copy said 60 seconds)
+const OTP_TTL_SECONDS = CODE_TTL_SECONDS;
 
 // Demo mode flag — name/email fields only show in demo
 const IS_DEMO = true; // Hardcoded for live test. Set false for production.

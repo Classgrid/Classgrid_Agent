@@ -12,6 +12,7 @@ import { Label } from "@/components/marketing_ui/label";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { useClearSessionUse, useRequestSecurityCode, useSetAiBlocked, useVerifySecurityCode } from "@/features/superadmin/queries/useAiUsage";
 import { Section } from "./Section";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 import { errorText } from "./planText";
 
 type Action = "block" | "unblock" | "clear";
@@ -114,6 +115,7 @@ export function PersonAccess({ userId, name, isBlocked }: { userId: string; name
             onChange={(e) => setCode(e.target.value.replace(/\D/g, ""))}
             disabled={busy}
           />
+          <p className="text-xs text-muted-foreground">The code works for {CODE_TTL_MINUTES} minutes.</p>
         </div>
       </DangerConfirmDialog>
     </Section>

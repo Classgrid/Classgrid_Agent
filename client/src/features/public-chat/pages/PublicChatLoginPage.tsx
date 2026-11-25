@@ -29,6 +29,7 @@ import { toast } from "sonner"; // the app's mounted Toaster (components/marketi
 import { getGoogleAuthUrl, loginWithPassword, requestPasswordReset, verifyDeviceOtp, resendDeviceOtp } from "../../auth/api";
 import { API_BASE_URL, apiClient } from "@/lib/apiClient";
 import { deviceId } from "@/lib/deviceId";
+import { CODE_TTL_MINUTES, CODE_TTL_SECONDS } from "@/lib/codeLifetime";
 import { DeviceLimitDevices } from "@/features/shared/components/settings/DeviceLimitDevices";
 import { fetchWithRescue, navigateWithRescue } from "@/lib/rescue";
 import { LoginGridBackground } from "../components/LoginGridBackground";
@@ -209,7 +210,8 @@ function CountryCodePicker({ value, onChange }: { value: string; onChange: (valu
 const useSession = () => ({ data: null, status: "unauthenticated" });
 const signIn = async (p: any, o: any) => { console.log("Mock signIn", p, o); return { ok: true, error: null }; };
 
-const OTP_TTL_SECONDS = 600;
+// (how long a code works, the same for every code: lib/codeLifetime.ts)
+const OTP_TTL_SECONDS = CODE_TTL_SECONDS;
 // Sign-up progress kept in the browser, so a refresh or reopened tab continues where the user stopped
 // (as long as the 30-minute email verification ticket is still valid).
 const ONBOARDING_STORAGE_KEY = "cg_chat_onboarding";
@@ -250,6 +252,17 @@ function loadOnboarding(): SavedOnboarding | null {
 }
 // A new code can be requested 60 s after the last one (the server enforces the same wait).
 const RESEND_COOLDOWN_SECONDS = 60;
+
+/**
+ * Seconds a code still works when a send was refused with "wait N seconds" (429, retryAfter = N): the server refuses
+ * a new code for 60 s after the last one, so that code went out (60 - N) s ago and works for 10 minutes less that.
+ * Without a usable N, a full 10 minutes (2026-11-25).
+ */
+function codeLeftAfterWait(retryAfter: unknown) {
+  const wait = Number(retryAfter);
+  if (!Number.isFinite(wait) || wait <= 0 || wait > RESEND_COOLDOWN_SECONDS) return OTP_TTL_SECONDS;
+  return OTP_TTL_SECONDS - (RESEND_COOLDOWN_SECONDS - Math.ceil(wait));
+}
 
 /** Map NextAuth URL error codes to user-friendly messages */
 const OAUTH_ERROR_MAP: Record<string, string> = {
@@ -545,9 +558,9 @@ function LoginContent() {
       // Force Email OTP even for OAuth users
       const triggerOtp = async () => {
         try {
-          await sendEmailCode(urlEmail || "");
+          const left = await sendEmailCode(urlEmail || "");
           setStep("otp");
-          startCountdown();
+          startCountdown(left);
         } catch (err) {
           console.error("Failed to trigger OAuth Email OTP", err);
           setStep("otp"); // still go to OTP step
@@ -626,17 +639,22 @@ function LoginContent() {
 
   // First send of an email code. A "wait N seconds" (429) reply means a code went out under a minute ago
   // (double submit or a retried request); that code is still valid, so it is not shown as an error.
+  // Resolves how many seconds the code on its way still works: a full 10 minutes for a new code; for the code sent
+  // under a minute ago, 10 minutes less the time since it was sent (2026-11-25: the timer started at 10:00 there and
+  // ran past the code's real end).
   const sendingCodeRef = useRef(false);
   const sendEmailCode = async (address: string) => {
     try {
       await apiClient.post("/api/auth/chat/send-email-otp", { email: address });
+      return OTP_TTL_SECONDS;
     } catch (err: any) {
       if (err?.code !== "429") throw err;
+      return codeLeftAfterWait(err?.retryAfter);
     }
   };
 
-  const startCountdown = () => {
-    setCountdown(OTP_TTL_SECONDS);
+  const startCountdown = (secondsLeft: number = OTP_TTL_SECONDS) => {
+    setCountdown(secondsLeft);
     setOtpExpired(false);
     if (timerRef.current) clearInterval(timerRef.current);
     timerRef.current = setInterval(() => {
@@ -651,8 +669,8 @@ function LoginContent() {
     }, 1000);
   };
 
-  const startWhatsappCountdown = () => {
-    setWhatsappCountdown(OTP_TTL_SECONDS);
+  const startWhatsappCountdown = (secondsLeft: number = OTP_TTL_SECONDS) => {
+    setWhatsappCountdown(secondsLeft);
     setWhatsappOtpExpired(false);
     if (whatsappTimerRef.current) clearInterval(whatsappTimerRef.current);
     whatsappTimerRef.current = setInterval(() => {
@@ -693,9 +711,9 @@ function LoginContent() {
             setStep("login_password");
           } else {
             // User exists but has no password (e.g. Google OAuth user) — send OTP for login
-            await sendEmailCode(email.toLowerCase());
+            const left = await sendEmailCode(email.toLowerCase());
             setStep("otp");
-            startCountdown();
+            startCountdown(left);
           }
         } else {
           setError("Account does not exist. Please sign up.");
@@ -709,14 +727,14 @@ function LoginContent() {
           if (checkRes.data.hasPassword) {
             setStep("login_password");
           } else {
-            await sendEmailCode(email.toLowerCase());
+            const left = await sendEmailCode(email.toLowerCase());
             setStep("otp");
-            startCountdown();
+            startCountdown(left);
           }
         } else {
-          await sendEmailCode(email.toLowerCase());
+          const left = await sendEmailCode(email.toLowerCase());
           setStep("otp");
-          startCountdown();
+          startCountdown(left);
         }
       }
     } catch (err: any) {
@@ -784,7 +802,8 @@ function LoginContent() {
     const toastId = toast.loading("Sending reset link...");
     try {
       const response = await requestPasswordReset(email.trim());
-      toast.success(response?.message || "If the email is registered, a password reset link has been sent.", { id: toastId });
+      // (the server's answer names no time: the link's is said here, 2026-11-25)
+      toast.success(`${response?.message || "If the email is registered, a password reset link has been sent."} The link works for ${CODE_TTL_MINUTES} minutes.`, { id: toastId });
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || "Failed to send reset link.", { id: toastId });
     }
@@ -1017,7 +1036,8 @@ function LoginContent() {
         const wait = Number(err?.retryAfter) || whatsappResendWait;
         toast(`We already sent a code to this number. Use that code${wait > 0 ? `, or resend in ${formatCountdown(wait)}` : ""}.`);
         setStep("whatsapp_otp");
-        if (!whatsappCountdown) startWhatsappCountdown();
+        // (the timer counts to that code's real end, from the server's wait: 2026-11-25)
+        if (Number(err?.retryAfter) > 0 || !whatsappCountdown) startWhatsappCountdown(codeLeftAfterWait(err?.retryAfter));
         return;
       }
       setError(err?.message || err?.response?.data?.message || "Failed to send OTP.");

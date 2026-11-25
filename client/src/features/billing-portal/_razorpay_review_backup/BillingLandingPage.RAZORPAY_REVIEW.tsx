@@ -209,7 +209,7 @@ function DemoCard() {
       </div>
 
       <p className="text-[10px] text-muted-foreground/60 text-center">
-        This test session expires in 48 hours. No real money is charged.
+        This test session expires in 10 minutes. No real money is charged.
       </p>
 
       {/* Purpose Modal for Payment Gateways */}

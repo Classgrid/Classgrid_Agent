@@ -80,6 +80,8 @@
  * This applies to all human developers and AI agents.
  */
 
+import { CODE_TTL_MINUTES } from "../utils/code-lifetime.js";
+
 const getFrontendUrl = () => {
   return process.env.FRONTEND_URL?.trim() || (process.env.NODE_ENV === "production" ? "https://app.classgrid.in" : "https://app.classgrid.in");
 };
@@ -395,7 +397,7 @@ export const getLoginNotificationHtml = (user, provider = "manual") => {
 export const getVerificationEmailHtml = (name, verifyLink) => {
   const content = `
     <p>Hi ${name},</p>
-    <p>Please verify your email address to complete your setup. This link expires in 24 hours.</p>
+    <p>Please verify your email address to complete your setup. This link expires in ${CODE_TTL_MINUTES} minutes.</p>
     <a href="${verifyLink}" class="btn">Verify Email</a>
   `;
   return baseTemplate({
@@ -408,7 +410,7 @@ export const getVerificationEmailHtml = (name, verifyLink) => {
 // ------------- PASSWORD RESET -------------
 export const getPasswordResetEmailHtml = (resetLink) => {
   const content = `
-    <p>We received a request to reset the password for your Classgrid account. This link expires in <strong>5 minutes</strong>.</p>
+    <p>We received a request to reset the password for your Classgrid account. This link expires in <strong>${CODE_TTL_MINUTES} minutes</strong>.</p>
     <a href="${resetLink}" class="btn">Reset Password</a>
   `;
   return baseTemplate({
@@ -1110,7 +1112,7 @@ export const getVerificationEmailPlainText = (name, verifyLink) => {
   return `Verify your email
 
 Hi ${name},
-Please verify your email address to complete your setup. This link expires in 24 hours.
+Please verify your email address to complete your setup. This link expires in ${CODE_TTL_MINUTES} minutes.
 
 Verify Email: ${verifyLink}
 
@@ -1124,7 +1126,7 @@ For contact, visit: https://app.classgrid.in/support
 export const getPasswordResetEmailPlainText = (resetLink) => {
   return `Reset your password
 
-We received a request to reset the password for your Classgrid account. This link expires in 5 minutes.
+We received a request to reset the password for your Classgrid account. This link expires in ${CODE_TTL_MINUTES} minutes.
 
 Reset Password: ${resetLink}
 
@@ -1401,42 +1403,6 @@ If you did not request this, please ignore this email.
 â€” The Classgrid Team
 support@classgrid.in
   `.trim();
-};
-
-export const getOnboardingOtpEmailHtml = (otp) => {
-  const content = `
-    <p>Hi there,</p>
-    <p>You requested a verification code during the Classgrid onboarding process.</p>
-    
-    <div class="box" style="margin-bottom: 24px; text-align: center;">
-      <p style="margin-bottom: 8px; color: #6b7280; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;">Your 6-Digit Code</p>
-      <p style="margin-bottom: 0; font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #111111;">${otp}</p>
-    </div>
-
-    <p style="font-size: 14px; color: #374151;">This code is valid for the next <strong>10 minutes</strong>. Please do not share it with anyone.</p>
-    
-    <p style="font-size: 13px; color: #6b7280; margin-top: 24px; margin-bottom: 0;">If you did not request this code, you can safely ignore this email.</p>
-  `;
-
-  return baseTemplate({
-    content,
-    title: "Onboarding Verification Code",
-    ignoreText: "This code expires in 10 minutes.",
-  });
-};
-
-export const getOnboardingOtpEmailPlainText = (otp) => {
-  return `Onboarding Verification Code
-
-Your 6-digit verification code is: ${otp}
-
-This code is valid for the next 10 minutes. Please do not share it with anyone.
-
-If you did not request this code, you can safely ignore this email.
-
-For contact, visit: https://app.classgrid.in/support
-
-&copy; ${new Date().getFullYear()} Classgrid. All rights reserved.`;
 };
 
 // ------------- CLASSROOM ACTIVITY NOTIFICATION -------------
@@ -2356,7 +2322,7 @@ export const getNewDeviceOtpHtml = (userName, otp, details = null) => {
     <div class="box" style="text-align:center; margin: 24px 0;">
       <div class="meta">Your Verification Code</div>
       <span class="code" style="font-size:32px; letter-spacing:8px; color:#111111;">${otp}</span>
-      <p style="margin-top:12px; font-size:13px; color:#6b7280;">This code expires in <strong style="color:#111111;">10 minutes</strong>.</p>
+      <p style="margin-top:12px; font-size:13px; color:#6b7280;">This code expires in <strong style="color:#111111;">${CODE_TTL_MINUTES} minutes</strong>.</p>
     </div>
 ${details ? `
     <div class="box">
@@ -2387,7 +2353,7 @@ We noticed a login attempt from a new device or browser.
 
 Your Verification Code: ${otp}
 
-This code expires in 10 minutes. Enter it on the login page to verify your device.
+This code expires in ${CODE_TTL_MINUTES} minutes. Enter it on the login page to verify your device.
 ${details ? `
 Please review the details
 ${details.account ? `Account: ${details.account}\n` : ""}${details.method ? `Login method: ${details.method}\n` : ""}IP & approximate location: ${details.ip || "Unknown"} - ${details.city || "Unknown location"}
@@ -2411,7 +2377,7 @@ export const getDeleteAccountCodeHtml = (userName, code) => {
     <div class="box" style="text-align:center; margin: 24px 0;">
       <div class="meta">Your Code</div>
       <span class="code" style="font-size:32px; letter-spacing:8px; color:#111111;">${code}</span>
-      <p style="margin-top:12px; font-size:13px; color:#6b7280;">This code expires in <strong style="color:#111111;">10 minutes</strong>.</p>
+      <p style="margin-top:12px; font-size:13px; color:#6b7280;">This code expires in <strong style="color:#111111;">${CODE_TTL_MINUTES} minutes</strong>.</p>
     </div>
 
     <p>Deleting your account removes your chats, files and projects for good.</p>
@@ -2431,7 +2397,7 @@ You asked to delete your Classgrid account. Enter this code in Classgrid to conf
 
 Your Code: ${code}
 
-This code expires in 10 minutes.
+This code expires in ${CODE_TTL_MINUTES} minutes.
 
 Deleting your account removes your chats, files and projects for good.
 
@@ -2449,7 +2415,7 @@ export const getBillingVerificationOtpHtml = (orgName, userName, otp) => {
     <div class="box" style="text-align:center; margin: 24px 0;">
       <div class="meta">Your Verification Code</div>
       <span class="code" style="font-size:32px; letter-spacing:8px; color:#111111;">${otp}</span>
-      <p style="margin-top:12px; font-size:13px; color:#6b7280;">This code expires in <strong style="color:#111111;">60 seconds</strong>.</p>
+      <p style="margin-top:12px; font-size:13px; color:#6b7280;">This code expires in <strong style="color:#111111;">${CODE_TTL_MINUTES} minutes</strong>.</p>
     </div>
 
     <p>Enter this code in your Billing Profile to verify this email address. If you did not make this request, please review your organization settings.</p>
@@ -2470,7 +2436,7 @@ You requested to verify the billing email for ${orgName}.
 
 Your Verification Code: ${otp}
 
-This code expires in 60 seconds. Enter it in your Billing Profile to verify this email address.
+This code expires in ${CODE_TTL_MINUTES} minutes. Enter it in your Billing Profile to verify this email address.
 
 If you did not make this request, please review your organization settings.
 
@@ -3051,7 +3017,7 @@ The Classgrid Support Team`;
 };
 
 // ------------- SUPER ADMIN SECURITY VERIFICATION OTP -------------
-export const getSuperAdminSecurityOtpHtml = (adminName, otp, actionDescription, expiryMinutes = 10) => {
+export const getSuperAdminSecurityOtpHtml = (adminName, otp, actionDescription, expiryMinutes = CODE_TTL_MINUTES) => {
   const content = `
     <p>Hi <strong>${adminName || 'Super Admin'}</strong>,</p>
     <p>A sensitive Super Admin operation has been initiated${actionDescription ? ` for <strong>${actionDescription}</strong>` : ''}.</p>
@@ -3074,7 +3040,7 @@ export const getSuperAdminSecurityOtpHtml = (adminName, otp, actionDescription, 
   });
 };
 
-export const getSuperAdminSecurityOtpPlainText = (adminName, otp, actionDescription, expiryMinutes = 10) => {
+export const getSuperAdminSecurityOtpPlainText = (adminName, otp, actionDescription, expiryMinutes = CODE_TTL_MINUTES) => {
   return `Super Admin Security Verification
 
 Hi ${adminName || 'Super Admin'},
@@ -3469,7 +3435,7 @@ export const getChatOtpEmailHtml = (otp) => {
       <p style="margin-bottom: 0; font-size: 32px; font-weight: 800; letter-spacing: 6px; color: #111111;">${otp}</p>
     </div>
 
-    <p style="font-size: 14px; color: #374151;">This code is valid for the next <strong>10 minutes</strong>. Please do not share it with anyone.</p>
+    <p style="font-size: 14px; color: #374151;">This code is valid for the next <strong>${CODE_TTL_MINUTES} minutes</strong>. Please do not share it with anyone.</p>
     
     <p style="font-size: 13px; color: #6b7280; margin-top: 24px; margin-bottom: 0;">If you did not request this code, you can safely ignore this email.</p>
   `;
@@ -3477,7 +3443,7 @@ export const getChatOtpEmailHtml = (otp) => {
   return baseTemplate({
     content,
     title: "Classgrid AI Verification Code",
-    ignoreText: "This code expires in 10 minutes.",
+    ignoreText: `This code expires in ${CODE_TTL_MINUTES} minutes.`,
   });
 };
 
@@ -3587,7 +3553,7 @@ export const getChatOtpEmailPlainText = (otp) => {
 
 Your 6-digit verification code is: ${otp}
 
-This code is valid for the next 10 minutes. Please do not share it with anyone.
+This code is valid for the next ${CODE_TTL_MINUTES} minutes. Please do not share it with anyone.
 
 If you did not request this code, you can safely ignore this email.
 

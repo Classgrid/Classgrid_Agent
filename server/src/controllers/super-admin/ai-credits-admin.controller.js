@@ -32,13 +32,14 @@ import User from "../../models/User.js";
 import Organization from "../../models/Organization.js";
 import AiCreditTransaction from "../../models/AiCreditTransaction.js";
 import mongoose from "mongoose";
-import AdminSecurityCode from "../../models/AdminSecurityCode.js";
 import { sendEmail } from "../../services/aws-ses.service.js";
 import { parseResetPeriodInput } from "../../services/ai-feature-limits.js";
 import { getAiCreditGrantedHtml, getAiCreditGrantedPlainText, getSuperAdminSecurityOtpHtml, getSuperAdminSecurityOtpPlainText, USAGE_URL } from "../../services/email-templates.service.js";
 import { planOf } from "../../services/plan-limits.service.js";
 import { takeFromGifted, lowerGiftedTotal, ADMIN_USAGE_RESET } from "../../services/ai-credits.service.js";
 import { addToPool, giftInForce } from "../../services/credit-expiry.js";
+import { makeSecurityCode, keepSecurityCode, takeSecurityCode } from "../../services/admin-security-code.service.js";
+import { CODE_TTL_MINUTES } from "../../utils/code-lifetime.js";
 
 /**
  * PHASE 9: Super Admin AI Credits Admin Controller
@@ -513,22 +514,19 @@ export const requestSecurityCode = async (req, res) => {
         }
 
         // Generate 6-digit code
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
+        const code = makeSecurityCode();
 
         // Invalidate old unused codes for this admin
         // No longer deleting old codes to avoid race conditions.
 
-        // Expires in 10 minutes
-        const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
-
-        await AdminSecurityCode.create({
-            superAdminId: req.user._id,
+        // Expires in 10 minutes (services/admin-security-code.service.js)
+        await keepSecurityCode({
+            adminId: req.user._id,
             email,
             code,
             action: action || "GENERAL_AI_MUTATION",
             orgId: orgId || null,
             planKey: action === "RESET_PLAN_USAGE" && RESETTABLE_PLANS.includes(plan) ? plan : null,
-            expiresAt
         });
 
         let actionDescription = action;
@@ -539,8 +537,8 @@ export const requestSecurityCode = async (req, res) => {
         if (action === "BLOCK_USER_AI") actionDescription = `Changing AI Block status for User`;
         if (action === "GENERAL_AI_MUTATION") actionDescription = `Granting AI Credits`;
 
-        const html = getSuperAdminSecurityOtpHtml(req.user.name || "Admin", code, actionDescription, 10);
-        const plainText = getSuperAdminSecurityOtpPlainText(req.user.name || "Admin", code, actionDescription, 10);
+        const html = getSuperAdminSecurityOtpHtml(req.user.name || "Admin", code, actionDescription, CODE_TTL_MINUTES);
+        const plainText = getSuperAdminSecurityOtpPlainText(req.user.name || "Admin", code, actionDescription, CODE_TTL_MINUTES);
 
         await sendEmail({
             to: email,
@@ -576,11 +574,10 @@ export const resetPlanUsage = async (req, res) => {
         const code = String(req.body?.code || "").trim();
         if (!/^\d{6}$/.test(code)) return res.status(400).json({ success: false, error: "Security code is required" });
 
-        // (the owner is compared as text, as verifySecurityCode does; then the code is used up in one atomic step)
-        const candidates = await AdminSecurityCode.find({ code, action: "RESET_PLAN_USAGE", planKey: plan, used: false, expiresAt: { $gt: new Date() } }).select("_id superAdminId").lean();
-        const mine = candidates.find((c) => String(c.superAdminId) === String(req.user._id));
-        const used = mine ? await AdminSecurityCode.findOneAndUpdate({ _id: mine._id, used: false }, { $set: { used: true } }, { new: true }) : null;
-        if (!used) return res.status(400).json({ success: false, error: "Invalid or expired security code." });
+        // (five tries, counted before the compare; the code is used up in one atomic step: services/admin-security-code.service.js)
+        const taken = await takeSecurityCode({ adminId: req.user._id, typed: code, filter: { action: "RESET_PLAN_USAGE", planKey: plan } });
+        if (taken.state === "tries") return res.status(400).json({ success: false, error: "Too many wrong tries. Ask for a new code." });
+        if (taken.state !== "ok") return res.status(400).json({ success: false, error: "Invalid or expired security code." });
 
         const { peopleFilter } = await import("./ai-usage-users.controller.js");
         const filter = peopleFilter({ plan }, new Date());
@@ -627,52 +624,23 @@ export const verifySecurityCode = async (req, res) => {
             return res.status(400).json({ success: false, error: "Security code is required" });
         }
 
-        const trimmedCode = code.toString().trim();
         const userId = req.user._id.toString();
 
-        console.log("[SecurityCode] Verify attempt:", { userId, trimmedCode, action, orgId });
-
-        // BROAD QUERY: Find by code only, then validate ownership manually
-        // This avoids ObjectId vs String type mismatch issues with superAdminId
-        const allMatchingCodes = await AdminSecurityCode.find({
-            code: trimmedCode,
-            used: false,
-            expiresAt: { $gt: new Date() }
-        }).sort({ createdAt: -1 });
-
-        console.log("[SecurityCode] Found matching codes:", allMatchingCodes.length);
-
-        // Find the one that belongs to this user (compare as strings to avoid type issues)
-        const securityCode = allMatchingCodes.find(
-            c => c.superAdminId?.toString() === userId
-        );
-
-        if (!securityCode) {
-            // Extra debug: check if there are ANY codes for this user at all
-            const userCodes = await AdminSecurityCode.find({}).then(
-                codes => codes.filter(c => c.superAdminId?.toString() === userId)
-            );
-            console.log("[SecurityCode] FAIL - All codes for this user:", userCodes.map(c => ({
-                code: c.code,
-                used: c.used,
-                expired: c.expiresAt < new Date(),
-                expiresAt: c.expiresAt
-            })));
-            return res.status(400).json({ success: false, error: `Code not found for user. Codes matched: ${allMatchingCodes.length}. User codes exist: ${userCodes.length > 0}` });
-        }
-
-        if (action && securityCode.action !== action) {
-            return res.status(400).json({ success: false, error: "Invalid action for this security code" });
-        }
-
-        if (orgId && securityCode.orgId !== orgId && securityCode.orgId !== null) {
-            return res.status(400).json({ success: false, error: "Invalid organization for this security code" });
-        }
-
-        // Mark as used
-        securityCode.used = true;
-        await securityCode.save();
-        console.log("[SecurityCode] SUCCESS - Code verified and marked as used");
+        // This super admin's codes still in time: five tries each, counted before the compare, and the code used up
+        // in one atomic step (services/admin-security-code.service.js). The code itself is never written to the log
+        // (2026-11-25: it was, with every code of the account on a wrong try).
+        const taken = await takeSecurityCode({
+            adminId: req.user._id,
+            typed: code,
+            accept: (securityCode) => {
+                if (action && securityCode.action !== action) return "Invalid action for this security code";
+                if (orgId && securityCode.orgId !== orgId && securityCode.orgId !== null) return "Invalid organization for this security code";
+                return null;
+            },
+        });
+        if (taken.state === "refused") return res.status(400).json({ success: false, error: taken.reason });
+        if (taken.state === "tries") return res.status(400).json({ success: false, error: "Too many wrong tries. Ask for a new code." });
+        if (taken.state !== "ok") return res.status(400).json({ success: false, error: "Invalid or expired security code." });
 
         const io = req.app.get("io");
         if (io) {

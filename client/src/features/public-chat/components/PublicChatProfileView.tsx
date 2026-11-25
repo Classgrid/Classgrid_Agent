@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/apiClient";
 import { useQueryClient } from "@tanstack/react-query";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export function PublicChatProfileView({ profileData, isReadOnly }: { profileData: any, isReadOnly?: boolean }) {
   const queryClient = useQueryClient();
@@ -279,6 +280,7 @@ export function PublicChatProfileView({ profileData, isReadOnly }: { profileData
                 <Button size="sm" variant="ghost" type="button" onClick={() => setOtpSent(false)}>Cancel</Button>
               </div>
             )}
+            {otpSent && isEditing && <p className="text-xs text-muted-foreground">The code works for {CODE_TTL_MINUTES} minutes.</p>}
             <p className="text-xs text-muted-foreground">Used for AI scheduling and important platform notifications.</p>
           </div>
           )}

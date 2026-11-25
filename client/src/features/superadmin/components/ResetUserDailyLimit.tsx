@@ -16,6 +16,7 @@ import { Button } from "@/components/marketing_ui/button";
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { toast } from "sonner";
 import { useResetUserUsage, useRequestSecurityCode, useVerifySecurityCode } from "@/features/superadmin/queries/useAiUsage";
+import { CODE_TTL_MINUTES } from "@/lib/codeLifetime";
 
 export interface ResetUserDailyLimitProps {
   userId: string;
@@ -82,7 +83,7 @@ export function ResetUserDailyLimit({ userId, userName }: ResetUserDailyLimitPro
         open={open}
         onOpenChange={setOpen}
         title={`Reset ${userName} Usage`}
-        description="Please provide your Super Admin security code to proceed."
+        description={`Please provide your Super Admin security code to proceed. The code works for ${CODE_TTL_MINUTES} minutes.`}
         warningMessage="This action will instantly overwrite the user's token consumption tracking, resetting their weekly usage back to 0."
         actionLabel="Reset Usage"
         cancelLabel="Cancel"

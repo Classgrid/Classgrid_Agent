@@ -4,7 +4,7 @@
 // email that already belongs to another Classgrid account (its main or an added one) cannot be added.
 //   GET    /api/user/emails              the account's emails
 //   POST   /api/user/emails              { email }  sends the code (at most one a minute, five a day)
-//   POST   /api/user/emails/confirm      { code }   adds the email (five tries per code, the code lasts 15 minutes)
+//   POST   /api/user/emails/confirm      { code }   adds the email (five tries per code, the code lasts 10 minutes)
 //   DELETE /api/user/emails/:email       removes an added email
 import crypto from "crypto";
 import User from "../models/User.js";
@@ -13,8 +13,8 @@ import { baseTemplate } from "../services/email-templates.service.js";
 import { dayKey } from "../services/plan-usage.service.js";
 import { isSchoolEmail } from "../services/student-school.service.js";
 import { MAX_ACCOUNT_EMAILS, cleanEmail, looksLikeEmail, emailOwnerQuery } from "../utils/account-email.js";
+import { CODE_TTL_MINUTES, CODE_TTL_MS } from "../utils/code-lifetime.js";
 
-const CODE_TTL_MS = 15 * 60 * 1000;
 const RESEND_MS = 60 * 1000;
 const CODES_PER_DAY = 5;
 const MAX_TRIES = 5;
@@ -113,10 +113,13 @@ export const addAccountEmail = async (req, res) => {
                 <p>Hi ${name}, enter this code in Classgrid to add this email to your account:</p>
                 <p style="font-size:28px;font-weight:700;letter-spacing:6px;margin:16px 0">${code}</p>
                 <p>Once it is added, you can sign in with this email and your Classgrid password.</p>
-                <p style="color:#666;font-size:13px">The code works for 15 minutes. If you did not ask for it, you can ignore this email: nothing changes without the code.</p>`,
+                <p style="color:#666;font-size:13px">The code works for ${CODE_TTL_MINUTES} minutes. If you did not ask for it, you can ignore this email: nothing changes without the code.</p>`,
         });
-        await enqueueEmail({ to: email, subject: `${code} is your Classgrid email code`, html, type: "other", userId: req.user._id });
-        res.json({ success: true, data: { pending_email: email, expires_in_minutes: 15 } });
+        const text = `Hi ${name}, enter this code in Classgrid to add this email to your account: ${code}\n\n`
+            + `Once it is added, you can sign in with this email and your Classgrid password.\n\n`
+            + `The code works for ${CODE_TTL_MINUTES} minutes. If you did not ask for it, you can ignore this email: nothing changes without the code.`;
+        await enqueueEmail({ to: email, subject: `${code} is your Classgrid email code`, html, text, type: "other", userId: req.user._id });
+        res.json({ success: true, data: { pending_email: email, expires_in_minutes: CODE_TTL_MINUTES } });
     } catch (err) {
         console.error("[account emails] add", err);
         res.status(500).json({ success: false, error: "Couldn't send the code. Please try again." });
