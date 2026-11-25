@@ -126,8 +126,10 @@ router.post("/request-login-otp", loginLimiter, authController.requestLoginOtp);
 router.post("/resend-device-otp", otpSendLimiter, authController.resendDeviceOtp);
 router.post("/verify-device", authController.verifyDeviceOtp);
 
-router.post("/onboarding-send-otp", otpSendLimiter, authController.sendOnboardingOtp);
-router.post("/onboarding-verify-otp", authController.verifyOnboardingOtp);
+// The old organisation sign-up codes (POST /onboarding-send-otp and /onboarding-verify-otp) are no longer mounted
+// (2026-11-25). They belonged to the shut-down organisation sign-up, and the send route gave every phone the fixed
+// code 123456 in the same code store the chat sign-up reads: anyone could put any WhatsApp number on a new chat
+// account with it, and it wiped the number's real pending code. Nothing live calls them.
 router.post("/check-username", authController.checkUsername);
 
 router.post("/setup-org-admin", authController.setupOrgAdmin); // kept for backward compat
