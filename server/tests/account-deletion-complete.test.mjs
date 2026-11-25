@@ -10,6 +10,11 @@
 //   - a part that fails is reported and the others still run
 //   - the WhatsApp inbox is left alone when another account has the same number
 //   - the CDN bucket: a folder is deleted page by page, and nothing outside the person's own folder is deleted
+//   - files stored under a name that does not say whose they are (models/StoredFile.js): the person's objects and
+//     rows go and another person's stay; a row kept by number alone follows the inbox's rule; an object a Library
+//     record or another row still points to stays; a file that cannot be deleted keeps its row; a row that is not a
+//     plain file or a deep enough folder is never followed; the WhatsApp writer writes its row (run for real)
+//   - the profile photo from before the account existed is found by the organization record the person owns
 // The database, Supabase, Redis, R2 and the CDN bucket are stand-ins in memory: nothing real is read or deleted, and
 // no network or key is needed. The WhatsApp inbox and the WhatsApp count are written by the real services, so the
 // key names checked here are the ones really used.
@@ -54,11 +59,22 @@ const model = (name) => ({
         return { deletedCount: all.length - keep.length };
     },
     updateMany: async () => ({ modifiedCount: 0 }),
-    create: async (row) => { rowsOf(name).push(row); return row; },
+    create: async (row) => {
+        if (failing.has(name)) throw new Error(`${name} cannot be reached`);
+        const saved = { _id: `${name}-${rowsOf(name).length + 1}-${Math.random().toString(36).slice(2, 8)}`, ...row };
+        rowsOf(name).push(saved);
+        return saved;
+    },
+    deleteOne: async (filter) => {
+        const all = rowsOf(name);
+        const at = all.findIndex((r) => matches(r, filter));
+        if (at >= 0) all.splice(at, 1);
+        return { deletedCount: at >= 0 ? 1 : 0 };
+    },
 });
 for (const name of ["ActivityLog", "AgentTask", "AiLibraryFile", "AiMemoryNote", "AiSchedule", "AiSkill", "AiUsageLog", "Call", "ChatGroup",
-    "ContentReport", "CustomMcpServer", "EmailJob", "IdeProject", "LiveDoc", "Notification", "NotificationLog", "OnboardingEvent",
-    "PushSubscription", "SavedSong", "SharePage", "User", "UserProfile", "UserStorageQuota", "UserSession", "WhatsappDirectSend"]) {
+    "ContentReport", "CustomMcpServer", "EmailJob", "IdeProject", "LiveDoc", "Notification", "NotificationLog", "OnboardingEvent", "Organization",
+    "PushSubscription", "SavedSong", "SharePage", "StoredFile", "User", "UserProfile", "UserStorageQuota", "UserSession", "WhatsappDirectSend"]) {
     mock.module(`../src/models/${name}.js`, { defaultExport: model(name) });
 }
 mock.module("../src/models/RemoteChat.js", { defaultExport: model("RemoteChat"), namedExports: { RemoteDevice: model("RemoteDevice") } });
@@ -122,16 +138,31 @@ const redis = {
 };
 mock.module("../src/config/redis.js", { defaultExport: redis });
 
-// ── R2: what was asked to be deleted ──
+// ── R2: what was asked to be deleted, and the objects of its buckets in memory ("test-r2" is the usual one) ──
 const r2Deleted = [];
 const r2Folders = [];
+const r2Buckets = new Map();
+const r2Bucket = (name = "test-r2") => { if (!r2Buckets.has(name)) r2Buckets.set(name, new Set()); return r2Buckets.get(name); };
+let r2Refuses = null; // a key R2 refuses to delete
 mock.module("../src/config/r2Client.js", {
     namedExports: {
-        deleteFromR2: async (key) => { r2Deleted.push(key); return true; },
-        deletePrefixFromR2: async (prefix) => { r2Folders.push(prefix); return 0; },
+        R2_BUCKET_NAME: "test-r2",
+        deleteFromR2: async (key, bucketName = "test-r2") => {
+            if (key === r2Refuses) throw new Error("Access Denied");
+            r2Deleted.push(key);
+            r2Bucket(bucketName).delete(key);
+            return true;
+        },
+        deletePrefixFromR2: async (prefix, bucketName = "test-r2") => {
+            if (typeof prefix !== "string" || prefix.length < 3 || !prefix.endsWith("/")) throw new Error("deletePrefixFromR2 needs a folder prefix");
+            r2Folders.push(prefix);
+            const keys = [...r2Bucket(bucketName)].filter((k) => k.startsWith(prefix));
+            for (const k of keys) r2Bucket(bucketName).delete(k);
+            return keys.length;
+        },
     },
 });
-mock.module("../src/services/r2.service.js", { namedExports: { generateR2UploadUrl: async () => ({ uploadUrl: "", publicUrl: "" }) } });
+mock.module("../src/services/r2.service.js", { namedExports: { generateR2UploadUrl: async (name) => ({ uploadUrl: `https://upload.test/${name}`, publicUrl: `https://files.example/${name}` }) } });
 
 // ── The other services the deletion calls ──
 mock.module("../src/services/ai-chat.service.js", { namedExports: { forgetSession: () => {} } });
@@ -170,13 +201,18 @@ s3.s3Client.send = async (command) => {
         }
         return Errors.length ? { Errors } : {};
     }
-    if (kind === "DeleteObjectCommand") { bucket(input.Bucket).delete(input.Key); return {}; }
+    if (kind === "DeleteObjectCommand") {
+        if (input.Key === s3Refuses) throw new Error("Access Denied");
+        bucket(input.Bucket).delete(input.Key);
+        return {};
+    }
     throw new Error(`the test's bucket does not know ${kind}`);
 };
 
 const { deleteAccountData, deleteStoredFiles } = await import("../src/services/account-deletion.service.js");
-const { saveIncomingMessages, noteMessagesRead } = await import("../src/services/whatsapp-inbox.service.js");
+const { saveIncomingMessages, noteMessagesRead, readRecentMessages } = await import("../src/services/whatsapp-inbox.service.js");
 const { recordDirectWhatsappSend } = await import("../src/services/ai-feature-limits.js");
+const { rememberStoredFile } = await import("../src/services/stored-files.service.js");
 
 const person = (over = {}) => ({
     _id: A, email: A_EMAIL, name: "Asha",
@@ -191,9 +227,9 @@ const person = (over = {}) => ({
 
 /** Fills every store with rows of both people, the way the real code writes them. */
 async function fill() {
-    tables.clear(); store.clear(); buckets.clear();
+    tables.clear(); store.clear(); buckets.clear(); r2Buckets.clear();
     for (const k of Object.keys(sbTables)) delete sbTables[k];
-    failing.clear(); sbFailing.clear(); redisDown = false; s3ListFails = null; s3Refuses = null;
+    failing.clear(); sbFailing.clear(); redisDown = false; s3ListFails = null; s3Refuses = null; r2Refuses = null;
     r2Deleted.length = 0; r2Folders.length = 0; s3Calls.length = 0; sbDeletes.length = 0; keptTouched.length = 0;
 
     rowsOf("User").push({ _id: A, metadata: { whatsappPhone: `+${A_NUMBER}` } }, { _id: B, metadata: { whatsappPhone: `+${B_NUMBER}` } });
@@ -398,8 +434,9 @@ test("the CDN bucket: one folder failing does not stop the other, and a key the 
     assert.deepEqual([...bucket("test-photos")].filter((k) => k.startsWith(`profile_pictures/${A}-`)), [`profile_pictures/${A}-1690000000000.png`]);
 });
 
-test("the CDN bucket: no folder is ever named from something that is not an account id", async () => {
+test("the CDN bucket: no folder is ever named from something that is not an account id", async (t) => {
     await fill();
+    t.mock.method(console, "error", () => {}); // (R2 refuses the folder "/" an empty id makes, and that is logged)
     for (const notAnId of ["", "undefined", "../", `${A}/`, "studio-shots"]) await deleteStoredFiles(notAnId, []);
     assert.deepEqual(s3Calls, []);
     assert.equal(bucket("test-ai-files").size, 10);
@@ -469,4 +506,273 @@ test("when the Library's records cannot be deleted, none of its files is listed 
     const { report, files } = await deleteAccountData(person());
     assert.match(String(report.libraryFiles), /^failed/);
     assert.deepEqual(files.filter((f) => f?.s3 || String(f).startsWith("ai-library/")), []);
+});
+
+// ── Files stored under a name that does not say whose they are, found by their rows (models/StoredFile.js). The
+// rows are written by the real helper (services/stored-files.service.js), the way each writer calls it. ──
+const ORG_A = "a0a0a0a0a0a0a0a0a0a0a0a0"; // the organization record A owns
+const ORG_B = "b0b0b0b0b0b0b0b0b0b0b0b0";
+const A_STORED = [
+    ["r2", "ai-generated/office/1700000000100-abc123/", true, "office-file"],
+    ["r2", "ai-generated/pdf/1700000000200-def456/", true, "pdf"],
+    ["r2", "ai-generated/image-1700000000300.png", false, "picture"],
+    ["s3", "ai-generated/1700000000400-notes..final.pdf", false, "ai-file"],
+    ["s3", "ai-generated/1700000000500-clip.mp4", false, "video"],
+    ["s3", "ai-generated/1700000000501-frame-2s.jpg", false, "video-frame"],
+];
+const B_STORED = [
+    ["r2", "ai-generated/office/1700000000600-zzz999/", true, "office-file"],
+    ["r2", "ai-generated/image-1700000000700.png", false, "picture"],
+    ["s3", "ai-generated/1700000000800-ravi.mp4", false, "video"],
+];
+// (a row is written without the writer waiting for it: a few turns of the loop let it finish)
+const settle = async () => { for (let i = 0; i < 5; i += 1) await new Promise((r) => setImmediate(r)); };
+const storedKeys = (owner) => rowsOf("StoredFile").filter((r) => same(r.userId, owner)).map((r) => r.key).sort();
+
+async function fillStored() {
+    await fill();
+    for (const [owner, list] of [[A, A_STORED], [B, B_STORED]]) {
+        for (const [store, key, folder, kind] of list) assert.equal(await rememberStoredFile({ userId: owner, store, key, folder, kind }), true);
+    }
+    // A file each of them sent on WhatsApp: written down with the account and the number, in the bucket it was put in
+    await rememberStoredFile({ userId: A, whatsappNumber: A_NUMBER, store: "r2", bucket: "classgrid-bucket", key: "whatsapp-files/11111111-a.jpg", kind: "whatsapp-file" });
+    await rememberStoredFile({ userId: B, whatsappNumber: B_NUMBER, store: "r2", bucket: "classgrid-bucket", key: "whatsapp-files/22222222-b.jpg", kind: "whatsapp-file" });
+
+    for (const key of [
+        "ai-generated/office/1700000000100-abc123/Report.docx",
+        "ai-generated/pdf/1700000000200-def456/part-1.pdf",
+        "ai-generated/pdf/1700000000200-def456/part-2.pdf",
+        "ai-generated/image-1700000000300.png",
+        "ai-generated/office/1700000000600-zzz999/Ravi.xlsx",
+        "ai-generated/image-1700000000700.png",
+        "ai-generated/office/1700000000100-abc1234/a-folder-that-only-starts-the-same.docx",
+        "ai-generated/image-1700000000999.png", // stored before rows were kept: nobody's row points to it
+    ]) r2Bucket().add(key);
+    r2Bucket("classgrid-bucket").add("whatsapp-files/11111111-a.jpg");
+    r2Bucket("classgrid-bucket").add("whatsapp-files/22222222-b.jpg");
+    for (const key of ["ai-generated/1700000000400-notes..final.pdf", "ai-generated/1700000000500-clip.mp4", "ai-generated/1700000000501-frame-2s.jpg", "ai-generated/1700000000800-ravi.mp4"]) bucket("test-ai-files").add(key);
+}
+
+test("files found by their rows: this person's objects and rows go, another person's stay", async () => {
+    await fillStored();
+    assert.equal(rowsOf("StoredFile").length, A_STORED.length + B_STORED.length + 2);
+
+    const { report, files } = await deleteAccountData(person());
+    assert.equal(report.storedFiles, 7, "six files the AI made and one sent on WhatsApp");
+    assert.equal(report.whatsappFiles, 0, "none is kept by number alone");
+    // (nothing is deleted yet: the rows are only listed, so a file that cannot be deleted can still be found)
+    assert.equal(storedKeys(A).length, 7);
+
+    const deleted = await deleteStoredFiles(A, files);
+
+    assert.deepEqual([...r2Bucket()].sort(), [
+        "ai-generated/image-1700000000700.png",
+        "ai-generated/image-1700000000999.png",
+        "ai-generated/office/1700000000100-abc1234/a-folder-that-only-starts-the-same.docx",
+        "ai-generated/office/1700000000600-zzz999/Ravi.xlsx",
+    ]);
+    assert.deepEqual([...r2Bucket("classgrid-bucket")], ["whatsapp-files/22222222-b.jpg"], "A's WhatsApp file went from the bucket it was put in");
+    for (const [, key] of A_STORED.filter(([store]) => store === "s3")) assert.equal(bucket("test-ai-files").has(key), false, key);
+    assert.equal(bucket("test-ai-files").has("ai-generated/1700000000800-ravi.mp4"), true);
+    assert.deepEqual(storedKeys(A), [], "A's rows are gone");
+    assert.deepEqual(storedKeys(B), [...B_STORED.map(([, key]) => key), "whatsapp-files/22222222-b.jpg"].sort(), "B's rows are untouched");
+    // 2 Library files + (1 office file, 2 PDFs, 1 picture, 3 on the CDN, 1 WhatsApp file) + 5 screenshots + 2 profile photos
+    assert.equal(deleted, 2 + 8 + 5 + 2);
+    // Only folders three names deep were ever listed in R2, besides the account's own two folders
+    assert.deepEqual(r2Folders, ["ai-generated/office/1700000000100-abc123/", "ai-generated/pdf/1700000000200-def456/", `${A}/`, `ai-chat-uploads/${A}/`]);
+});
+
+test("a file kept by number alone follows the inbox's rule: only when the number is this account's alone", async () => {
+    const byNumber = async () => {
+        await fillStored();
+        assert.equal(await rememberStoredFile({ whatsappNumber: A_NUMBER, store: "r2", key: "whatsapp-files/33333333-old.jpg", kind: "whatsapp-file" }), true);
+        assert.equal(await rememberStoredFile({ whatsappNumber: B_NUMBER, store: "r2", key: "whatsapp-files/44444444-ravi.jpg", kind: "whatsapp-file" }), true);
+        r2Bucket().add("whatsapp-files/33333333-old.jpg");
+        r2Bucket().add("whatsapp-files/44444444-ravi.jpg");
+    };
+    const numberRows = () => rowsOf("StoredFile").filter((r) => r.userId === null).map((r) => r.key).sort();
+
+    await byNumber();
+    let { report, files } = await deleteAccountData(person());
+    assert.equal(report.whatsappFiles, 1);
+    await deleteStoredFiles(A, files);
+    assert.equal(r2Bucket().has("whatsapp-files/33333333-old.jpg"), false);
+    assert.equal(r2Bucket().has("whatsapp-files/44444444-ravi.jpg"), true, "another number's file is never touched");
+    assert.deepEqual(numberRows(), ["whatsapp-files/44444444-ravi.jpg"]);
+
+    // Another account has the same number: the file could be theirs, so it stays with its row
+    await byNumber();
+    rowsOf("User").push({ _id: "cccccccccccccccccccccccc", metadata: { whatsappPhone: A_NUMBER.slice(-10) } });
+    ({ report, files } = await deleteAccountData(person()));
+    assert.equal(report.whatsappFiles, "left: another account has the same number");
+    await deleteStoredFiles(A, files);
+    assert.equal(r2Bucket().has("whatsapp-files/33333333-old.jpg"), true);
+    assert.deepEqual(numberRows(), ["whatsapp-files/33333333-old.jpg", "whatsapp-files/44444444-ravi.jpg"]);
+    // (what was written down with A's account still goes: that is known to be A's)
+    assert.equal(r2Bucket("classgrid-bucket").has("whatsapp-files/11111111-a.jpg"), false);
+
+    // A test number several accounts share
+    await byNumber();
+    assert.equal(await rememberStoredFile({ whatsappNumber: "918623947038", store: "r2", key: "whatsapp-files/55555555-test.jpg", kind: "whatsapp-file" }), true);
+    r2Bucket().add("whatsapp-files/55555555-test.jpg");
+    ({ report, files } = await deleteAccountData(person({ metadata: { whatsappPhone: "+918623947038" } })));
+    assert.equal(report.whatsappFiles, "left: a test number several accounts share");
+    await deleteStoredFiles(A, files);
+    assert.equal(r2Bucket().has("whatsapp-files/55555555-test.jpg"), true);
+    assert.equal(r2Bucket().has("whatsapp-files/33333333-old.jpg"), true, "a number that is not on the account is never used");
+});
+
+test("a recorded file stays while a Library record or another row still points to it", async () => {
+    await fillStored();
+    const inLibrary = "ai-generated/1700000001000-in-ravis-library.pdf";
+    const sameMoment = "ai-generated/image-1700000002000.png";
+    const twice = "ai-generated/1700000003000-twice.pdf";
+    const folder = "ai-generated/pdf/1700000004000-ffffff/";
+    const alsoInOwnLibrary = "ai-generated/1700000000001-report.pdf"; // A's Library record (see fill) and A's row
+    // B's Library has a record of an object A's row points to, and of a file inside a folder of A's
+    rowsOf("AiLibraryFile").push({ user_id: B, source: "generated", file_key: inLibrary }, { user_id: B, source: "uploaded", file_key: `${folder}kept.pdf` });
+    await rememberStoredFile({ userId: A, store: "s3", key: inLibrary, kind: "ai-file" });
+    await rememberStoredFile({ userId: A, store: "r2", key: folder, folder: true, kind: "pdf" });
+    // Two pictures made in the same millisecond got one name: A's row and B's row point to one object
+    await rememberStoredFile({ userId: A, store: "r2", key: sameMoment, kind: "picture" });
+    await rememberStoredFile({ userId: B, store: "r2", key: sameMoment, kind: "picture" });
+    // One object written down twice for A
+    await rememberStoredFile({ userId: A, store: "s3", key: twice, kind: "ai-file" });
+    await rememberStoredFile({ userId: A, store: "s3", key: twice, kind: "ai-file" });
+    await rememberStoredFile({ userId: A, store: "s3", key: alsoInOwnLibrary, kind: "ai-file" });
+    bucket("test-ai-files").add(inLibrary);
+    bucket("test-ai-files").add(twice);
+    r2Bucket().add(sameMoment);
+    r2Bucket().add(`${folder}kept.pdf`);
+
+    const { files } = await deleteAccountData(person());
+    await deleteStoredFiles(A, files);
+
+    assert.equal(bucket("test-ai-files").has(inLibrary), true, "B's Library record still points to it");
+    assert.equal(r2Bucket().has(`${folder}kept.pdf`), true, "a Library record still points into the folder");
+    assert.equal(r2Bucket().has(sameMoment), true, "B's row still points to it");
+    assert.equal(bucket("test-ai-files").has(twice), false, "the last of A's two rows deleted it");
+    assert.equal(bucket("test-ai-files").has(alsoInOwnLibrary), false);
+    assert.deepEqual(storedKeys(A), [], "A's rows go either way");
+    assert.equal(storedKeys(B).includes(sameMoment), true);
+    // (an object is asked to be deleted once, also when both a Library record and a row listed it)
+    const asked = s3Calls.filter((c) => c.kind === "DeleteObjectCommand").map((c) => c.Key);
+    assert.equal(asked.filter((k) => k === twice).length, 1);
+    assert.equal(asked.filter((k) => k === alsoInOwnLibrary).length, 1);
+    assert.equal(asked.includes(inLibrary), false);
+});
+
+test("a recorded file that cannot be deleted keeps its row, and the others still go", async (t) => {
+    await fillStored();
+    t.mock.method(console, "error", () => {});
+    s3Refuses = "ai-generated/1700000000500-clip.mp4";
+    r2Refuses = "ai-generated/image-1700000000300.png";
+    const { files } = await deleteAccountData(person());
+    await deleteStoredFiles(A, files);
+    assert.deepEqual(storedKeys(A), ["ai-generated/1700000000500-clip.mp4", "ai-generated/image-1700000000300.png"], "the two that failed can still be found");
+    assert.equal(bucket("test-ai-files").has("ai-generated/1700000000500-clip.mp4"), true);
+    assert.equal(bucket("test-ai-files").has("ai-generated/1700000000501-frame-2s.jpg"), false);
+    assert.equal(r2Bucket().has("ai-generated/office/1700000000100-abc123/Report.docx"), false);
+});
+
+test("a row that is not a plain file or a deep enough folder is never followed", async (t) => {
+    await fillStored();
+    t.mock.method(console, "error", () => {});
+    // Rows no writer makes (put straight into the table): a whole top folder, a path that climbs, a link, another store
+    const bad = [
+        { store: "r2", key: "ai-generated/", folder: true },
+        { store: "r2", key: "ai-generated/office/", folder: true },
+        { store: "r2", key: "ai-generated/pdf/../office/1700000000600-zzz999/", folder: true },
+        { store: "r2", key: "https://files.example/ai-generated/image-1700000000700.png", folder: false },
+        { store: "s3", key: "/ai-generated/1700000000800-ravi.mp4", folder: false },
+        { store: "s3", key: "ai-generated/../ai-generated/1700000000800-ravi.mp4", folder: false },
+        { store: "disk", key: "ai-generated/1700000000800-ravi.mp4", folder: false },
+    ];
+    bad.forEach((row, n) => rowsOf("StoredFile").push({ _id: `bad-${n}`, userId: A, whatsappNumber: null, bucket: null, kind: "ai-file", ...row }));
+    const { files } = await deleteAccountData(person());
+    await deleteStoredFiles(A, files);
+    assert.equal(r2Bucket().has("ai-generated/office/1700000000600-zzz999/Ravi.xlsx"), true);
+    assert.equal(r2Bucket().has("ai-generated/image-1700000000700.png"), true);
+    assert.equal(r2Bucket().has("ai-generated/image-1700000000999.png"), true);
+    assert.equal(bucket("test-ai-files").has("ai-generated/1700000000800-ravi.mp4"), true);
+    assert.deepEqual(rowsOf("StoredFile").filter((r) => String(r._id).startsWith("bad-")).length, bad.length, "the bad rows are kept, for someone to look at");
+    assert.equal(r2Folders.some((p) => p === "ai-generated/" || p === "ai-generated/office/"), false);
+});
+
+test("the profile photo from before the account existed: found by the organization record the person owns, never by a link", async () => {
+    await fill();
+    rowsOf("Organization").push({ _id: ORG_A, owner_id: A }, { _id: ORG_B, owner_id: B });
+    bucket("test-photos").add(`profile_pictures/pending_${ORG_A}-1690000000000.png`);
+    bucket("test-photos").add(`profile_pictures/pending_${ORG_B}-1690000000000.png`);
+    // The link on A's account points at B's photo (a person can save any link there): it is not followed
+    const { report, files } = await deleteAccountData(person({ profilePicture: `https://cdn.classgrid.in/profile_pictures/pending_${ORG_B}-1690000000000.png` }));
+    assert.equal(report.signUpPhoto, 1);
+    await deleteStoredFiles(A, files);
+    assert.equal(bucket("test-photos").has(`profile_pictures/pending_${ORG_A}-1690000000000.png`), false);
+    assert.equal(bucket("test-photos").has(`profile_pictures/pending_${ORG_B}-1690000000000.png`), true);
+    assert.equal(bucket("test-photos").has(`profile_pictures/pending_${A}-1700000000000.png`), true, "a name with the account's own id after pending_ is not an organization the person owns");
+    // An entry that is not exactly that kind of folder is not listed at all
+    s3Calls.length = 0;
+    await deleteStoredFiles("not-an-id", [{ s3Folder: "profile_pictures/" }, { s3Folder: "profile_pictures/pending_" }, { s3Folder: `studio-shots/${B}/` }, { s3Folder: `profile_pictures/pending_${ORG_B}-1` }]);
+    assert.deepEqual(s3Calls, []);
+});
+
+test("a file sent on WhatsApp is written down when it is saved: with the account that reads the inbox, and the number", async (t) => {
+    await fill();
+    // Meta's two answers (where the file is, then the file) and our storage taking the upload: nothing leaves the test
+    const asked = [];
+    t.mock.method(globalThis, "fetch", async (url, options = {}) => {
+        asked.push(`${options.method || "GET"} ${url}`);
+        if (String(url).startsWith("https://graph.facebook.com/")) return { json: async () => ({ url: "https://lookaside.fbsbx.com/file/1", mime_type: "image/jpeg", file_size: 8 }) };
+        if (String(url).startsWith("https://lookaside.fbsbx.com/")) return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
+        if (String(url).startsWith("https://upload.test/")) return { ok: true };
+        throw new Error(`the test does not answer ${url}`);
+    });
+    const now = Math.floor(Date.now() / 1000);
+    await saveIncomingMessages({ messages: [{ from: A_NUMBER, id: "in-a9", timestamp: now, type: "document", document: { id: "9001", mime_type: "application/pdf", filename: "My Notes..final.pdf" } }] });
+
+    const items = await readRecentMessages(A_NUMBER, 1, A);
+    await settle();
+    assert.match(items[0].fileUrl, /^https:\/\/files\.example\/whatsapp-files\/[0-9a-f-]{36}-My_Notes\.\.final\.pdf$/);
+    const rows = rowsOf("StoredFile");
+    assert.equal(rows.length, 1);
+    assert.equal(`https://files.example/${rows[0].key}`, items[0].fileUrl, "the row's key is the key the file was stored under");
+    assert.deepEqual({ ...rows[0], _id: 0, key: 0 }, { _id: 0, userId: A, whatsappNumber: A_NUMBER, store: "r2", bucket: "classgrid-bucket", key: 0, folder: false, kind: "whatsapp-file" });
+    assert.equal(asked.filter((a) => a.startsWith("PUT https://upload.test/whatsapp-files/")).length, 1);
+
+    // Read again: the file is not stored a second time, and no second row is written
+    await readRecentMessages(A_NUMBER, 1, A);
+    await settle();
+    assert.equal(rowsOf("StoredFile").length, 1);
+
+    // A reader that does not say whose inbox it is: kept by number alone. With R2_BUCKET_NAME set, the bucket is the
+    // usual one and the row leaves it out.
+    process.env.R2_BUCKET_NAME = "test-r2";
+    try {
+        await saveIncomingMessages({ messages: [{ from: B_NUMBER, id: "in-b9", timestamp: now, type: "image", image: { id: "9002", mime_type: "image/jpeg" } }] });
+        await readRecentMessages(B_NUMBER, 1);
+        await settle();
+    } finally {
+        delete process.env.R2_BUCKET_NAME;
+    }
+    const second = rowsOf("StoredFile")[1];
+    assert.deepEqual([second.userId, second.whatsappNumber, second.bucket, second.kind], [null, B_NUMBER, null, "whatsapp-file"]);
+    assert.match(second.key, /^whatsapp-files\/[0-9a-f-]{36}-file\.jpeg$/);
+});
+
+test("the row cannot be written: the file is still stored and its link still given", async (t) => {
+    await fill();
+    t.mock.method(console, "error", () => {});
+    t.mock.method(globalThis, "fetch", async (url) => {
+        if (String(url).startsWith("https://graph.facebook.com/")) return { json: async () => ({ url: "https://lookaside.fbsbx.com/file/2", mime_type: "image/png", file_size: 8 }) };
+        if (String(url).startsWith("https://lookaside.fbsbx.com/")) return { ok: true, arrayBuffer: async () => new ArrayBuffer(8) };
+        return { ok: true };
+    });
+    failing.add("StoredFile");
+    await saveIncomingMessages({ messages: [{ from: A_NUMBER, id: "in-a10", timestamp: Math.floor(Date.now() / 1000), type: "image", image: { id: "9003", mime_type: "image/png" } }] });
+    const items = await readRecentMessages(A_NUMBER, 1, A);
+    await settle();
+    assert.match(items[0].fileUrl, /^https:\/\/files\.example\/whatsapp-files\//);
+    assert.equal(items[0].fileError, undefined);
+    assert.equal(rowsOf("StoredFile").length, 0);
 });

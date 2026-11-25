@@ -136,10 +136,12 @@ export const s3Client = new S3Client({
 });
 
 /**
- * Deletes one object from the bucket by its key (not a link: a link may point anywhere).
+ * Deletes one object from the bucket by its key (not a link: a link may point anywhere). A key with a ".." part is
+ * refused; a name that only has two dots in it ("notes..final.pdf", which the AI's uploads can make) is a key like
+ * any other.
  */
 export async function deleteFromS3(key, bucket = BUCKET_NAME) {
-    if (typeof key !== "string" || !key || key.startsWith("/") || key.includes("..")) throw new Error("deleteFromS3 needs an object key");
+    if (typeof key !== "string" || !key || key.startsWith("/") || key.split("/").includes("..")) throw new Error("deleteFromS3 needs an object key");
     await s3Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
     return true;
 }

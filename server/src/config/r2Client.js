@@ -82,7 +82,7 @@ import { asyncContext } from '../utils/async-context.js';
 const accountId = process.env.R2_ACCOUNT_ID;
 const accessKeyId = process.env.R2_ACCESS_KEY_ID;
 const secretAccessKey = process.env.R2_SECRET_ACCESS_KEY;
-const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'classgrid-storage';
+export const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME || 'classgrid-storage';
 const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL || 'https://pub-96a564393c0440f2bab37ad8bbe92398.r2.dev';
 
 if (!accountId || !accessKeyId || !secretAccessKey) {
@@ -171,10 +171,11 @@ export async function getPrivateDownloadUrl(objectKey, expiresInSeconds = 300) {
 /**
  * Deletes a file from Cloudflare R2 using its URL or Key
  * @param {string} fileIdentifier - The public URL or the object Key
+ * @param {string} bucket - Another bucket of the same R2 account, when the file was not put in the usual one
  */
-export async function deleteFromR2(fileIdentifier) {
+export async function deleteFromR2(fileIdentifier, bucket = R2_BUCKET_NAME) {
     let key = fileIdentifier;
-    
+
     // If a full URL is passed, extract just the key (the path after the domain)
     if (fileIdentifier.startsWith('http')) {
         const urlObj = new URL(fileIdentifier);
@@ -182,7 +183,7 @@ export async function deleteFromR2(fileIdentifier) {
     }
 
     const command = new DeleteObjectCommand({
-        Bucket: R2_BUCKET_NAME,
+        Bucket: bucket || R2_BUCKET_NAME,
         Key: key,
     });
 
@@ -193,17 +194,18 @@ export async function deleteFromR2(fileIdentifier) {
 /**
  * Deletes every object whose key starts with `prefix` (a deleted account's own folder, "<userId>/"), 1000 at a time.
  * Resolves the number of objects deleted. The prefix must name a folder (end in "/"), so a short prefix can never
- * empty the bucket.
+ * empty the bucket. `bucket`: another bucket of the same R2 account, when the files were not put in the usual one.
  */
-export async function deletePrefixFromR2(prefix) {
+export async function deletePrefixFromR2(prefix, bucket = R2_BUCKET_NAME) {
     if (typeof prefix !== 'string' || prefix.length < 3 || !prefix.endsWith('/')) throw new Error('deletePrefixFromR2 needs a folder prefix');
+    const Bucket = bucket || R2_BUCKET_NAME;
     let deleted = 0;
     let token;
     do {
-        const page = await r2Client.send(new ListObjectsV2Command({ Bucket: R2_BUCKET_NAME, Prefix: prefix, ContinuationToken: token }));
+        const page = await r2Client.send(new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken: token }));
         const keys = (page.Contents || []).map((o) => ({ Key: o.Key })).filter((o) => o.Key);
         if (keys.length) {
-            await r2Client.send(new DeleteObjectsCommand({ Bucket: R2_BUCKET_NAME, Delete: { Objects: keys, Quiet: true } }));
+            await r2Client.send(new DeleteObjectsCommand({ Bucket, Delete: { Objects: keys, Quiet: true } }));
             deleted += keys.length;
         }
         token = page.IsTruncated ? page.NextContinuationToken : undefined;

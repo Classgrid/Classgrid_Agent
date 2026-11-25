@@ -6,7 +6,8 @@
 
 /** The CDN bucket key of a Library file the AI made, or null (an uploaded file, or a file with no key). */
 export const aiMadeFileKey = (file) => (
-    file?.source === "generated" && typeof file.file_key === "string" && file.file_key.startsWith("ai-generated/") && !file.file_key.includes("..")
+    // (a ".." part is refused; a name with two dots in it, "notes..final.pdf", is a name like any other)
+    file?.source === "generated" && typeof file.file_key === "string" && file.file_key.startsWith("ai-generated/") && !file.file_key.split("/").includes("..")
         ? file.file_key
         : null
 );

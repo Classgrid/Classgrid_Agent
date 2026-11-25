@@ -16,15 +16,30 @@
 //   - WhatsApp: the count of messages the AI sent for them, and what they wrote to Classgrid's number that is still
 //     kept (the last messages, 3 days)
 //   - on the CDN: the screenshots the AI took in their chats (and the lists of them), the files and videos the AI
-//     made that are in their Library, and the profile photo saved at sign-up
+//     made that are in their Library, and the profile photo saved at sign-up (also the one saved while the account
+//     was still being set up, found by the id of the organization record the person owns)
+//   - files stored under a name that does not say whose they are, found by the row written when each was stored
+//     (models/StoredFile.js, since 2026-11-25): office files and edited PDFs the AI made, pictures it made, files and
+//     videos it put on the CDN (also when the Library was full), a video's still frames, files the person sent on
+//     WhatsApp. A file goes only when no Library record and no other row still points to it.
 // Kept on purpose: payments, invoices, credit and platform transactions, credit spends and Google Play purchases
 // (the business must keep them by law), and the admin audit log and the system logs (the record of what was done).
 // Also left, because it is not this person's to delete or cannot be told to be theirs:
 //   - reports other people sent about this person's docs, pages or comments (they belong to the Classgrid team's
 //     moderation; they carry the name and a short piece of what was reported)
-//   - files the AI made that are not in the Library (office files, edited PDFs, "@Create image" pictures, a video's
-//     still frames, anything made while the Library was full): their names carry no account id, so nothing here
-//     can say whose they are. The same for a file the person sent on WhatsApp.
+//   - the files of the kinds above that were stored before 2026-11-25: they have no row, and nothing else proves
+//     whose they are. A link in the person's chats is not proof: anyone can paste a link or import a chat that holds
+//     one (controllers/ai-chat-import.controller.js), and the names can be guessed (a time and a file name), so
+//     deleting what a chat links to would let one person delete another person's files. They need a one-time
+//     read of all chats by the Classgrid team to write their rows; nothing here does that.
+//   - files other parts of the server store under a name without the account and without a row yet: pictures of
+//     the person's screen and parts of files read from their computer ("assets/<time>-<random>", local-runner.service.js
+//     and routes/upload.routes.js), attachments read from their mailbox ("email-files/", agent-mail.service.js),
+//     files staged from their Drive or Gmail ("ai-temp-cache/", mcp/tools.js), PDFs made by generate_pdf
+//     ("reports/<title>.pdf", mcp/tools.js: one name for everyone who uses the same title), a plugin's icon
+//     ("custom-mcp-icons/"), and published sites ("websites/")
+//   - the proof document of an application for student prices ("private/student-proofs/<their id>/",
+//     controllers/ai-student.controller.js): it has the account's id in its name, and no part here deletes it yet
 //
 // Each part is tried on its own; one that fails is logged and the rest still run, so a storage hiccup never leaves
 // the account half deleted. The files in storage are listed here and removed by deleteStoredFiles after the reply.
@@ -38,6 +53,7 @@ import { leaveSharedChat } from "./ai-chat-grid.service.js";
 import { sandboxSsh } from "./ide-project.service.js";
 import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
 import { forgetNumber } from "./whatsapp-inbox.service.js";
+import { storedFileProblem } from "./stored-files.service.js";
 import { confirmedEmails } from "../utils/account-email.js";
 import { isSharedTestWhatsapp } from "../utils/chat-onboarding.js";
 import { aiMadeFileKey } from "../utils/library-file-key.js";
@@ -58,10 +74,12 @@ import LiveDoc from "../models/LiveDoc.js";
 import Notification from "../models/Notification.js";
 import NotificationLog from "../models/NotificationLog.js";
 import OnboardingEvent from "../models/OnboardingEvent.js";
+import Organization from "../models/Organization.js";
 import PushSubscription from "../models/PushSubscription.js";
 import RemoteChat, { RemoteDevice } from "../models/RemoteChat.js";
 import SavedSong from "../models/SavedSong.js";
 import SharePage from "../models/SharePage.js";
+import StoredFile from "../models/StoredFile.js";
 import User from "../models/User.js";
 import UserProfile from "../models/UserProfile.js";
 import UserStorageQuota from "../models/UserStorageQuota.js";
@@ -155,19 +173,60 @@ async function deleteRedisKeys(userId) {
 }
 
 /**
- * What the person wrote to Classgrid's WhatsApp number that Redis still keeps (whatsapp-inbox.service.js: the last
- * messages, 3 days). It is kept by number, so it goes only for the number confirmed on this account
- * (metadata.whatsappPhone), and only when no other account has that number: a test number several accounts share,
- * or a number two accounts both have, is left alone.
+ * The WhatsApp number whose things are this account's alone: the number confirmed on the account
+ * (metadata.whatsappPhone), and only when no other account has it. A test number several accounts share, or a
+ * number two accounts both have, gives no number and `left` says why. What is kept by number (the inbox in Redis, a
+ * stored file written down with a number and no account) goes only for this number.
  */
-async function deleteWhatsappInbox(user) {
+async function ownWhatsappNumber(user) {
     const number = normalizeWhatsappNumber(user?.metadata?.whatsappPhone);
-    if (!number) return 0;
-    if (isSharedTestWhatsapp(number)) return "left: a test number several accounts share";
+    if (!number) return { number: "", left: "" };
+    if (isSharedTestWhatsapp(number)) return { number: "", left: "left: a test number several accounts share" };
     const sameEnding = await User.find({ _id: { $ne: user._id }, "metadata.whatsappPhone": { $regex: `${number.slice(-10)}$` } })
         .select("metadata.whatsappPhone").lean();
-    if (sameEnding.some((other) => normalizeWhatsappNumber(other.metadata?.whatsappPhone) === number)) return "left: another account has the same number";
+    if (sameEnding.some((other) => normalizeWhatsappNumber(other.metadata?.whatsappPhone) === number)) return { number: "", left: "left: another account has the same number" };
+    return { number, left: "" };
+}
+
+/**
+ * What the person wrote to Classgrid's WhatsApp number that Redis still keeps (whatsapp-inbox.service.js: the last
+ * messages, 3 days). It is kept by number, so it goes only for the number that is this account's alone.
+ */
+async function deleteWhatsappInbox(user) {
+    const { number, left } = await ownWhatsappNumber(user);
+    if (!number) return left || 0;
     return forgetNumber(number);
+}
+
+const ACCOUNT_ID = /^[a-f0-9]{24}$/i;
+const escapeRegex = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A stored file's row (models/StoredFile.js) as deleteStoredFiles takes it: where the file is, and which row it is. */
+const recordedFile = (row) => ({ stored: String(row._id), store: row.store, bucket: row.bucket || null, key: row.key, folder: !!row.folder });
+
+/**
+ * One file found by its row: the object (or every object of the folder) goes from its own store, and then the row.
+ * The object stays, and only the row goes, when a Library record or another row still points to it: the same object
+ * written down for another account, or twice for this one (the last of its rows deletes it). A file that cannot be
+ * deleted keeps its row, so it can still be found. Resolves how many objects went.
+ */
+async function deleteRecordedFile(file) {
+    const problem = storedFileProblem(file);
+    if (problem) throw new Error(problem);
+    const sameObject = file.folder ? { $regex: `^${escapeRegex(file.key)}` } : file.key;
+    const inLibrary = await AiLibraryFile.find({ file_key: sameObject }).select("_id").lean();
+    const otherRows = await StoredFile.find({ _id: { $ne: file.stored }, store: file.store, bucket: file.bucket || null, key: sameObject }).select("_id").lean();
+    let deleted = 0;
+    if (!inLibrary.length && !otherRows.length) {
+        if (file.store === "s3") {
+            const bucket = file.bucket || AI_FILES_BUCKET;
+            deleted = file.folder ? await deletePrefixFromS3(file.key, bucket) : Number(await deleteFromS3(file.key, bucket));
+        } else {
+            deleted = file.folder ? await deletePrefixFromR2(file.key, file.bucket || undefined) : Number(await deleteFromR2(file.key, file.bucket || undefined));
+        }
+    }
+    await StoredFile.deleteOne({ _id: file.stored });
+    return deleted;
 }
 
 export async function deleteAccountData(user, { io = null } = {}) {
@@ -206,6 +265,32 @@ export async function deleteAccountData(user, { io = null } = {}) {
         const rows = await SavedSong.find({ userId: user._id }).select("r2Key").lean();
         files.push(...rows.map((r) => r.r2Key).filter(Boolean));
         return (await SavedSong.deleteMany({ userId: user._id })).deletedCount || 0;
+    });
+    // Files stored under a name that does not say whose they are, found by the rows written when each was stored
+    // (models/StoredFile.js). They are only listed here: deleteStoredFiles deletes each file and then its row, so a
+    // file that could not be deleted still has its row and can be found again.
+    await step("storedFiles", async () => {
+        const rows = await StoredFile.find({ userId: user._id }).select("store bucket key folder").lean();
+        files.push(...rows.map(recordedFile));
+        return rows.length;
+    });
+    // The same for a file written down with a WhatsApp number and no account: only for the number that is this
+    // account's alone, like the inbox below
+    await step("whatsappFiles", async () => {
+        const { number, left } = await ownWhatsappNumber(user);
+        if (!number) return left || 0;
+        const rows = await StoredFile.find({ userId: null, whatsappNumber: number }).select("store bucket key folder").lean();
+        files.push(...rows.map(recordedFile));
+        return rows.length;
+    });
+    // The profile photo saved while the account was still being set up ("profile_pictures/pending_<id>-<time>",
+    // auth.controller.js): the id in its name is the id of the organization record this person owns (owner_id, which
+    // only the server sets, when the account is made). It is found by that id, never by the link kept on the account.
+    await step("signUpPhoto", async () => {
+        const owned = await Organization.find({ owner_id: user._id }).select("_id").lean();
+        const ids = owned.map((o) => String(o._id)).filter((id) => ACCOUNT_ID.test(id));
+        files.push(...ids.map((id) => ({ s3Folder: `profile_pictures/pending_${id}-`, bucket: PHOTO_BUCKET })));
+        return ids.length;
     });
     await step("projects", () => deleteProjects(userId));
 
@@ -297,15 +382,29 @@ export async function deleteAccountData(user, { io = null } = {}) {
  * (studio-browser-tools.js saveShot, "studio-shots/<their id>/") and the profile photo saved at sign-up
  * (auth.controller.js uploadBase64ToS3, "profile_pictures/<their id>-<time>"). A CDN folder is only ever named by
  * the account's own id, never by a link kept on the account (a person can put any link there).
+ * Two more kinds are listed by deleteAccountData: a file found by its row ({ stored, store, bucket, key, folder },
+ * see deleteRecordedFile; one at a time, so two rows of one object never both leave it for the other), and the
+ * profile photo from before the account existed ({ s3Folder: "profile_pictures/pending_<id>-", bucket }).
  * Runs after the reply; failures are logged.
  */
 export async function deleteStoredFiles(userId, files) {
     let deleted = 0;
-    for (const part of chunks(files, 20)) {
+    const recorded = files.filter((file) => file?.stored);
+    const pendingPhotos = files.filter((file) => /^profile_pictures\/pending_[a-f0-9]{24}-$/i.test(file?.s3Folder || ""));
+    // (an AI-made Library file that also has a row is left to its row, so it is deleted and counted once)
+    const withRow = new Set(recorded.filter((file) => file.store === "s3" && !file.folder && !file.bucket).map((file) => file.key));
+    const listed = files.filter((file) => typeof file === "string" || (file?.s3 && !withRow.has(file.s3)));
+    for (const part of chunks(listed, 20)) {
         const done = await Promise.all(part.map((file) => (
             file?.s3 ? deleteFromS3(file.s3, AI_FILES_BUCKET) : deleteFromR2(file)
         ).then(() => 1).catch(() => 0)));
         deleted += done.reduce((a, b) => a + b, 0);
+    }
+    for (const file of recorded) {
+        deleted += await deleteRecordedFile(file).catch((e) => {
+            console.error(`[account delete] stored file ${file.store} ${file.key} failed (its row is kept):`, e.message);
+            return e.deleted || 0;
+        });
     }
     for (const prefix of [`${userId}/`, `ai-chat-uploads/${userId}/`]) {
         deleted += await deletePrefixFromR2(prefix).catch((e) => {
@@ -313,13 +412,13 @@ export async function deleteStoredFiles(userId, files) {
             return 0;
         });
     }
-    if (/^[a-f0-9]{24}$/i.test(userId)) {
-        for (const [prefix, bucket] of [[`studio-shots/${userId}/`, AI_FILES_BUCKET], [`profile_pictures/${userId}-`, PHOTO_BUCKET]]) {
-            deleted += await deletePrefixFromS3(prefix, bucket).catch((e) => {
-                console.error(`[account delete] CDN folder ${prefix} failed:`, e.message);
-                return e.deleted || 0;
-            });
-        }
+    const cdnFolders = pendingPhotos.map((file) => [file.s3Folder, file.bucket || PHOTO_BUCKET]);
+    if (ACCOUNT_ID.test(userId)) cdnFolders.unshift([`studio-shots/${userId}/`, AI_FILES_BUCKET], [`profile_pictures/${userId}-`, PHOTO_BUCKET]);
+    for (const [prefix, bucket] of cdnFolders) {
+        deleted += await deletePrefixFromS3(prefix, bucket).catch((e) => {
+            console.error(`[account delete] CDN folder ${prefix} failed:`, e.message);
+            return e.deleted || 0;
+        });
     }
     return deleted;
 }

@@ -57,6 +57,7 @@ import { chargeableTokens, pricesFor } from "../services/ai-token-pricing.js";
 import { FIRST_ROUND_OUTPUT, addRound, roundTokensLeft, roundMaxOutput, roundInputTooBig, answerOutputRoom, spillPastPool, claudeInsidePlan, noteSettled, meterLow, refillMeter, METER_REFRESH_MS } from "../services/answer-meter.js";
 import { withMadePictures as withMadePicturesOf } from "../utils/made-pictures.js";
 import { getPresignedUploadUrl, uploadBufferToR2 } from "../config/r2Client.js";
+import { rememberStoredFile } from "../services/stored-files.service.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
 import {
     createSession,
@@ -5333,6 +5334,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const { makeOfficeFile } = await import('../services/office-files.service.js');
                             const file = await makeOfficeFile(args || {});
                             const folder = `ai-generated/office/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                            // (whose file it is, so Delete Account can find it: the file's own folder, whatever its name)
+                            rememberStoredFile({ userId: req.user?._id, store: "r2", key: `${folder}/`, folder: true, kind: "office-file" });
                             const saved = await uploadBufferToR2(file.buffer, file.fileName, file.mime, `${folder}/${file.fileName}`);
                             // Encode the name so links with Hindi or other letters still work
                             const url = `${saved.slice(0, saved.length - file.fileName.length)}${encodeURIComponent(file.fileName)}`;
@@ -5363,6 +5366,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const input = await downloadFile(link, { label: 'file', fallbackName: 'document.docx' });
                             const file = await editOfficeFile(a, input);
                             const folder = `ai-generated/office/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                            rememberStoredFile({ userId: req.user?._id, store: "r2", key: `${folder}/`, folder: true, kind: "office-file" });
                             const saved = await uploadBufferToR2(file.buffer, file.fileName, file.mime, `${folder}/${file.fileName}`);
                             const url = `${saved.slice(0, saved.length - file.fileName.length)}${encodeURIComponent(file.fileName)}`;
                             const note = file.note ? `\n${file.note}` : '';
@@ -5384,6 +5388,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const result = await editPdf(a, inputs);
                             if (result.text) return result.text;
                             const folder = `ai-generated/pdf/${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+                            // (one row for the folder: a split can put up to 50 files in it)
+                            rememberStoredFile({ userId: req.user?._id, store: "r2", key: `${folder}/`, folder: true, kind: "pdf" });
                             const links = [];
                             // Upload a few at a time (split can make up to 50 files)
                             for (let i = 0; i < result.files.length; i += 5) {
@@ -5416,6 +5422,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             });
                             const safeFileName = args.fileName.replace(/[^a-zA-Z0-9.-]/g, '_').toLowerCase();
                             const s3Key = `ai-generated/${Date.now()}-${safeFileName}`;
+                            // (whose file it is, so Delete Account can find it also when no Library record is made:
+                            // a full Library, or a record that could not be saved)
+                            rememberStoredFile({ userId: req.user?._id, store: "s3", key: s3Key, kind: "ai-file" });
                             await s3Client.send(new PutObjectCommand({
                                 Bucket: process.env.AWS_S3_ERP_BUCKET_NAME || 'erp-classgrid',
                                 Key: s3Key,
@@ -5521,6 +5530,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             });
                             const safeFileName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_').toLowerCase();
                             const s3Key = `ai-generated/${Date.now()}-${safeFileName}`;
+                            rememberStoredFile({ userId: req.user?._id, store: "s3", key: s3Key, kind: "ai-file" });
                             await s3Client.send(new PutObjectCommand({
                                 Bucket: process.env.AWS_S3_ERP_BUCKET_NAME || 'erp-classgrid',
                                 Key: s3Key,
@@ -5581,8 +5591,15 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const name = `${String(args?.fileName || "video").replace(/\.mp4$/i, "").replace(/[^\w-]+/g, "-").slice(0, 60) || "video"}.mp4`;
                             const video = await renderVideo(args || {});
                             const { key, url } = await uploadToCdn(video.mp4, name, "video/mp4");
+                            // (whose they are, so Delete Account can find them: the video, also when no Library
+                            // record is made, and each still frame, which never has one)
+                            rememberStoredFile({ userId: req.user?._id, store: "s3", key, kind: "video" });
                             const stills = [];
-                            for (const c of video.checks) stills.push(`${c.at}s: ${(await uploadToCdn(c.jpg, `frame-${c.at}s.jpg`, "image/jpeg")).url}`);
+                            for (const c of video.checks) {
+                                const frame = await uploadToCdn(c.jpg, `frame-${c.at}s.jpg`, "image/jpeg");
+                                rememberStoredFile({ userId: req.user?._id, store: "s3", key: frame.key, kind: "video-frame" });
+                                stills.push(`${c.at}s: ${frame.url}`);
+                            }
                             const libraryRoom = await libraryRoomFor(req.user, video.mp4.length).catch(() => ({ ok: true }));
                             if (libraryRoom.ok) try {
                                 const AiLibraryFile = (await import('../models/AiLibraryFile.js')).default;
@@ -6134,7 +6151,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             const since = Math.min(Date.now() - 2000, req._lastWhatsappSentAt || Date.now() - 2000);
                             const stop = new AbortController();
                             res.on('close', () => stop.abort());
-                            const items = await waitForReply(phone, since, minutes * 60 * 1000, stop.signal);
+                            const items = await waitForReply(phone, since, minutes * 60 * 1000, stop.signal, req.user?._id);
                             if (!items.length) return `The user did not reply on WhatsApp within ${minutes} minutes.`;
                             const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
                             noteMessagesRead(phone, items);
@@ -6166,8 +6183,8 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             // A call's live work (whatsappSince): only messages sent since the call started, never older ones
                             const since = Number(body.whatsappSince) || 0;
                             const items = fromTask || (since
-                                ? (await readRecentMessages(phone, 20)).filter((m) => m.at >= since).slice(0, count)
-                                : await readRecentMessages(phone, count));
+                                ? (await readRecentMessages(phone, 20, req.user?._id)).filter((m) => m.at >= since).slice(0, count)
+                                : await readRecentMessages(phone, count, req.user?._id));
                             if (!items.length) return fromTask ? "No WhatsApp messages from the user for this task yet." : "No WhatsApp messages from the user in the last 3 days.";
                             const { noteMessagesRead } = await import('../services/whatsapp-inbox.service.js');
                             noteMessagesRead(phone, items);
@@ -9726,11 +9743,15 @@ export const generateImage = async (req, res) => {
 
         // Upload to Cloudflare R2
         const imageExt = /png/.test(imageMime) ? 'png' : /webp/.test(imageMime) ? 'webp' : 'jpg';
+        const imageKey = `ai-generated/image-${Date.now()}.${imageExt}`;
+        // (whose picture it is, so Delete Account can find it: its name says nothing, and a picture made in a
+        // private chat is in no chat at all)
+        rememberStoredFile({ userId: req.user?._id, store: "r2", key: imageKey, kind: "picture" });
         const r2Url = await uploadBufferToR2(
             imageBuffer,
             `generated-${Date.now()}.${imageExt}`,
             imageMime,
-            `ai-generated/image-${Date.now()}.${imageExt}`
+            imageKey
         );
 
         let activeSessionId = sessionId;

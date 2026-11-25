@@ -176,6 +176,11 @@ test("only a key the AI's uploads make is ever sent to the CDN bucket", async ()
     assert.equal(aiMadeFileKey({ source: "uploaded", file_key: "ai-generated/1-a.pdf" }), null);
     assert.equal(aiMadeFileKey({ source: "generated", file_key: `ai-library/${A}/x.png` }), null);
     assert.equal(aiMadeFileKey({ source: "generated", file_key: "ai-generated/../profile_pictures/x.png" }), null);
+    // (two dots inside a name are a name: the AI's uploads keep dots, so "notes..final.pdf" is a key they make)
+    assert.equal(aiMadeFileKey({ source: "generated", file_key: "ai-generated/1-notes..final.pdf" }), "ai-generated/1-notes..final.pdf");
+    fill();
+    assert.equal(await s3.deleteFromS3("ai-generated/1-notes..final.pdf", "test-ai-files"), true);
+    await assert.rejects(() => s3.deleteFromS3("ai-generated/../1-notes.pdf", "test-ai-files"), /needs an object key/);
     assert.equal(aiMadeFileKey({ source: "generated", file_key: null }), null);
     assert.equal(aiMadeFileKey({ source: "generated" }), null);
     assert.equal(aiMadeFileKey(null), null);

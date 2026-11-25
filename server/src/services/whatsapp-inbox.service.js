@@ -6,6 +6,7 @@ import crypto from "crypto";
 import redis from "../config/redis.js";
 import { normalizeWhatsappNumber } from "./ai-feature-limits.js";
 import { generateR2UploadUrl } from "./r2.service.js";
+import { rememberStoredFile } from "./stored-files.service.js";
 
 const GRAPH = "https://graph.facebook.com/v22.0";
 const INBOX_KEY = (number) => `wa:inbox:${number}`;
@@ -63,8 +64,11 @@ export async function saveIncomingMessages(value) {
     }
 }
 
-// A file the user sent: downloaded from Meta and put on our CDN (R2), once, so the Agent can open it
-async function mediaToCdn(media) {
+// A file the user sent: downloaded from Meta and put on our CDN (R2), once, so the Agent can open it.
+// Whose file it is gets written down (services/stored-files.service.js), so Delete Account can find it: its name is
+// random and says nothing. It is kept by `number` (the inbox it came from), and with the account too when the
+// caller gave one (`owner`: the account whose inbox is being read).
+async function mediaToCdn(media, number = null, owner = null) {
     if (!/^\d+$/.test(media.id)) throw new Error("bad file id");
     const cached = await redis.get(MEDIA_KEY(media.id)).catch(() => null);
     if (cached) return cached;
@@ -83,16 +87,18 @@ async function mediaToCdn(media) {
     const base = (media.filename || "file").replace(/[^a-zA-Z0-9.-]/g, "_").replace(/\.[a-z0-9]{1,6}$/i, "").slice(0, 80);
     const name = `whatsapp-files/${crypto.randomUUID()}-${base}${ext}`;
     const { uploadUrl, publicUrl } = await generateR2UploadUrl(name, mime);
+    // (the bucket as r2.service.js generateR2UploadUrl names it; the row leaves it out when it is the usual one)
+    rememberStoredFile({ userId: owner, whatsappNumber: number, store: "r2", bucket: process.env.R2_BUCKET_NAME || "classgrid-bucket", key: name, kind: "whatsapp-file" });
     const put = await fetch(uploadUrl, { method: "PUT", body: buffer, headers: { "Content-Type": mime }, signal: AbortSignal.timeout(60000) });
     if (!put.ok) throw new Error(`upload failed (${put.status})`);
     redis.set(MEDIA_KEY(media.id), publicUrl, "EX", TTL_S).catch(() => {});
     return publicUrl;
 }
 
-async function withFiles(items) {
+async function withFiles(items, number = null, owner = null) {
     for (const item of items) {
         if (!item.media) continue;
-        try { item.fileUrl = await mediaToCdn(item.media); } catch (e) { item.fileError = e.message; }
+        try { item.fileUrl = await mediaToCdn(item.media, number, owner); } catch (e) { item.fileError = e.message; }
     }
     return items;
 }
@@ -102,16 +108,18 @@ async function inbox(number) {
     return raw.map((r) => { try { return JSON.parse(r); } catch { return null; } }).filter(Boolean);
 }
 
-// The user's latest WhatsApp messages to Classgrid (newest first), with files turned into links
-export async function readRecentMessages(phone, count = 5) {
+// The user's latest WhatsApp messages to Classgrid (newest first), with files turned into links.
+// `owner` (here and in the readers below): the id of the account whose number this is, when the caller knows it;
+// a file saved while reading is then written down as that account's (see mediaToCdn).
+export async function readRecentMessages(phone, count = 5, owner = null) {
     const number = normalizeWhatsappNumber(phone);
     if (!number) return [];
-    return withFiles((await inbox(number)).slice(0, Math.max(1, Math.min(count, KEEP))));
+    return withFiles((await inbox(number)).slice(0, Math.max(1, Math.min(count, KEEP))), number, owner);
 }
 
 // Waits for the user's next WhatsApp message after `sinceMs` (checks every 3 s, at most `timeoutMs`, stops when
 // `signal` aborts). Reactions don't count as a reply. Returns the new messages (oldest first, files as links).
-export async function waitForReply(phone, sinceMs, timeoutMs, signal) {
+export async function waitForReply(phone, sinceMs, timeoutMs, signal, owner = null) {
     const number = normalizeWhatsappNumber(phone);
     if (!number) return [];
     const until = Date.now() + timeoutMs;
@@ -121,7 +129,7 @@ export async function waitForReply(phone, sinceMs, timeoutMs, signal) {
         if ((await inbox(number)).some(isReply)) {
             // A few seconds more, so a reply sent as several messages (text, then a file) arrives together
             await new Promise((r) => setTimeout(r, 5000));
-            return withFiles((await inbox(number)).filter(isReply).reverse());
+            return withFiles((await inbox(number)).filter(isReply).reverse(), number, owner);
         }
         await new Promise((r) => setTimeout(r, 3000));
     }
@@ -139,27 +147,27 @@ export async function noteMessagesRead(phone, items) {
 }
 
 // Messages (not reactions) newer than `sinceMs` that the Agent has not read yet: oldest first, files as links
-export async function unreadMessages(phone, sinceMs = 0) {
+export async function unreadMessages(phone, sinceMs = 0, owner = null) {
     const number = normalizeWhatsappNumber(phone);
     if (!number) return [];
     const readUpTo = Number(await redis.get(READ_UPTO_KEY(number)).catch(() => 0)) || 0;
     const after = Math.max(Number(sinceMs) || 0, readUpTo);
-    return withFiles((await inbox(number)).filter((m) => m.at > after && m.type !== "reaction").reverse());
+    return withFiles((await inbox(number)).filter((m) => m.at > after && m.type !== "reaction").reverse(), number, owner);
 }
 
 // These messages of a number (by WhatsApp message id), oldest first, with files turned into links
-export async function messagesByIds(phone, ids) {
+export async function messagesByIds(phone, ids, owner = null) {
     const number = normalizeWhatsappNumber(phone);
     if (!number || !ids?.length) return [];
     const want = new Set(ids);
-    return withFiles((await inbox(number)).filter((m) => want.has(m.id)).reverse());
+    return withFiles((await inbox(number)).filter((m) => want.has(m.id)).reverse(), number, owner);
 }
 
 // Messages of a number since `sinceMs` (oldest first, files as links), read or not
-export async function messagesSince(phone, sinceMs) {
+export async function messagesSince(phone, sinceMs, owner = null) {
     const number = normalizeWhatsappNumber(phone);
     if (!number) return [];
-    return withFiles((await inbox(number)).filter((m) => m.at >= (Number(sinceMs) || 0) && m.type !== "reaction").reverse());
+    return withFiles((await inbox(number)).filter((m) => m.at >= (Number(sinceMs) || 0) && m.type !== "reaction").reverse(), number, owner);
 }
 
 // The newest message time the Agent already read with its own WhatsApp tools

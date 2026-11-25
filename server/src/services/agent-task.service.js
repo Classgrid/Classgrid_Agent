@@ -320,7 +320,7 @@ export async function startCallTask({ user, phone, question, sessionId, callStar
             await AgentTask.updateMany({ _id: { $in: older.map((t) => t._id) } }, { $set: { status: "done", wake_at: null, heartbeat_at: null } });
             for (const t of older) await endTaskLog(t._id);
         }
-        await saveTaskMessages(task, await messagesSince(number, callStartedAt || Date.now()));
+        await saveTaskMessages(task, await messagesSince(number, callStartedAt || Date.now(), user._id));
     }
     await logSmall(task, "agent", question);
     return String(task._id);
@@ -799,7 +799,7 @@ export async function onWhatsappMessage(value) {
 // The small model's side (owner's design): reply to the user at once, save the messages in the task's record, and
 // pass them to the big model. The big model is never stopped: a running one gets them right after its run.
 async function takeMessages(number, user, ids, replied = "") {
-    const items = await messagesByIds(number, ids);
+    const items = await messagesByIds(number, ids, user?._id);
     if (!items.length) return;
     const inUse = numberInUse(number);
     let task = await AgentTask.findOne({ phone: number, status: { $in: OPEN } }).sort({ updatedAt: -1 });
