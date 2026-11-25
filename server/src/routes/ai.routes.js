@@ -140,10 +140,13 @@ router.get("/voices", isAuthenticated, listVoices);
 // The phone app's fast voice mode: what the user said in, one stream out with the answer's text and the voice of
 // every sentence as soon as it is ready (as fast as the WhatsApp voice call; ai-voice.controller.js)
 router.post("/voice/turn", isAuthenticated, requireChatOnboarding, voiceTurn);
-router.get("/agent-reviews", isAuthenticated, getAgentReviews);
-router.put("/agent-reviews/:id/status", isAuthenticated, updateAgentReviewStatus);
-router.delete("/agent-reviews/:id", isAuthenticated, deleteAgentReview);
-router.post("/agent-reviews/bulk-delete", isAuthenticated, bulkDeleteAgentReviews);
+// People's feedback reports ("Not helpful" and its reason, with the reporter's name and email): the Classgrid team's
+// page only (Super admin > Agent Reviews). These four asked for a sign-in and nothing more, so any signed-in person
+// could read, change and delete everyone's reports (found 2026-11-25).
+router.get("/agent-reviews", isAuthenticated, requireRole("super_admin"), getAgentReviews);
+router.put("/agent-reviews/:id/status", isAuthenticated, requireRole("super_admin"), updateAgentReviewStatus);
+router.delete("/agent-reviews/:id", isAuthenticated, requireRole("super_admin"), deleteAgentReview);
+router.post("/agent-reviews/bulk-delete", isAuthenticated, requireRole("super_admin"), bulkDeleteAgentReviews);
 router.get("/cron-process-reviews", processAgentReviewsCron);
 
 // Image Generation
