@@ -974,8 +974,13 @@ function LoginContent() {
   const handleSetupAge = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-    if (!age || isNaN(Number(age)) || Number(age) < 13 || Number(age) > 120) {
+    if (!age || isNaN(Number(age)) || Number(age) <= 0 || Number(age) > 120) {
        setError("Please enter a valid age.");
+       return;
+    }
+    // Classgrid is for 18 and over (owner, 2026-11-25; the server refuses a younger age too: utils/min-age.js)
+    if (Number(age) < 18) {
+       setError("You need to be 18 or older to use Classgrid.");
        return;
     }
     setLoading(true);

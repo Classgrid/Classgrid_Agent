@@ -124,6 +124,7 @@ import { RecaptchaVerificationError, verifyRecaptchaToken } from "../services/re
 import { isPublicChatAccount, needsChatOnboarding, isSharedTestWhatsapp, readableJobRole, whatsappStepDone } from "../utils/chat-onboarding.js";
 import { isWebsiteOrigin } from "../utils/client-app.js";
 import { isFeatureOn, sendFeatureOff } from "../services/feature-flag.service.js";
+import { ageGiven, ageProblem } from "../utils/min-age.js";
 
 const JWT_SECRET = getJwtSecret();
 const getFrontendUrl = () => {
@@ -3230,6 +3231,8 @@ export const chatOnboard = async (req, res) => {
         await connectDB();
         const { email, name, password, age, role: rawRole, whatsappPhone } = req.body;
         const role = readableJobRole(rawRole); // "software_engineer" -> "Software Engineer"
+        // 18 and over only (utils/min-age.js): a younger age is refused here whatever the screen let through
+        if (ageGiven(age) && ageProblem(age)) return res.status(400).json({ message: ageProblem(age), code: "age_not_allowed" });
         const User = (await import('../models/User.js')).default;
         const bcrypt = (await import('bcryptjs')).default;
         const jwt = (await import('jsonwebtoken')).default;
@@ -3608,6 +3611,9 @@ export const chatFinalizeOnboarding = async (req, res) => {
         if (!email || (!skipWhatsapp && (!whatsappPhone || !whatsappOtp))) {
             return res.status(400).json({ message: 'Email, WhatsApp number and OTP are required' });
         }
+        // 18 and over only (utils/min-age.js): a younger age is refused here whatever the screen let through, and
+        // before the WhatsApp code is used up, so the person is not left with a spent code
+        if (ageGiven(age) && ageProblem(age)) return res.status(400).json({ message: ageProblem(age), code: "age_not_allowed" });
 
         // Proof of email ownership: the ticket issued by chatVerifyEmailOtp, bound to this email
         let ticket;
