@@ -74,7 +74,7 @@ const model = (name) => ({
 });
 for (const name of ["ActivityLog", "AgentTask", "AiLibraryFile", "AiMemoryNote", "AiSchedule", "AiSkill", "AiUsageLog", "Call", "ChatGroup",
     "ContentReport", "CustomMcpServer", "EmailJob", "IdeProject", "LiveDoc", "Notification", "NotificationLog", "OnboardingEvent", "Organization",
-    "PushSubscription", "SavedSong", "SharePage", "StoredFile", "User", "UserProfile", "UserStorageQuota", "UserSession", "WhatsappDirectSend"]) {
+    "PushSubscription", "SavedSong", "SharePage", "StoredFile", "StudentApplication", "User", "UserProfile", "UserStorageQuota", "UserSession", "WhatsappDirectSend"]) {
     mock.module(`../src/models/${name}.js`, { defaultExport: model(name) });
 }
 mock.module("../src/models/RemoteChat.js", { defaultExport: model("RemoteChat"), namedExports: { RemoteDevice: model("RemoteDevice") } });
@@ -420,7 +420,7 @@ test("the CDN bucket: the person's folders go page by page, and nothing outside 
     // The AI-made file went from the CDN bucket and was not sent to R2; the uploaded file went from R2
     assert.deepEqual(s3Calls.filter((c) => c.kind === "DeleteObjectCommand").map((c) => [c.Bucket, c.Key]), [["test-ai-files", "ai-generated/1700000000001-report.pdf"]]);
     assert.deepEqual(r2Deleted, [`ai-library/${A}/photo.png`]);
-    assert.deepEqual(r2Folders, [`${A}/`, `ai-chat-uploads/${A}/`]);
+    assert.deepEqual(r2Folders, [`${A}/`, `ai-chat-uploads/${A}/`, `private/student-proofs/${A}/`]);
 });
 
 test("the CDN bucket: one folder failing does not stop the other, and a key the bucket refuses is not counted", async (t) => {
@@ -579,7 +579,7 @@ test("files found by their rows: this person's objects and rows go, another pers
     // 2 Library files + (1 office file, 2 PDFs, 1 picture, 3 on the CDN, 1 WhatsApp file) + 5 screenshots + 2 profile photos
     assert.equal(deleted, 2 + 8 + 5 + 2);
     // Only folders three names deep were ever listed in R2, besides the account's own two folders
-    assert.deepEqual(r2Folders, ["ai-generated/office/1700000000100-abc123/", "ai-generated/pdf/1700000000200-def456/", `${A}/`, `ai-chat-uploads/${A}/`]);
+    assert.deepEqual(r2Folders, ["ai-generated/office/1700000000100-abc123/", "ai-generated/pdf/1700000000200-def456/", `${A}/`, `ai-chat-uploads/${A}/`, `private/student-proofs/${A}/`]);
 });
 
 test("a file kept by number alone follows the inbox's rule: only when the number is this account's alone", async () => {
@@ -775,4 +775,23 @@ test("the row cannot be written: the file is still stored and its link still giv
     assert.match(items[0].fileUrl, /^https:\/\/files\.example\/whatsapp-files\//);
     assert.equal(items[0].fileError, undefined);
     assert.equal(rowsOf("StoredFile").length, 0);
+});
+
+test("applications for student prices go with the account, and the proof documents' folder is the account's own", async () => {
+    await fill();
+    rowsOf("StudentApplication").push(
+        { user_id: A, status: "approved", document: { key: `private/student-proofs/${A}/proof-1.pdf` } },
+        { user_id: A, status: "rejected", document: { key: `private/student-proofs/${A}/proof-0.jpg` } },
+        { user_id: B, status: "pending", document: { key: `private/student-proofs/${B}/proof-1.pdf` } },
+    );
+    const { report, files } = await deleteAccountData(person());
+    assert.equal(report.studentApplications, 2);
+    assert.deepEqual(rowsOf("StudentApplication").map((r) => String(r.user_id)), [B]);
+    await deleteStoredFiles(A, files);
+    assert.ok(r2Folders.includes(`private/student-proofs/${A}/`));
+    assert.ok(!r2Folders.some((p) => p.includes(B)), "nobody else's folder is named");
+    // (never from something that is not an account id)
+    r2Folders.length = 0;
+    for (const notAnId of ["", "undefined", "../", `${A}/`]) await deleteStoredFiles(notAnId, []).catch(() => {});
+    assert.ok(!r2Folders.some((p) => p.startsWith("private/student-proofs/")));
 });

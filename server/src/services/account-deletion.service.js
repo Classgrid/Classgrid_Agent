@@ -13,6 +13,8 @@
 //   - Remote PC: the chats they turned on for the phone, and their computers' switches
 //   - the reports they sent about a doc, a page or a comment, and their rows in the old activity log
 //   - the feedback they sent on answers (thumbs up or down and their words), under every email of the account
+//   - their applications for student prices and the proof document sent with each ("private/student-proofs/<their
+//     id>/" in R2, controllers/ai-student.controller.js)
 //   - WhatsApp: the count of messages the AI sent for them, and what they wrote to Classgrid's number that is still
 //     kept (the last messages, 3 days)
 //   - on the CDN: the screenshots the AI took in their chats (and the lists of them), the files and videos the AI
@@ -38,8 +40,6 @@
 //     files staged from their Drive or Gmail ("ai-temp-cache/", mcp/tools.js), PDFs made by generate_pdf
 //     ("reports/<title>.pdf", mcp/tools.js: one name for everyone who uses the same title), a plugin's icon
 //     ("custom-mcp-icons/"), and published sites ("websites/")
-//   - the proof document of an application for student prices ("private/student-proofs/<their id>/",
-//     controllers/ai-student.controller.js): it has the account's id in its name, and no part here deletes it yet
 //
 // Each part is tried on its own; one that fails is logged and the rest still run, so a storage hiccup never leaves
 // the account half deleted. The files in storage are listed here and removed by deleteStoredFiles after the reply.
@@ -80,6 +80,7 @@ import RemoteChat, { RemoteDevice } from "../models/RemoteChat.js";
 import SavedSong from "../models/SavedSong.js";
 import SharePage from "../models/SharePage.js";
 import StoredFile from "../models/StoredFile.js";
+import StudentApplication from "../models/StudentApplication.js";
 import User from "../models/User.js";
 import UserProfile from "../models/UserProfile.js";
 import UserStorageQuota from "../models/UserStorageQuota.js";
@@ -322,6 +323,9 @@ export async function deleteAccountData(user, { io = null } = {}) {
         ["reportsSent", ContentReport, { reportedBy: user._id }],
         ["activityLog", ActivityLog, { user: user._id }], // the old activity log: what this person opened and did
         ["whatsappSends", WhatsappDirectSend, { userId: user._id }], // the WhatsApp limit's count (its Redis copy goes with "redis")
+        // Applications for student prices: the place of study, the study email, the decision (the proof document
+        // itself goes with the storage folders, deleteStoredFiles)
+        ["studentApplications", StudentApplication, { user_id: user._id }],
     ];
     for (const [name, Model, filter] of byUser) {
         await step(name, async () => (await Model.deleteMany(filter)).deletedCount || 0);
@@ -406,7 +410,10 @@ export async function deleteStoredFiles(userId, files) {
             return e.deleted || 0;
         });
     }
-    for (const prefix of [`${userId}/`, `ai-chat-uploads/${userId}/`]) {
+    // (the proof documents of applications for student prices are in a folder named by the account's id)
+    const ownFolders = [`${userId}/`, `ai-chat-uploads/${userId}/`];
+    if (ACCOUNT_ID.test(userId)) ownFolders.push(`private/student-proofs/${userId}/`);
+    for (const prefix of ownFolders) {
         deleted += await deletePrefixFromR2(prefix).catch((e) => {
             console.error(`[account delete] storage folder ${prefix} failed:`, e.message);
             return 0;
