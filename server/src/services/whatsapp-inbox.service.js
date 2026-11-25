@@ -173,3 +173,15 @@ export async function isNumberBusy(phone) {
     const number = normalizeWhatsappNumber(phone);
     return !!number && !!(await redis.get(BUSY_KEY(number)).catch(() => null));
 }
+
+// A deleted account's number (services/account-deletion.service.js): its inbox, the saved link of each file in it,
+// when it last wrote and how far the Agent had read all leave Redis. Resolves how many keys went. The "seen" marks
+// stay until they run out: they hold only Meta's message id, and without them a message Meta sends again would be
+// saved again. A Redis that cannot be reached throws, so the caller knows this part is not done.
+export async function forgetNumber(phone) {
+    const number = normalizeWhatsappNumber(phone);
+    if (!number) return 0;
+    const raw = await redis.lrange(INBOX_KEY(number), 0, -1);
+    const mediaIds = raw.map((r) => { try { return JSON.parse(r)?.media?.id; } catch { return null; } }).filter((id) => /^\d+$/.test(String(id || "")));
+    return redis.del(INBOX_KEY(number), LAST_IN_KEY(number), READ_UPTO_KEY(number), ...[...new Set(mediaIds)].map((id) => MEDIA_KEY(id)));
+}

@@ -71,13 +71,17 @@
  * ─────────────────────────────────────────────────────────
  */
 
-import { S3Client } from "@aws-sdk/client-s3";
+import { S3Client, DeleteObjectCommand, DeleteObjectsCommand, ListObjectsV2Command } from "@aws-sdk/client-s3";
 
 export const BUCKET_NAME = (
     process.env.AWS_S3_BUCKET
     || process.env.AWS_S3_ERP_BUCKET_NAME
     || "erp-classgrid"
 ).trim();
+// The bucket the AI's own files are written to: the screenshots it takes (services/studio-browser-tools.js saveShot)
+// and the files and videos it makes (ai-chat.controller.js upload_file_to_cdn, services/video-render.service.js
+// uploadToCdn). Named the way those writers name it, so a delete always goes to the bucket the file was put in.
+export const AI_FILES_BUCKET = process.env.AWS_S3_ERP_BUCKET_NAME || "erp-classgrid";
 export const S3_REGION = (
     process.env.AWS_S3_REGION
     || process.env.AWS_S3_ERP_REGION
@@ -130,5 +134,47 @@ export const s3Client = new S3Client({
     region: S3_REGION,
     ...(credentials ? { credentials } : {}),
 });
+
+/**
+ * Deletes one object from the bucket by its key (not a link: a link may point anywhere).
+ */
+export async function deleteFromS3(key, bucket = BUCKET_NAME) {
+    if (typeof key !== "string" || !key || key.startsWith("/") || key.includes("..")) throw new Error("deleteFromS3 needs an object key");
+    await s3Client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+    return true;
+}
+
+/**
+ * Deletes every object whose key starts with `prefix` (a deleted account's own files, "studio-shots/<userId>/"),
+ * 1000 at a time, like deletePrefixFromR2. Resolves the number of objects deleted. The prefix must end in "/" (a
+ * folder) or "-" (files named "<id>-..."), so a short prefix can never empty the bucket, and a key the list gives
+ * that does not start with the prefix is never deleted. Keys the bucket refuses to delete are not counted: once
+ * every page is done they are reported as one error, whose `deleted` says how many did go.
+ */
+export async function deletePrefixFromS3(prefix, bucket = BUCKET_NAME) {
+    if (typeof prefix !== "string" || prefix.length < 3 || !/[/-]$/.test(prefix)) throw new Error("deletePrefixFromS3 needs a folder prefix");
+    let deleted = 0;
+    let refused = 0;
+    let why = "";
+    let token;
+    do {
+        const page = await s3Client.send(new ListObjectsV2Command({ Bucket: bucket, Prefix: prefix, ContinuationToken: token }));
+        const keys = (page.Contents || []).map((o) => ({ Key: o.Key })).filter((o) => o.Key && o.Key.startsWith(prefix));
+        if (keys.length) {
+            const done = await s3Client.send(new DeleteObjectsCommand({ Bucket: bucket, Delete: { Objects: keys, Quiet: true } }));
+            const errors = done?.Errors || [];
+            deleted += keys.length - errors.length;
+            refused += errors.length;
+            if (errors.length && !why) why = errors[0].Code || errors[0].Message || "refused";
+        }
+        token = page.IsTruncated ? page.NextContinuationToken : undefined;
+    } while (token);
+    if (refused) {
+        const error = new Error(`${refused} object(s) under ${prefix} could not be deleted (${why})`);
+        error.deleted = deleted;
+        throw error;
+    }
+    return deleted;
+}
 
 export default s3Client;

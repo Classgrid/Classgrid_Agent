@@ -32,6 +32,8 @@ import AiLibraryFile from '../models/AiLibraryFile.js';
 import UserStorageQuota from '../models/UserStorageQuota.js';
 import { libraryStorageFor } from '../services/plan-limits.service.js';
 import { uploadBufferToR2, deleteFromR2 } from '../config/r2Client.js';
+import { AI_FILES_BUCKET, deleteFromS3 } from '../config/s3Client.js';
+import { aiMadeFileKey } from '../utils/library-file-key.js';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
 import { getIO } from '../services/socket.service.js';
@@ -121,9 +123,47 @@ export const uploadToLibrary = async (req, res) => {
 // is listed, so nothing older than that is ever shown or restored.
 const TRASH_DAYS = 30;
 const inTrash = { source: 'generated', deleted_at: { $ne: null } };
+
+// A file the AI made has its own object on the CDN bucket (utils/library-file-key.js): deleting the file for good
+// deletes that object too, as deleting an uploaded file deletes its R2 object. Until 2026-11-25 only the record went
+// and the object stayed on the CDN for ever. A failure is logged and the rest go on.
+// Called after the files' records are deleted: an object goes only when no Library record is left that points to it
+// (a record of the same object in another account, or a second one in this account, keeps it).
+async function deleteAiMadeObjects(files) {
+  for (const file of files) {
+    const key = aiMadeFileKey(file);
+    if (!key) continue;
+    try {
+      const stillKept = await AiLibraryFile.find({ file_key: key }).select('_id').lean();
+      if (stillKept.length) continue;
+      await deleteFromS3(key, AI_FILES_BUCKET);
+    } catch (err) {
+      console.error('Error deleting from S3:', err);
+    }
+  }
+}
+
+// Deletes the Trash files matching `filter` for good: the records, then the objects of the ones that are really gone
+// (a file restored in the same moment keeps its record, so it keeps its object; when the records cannot be read
+// back, no object is deleted). Resolves how many records went; the objects are deleted afterwards, without the
+// request waiting for them.
+async function deleteTrashed(filter) {
+  const rows = await AiLibraryFile.find(filter).select('file_key source').lean();
+  if (!rows.length) return 0;
+  const ids = rows.map((r) => r._id);
+  const { deletedCount } = await AiLibraryFile.deleteMany({ ...filter, _id: { $in: ids } });
+  AiLibraryFile.find({ _id: { $in: ids } }).select('_id').lean()
+    .then((left) => {
+      const stillThere = new Set(left.map((r) => String(r._id)));
+      return deleteAiMadeObjects(rows.filter((r) => !stillThere.has(String(r._id))));
+    })
+    .catch((err) => console.error('Error deleting Trash files from S3:', err));
+  return deletedCount || 0;
+}
+
 async function purgeOldTrash(userId) {
   const before = new Date(Date.now() - TRASH_DAYS * 24 * 60 * 60 * 1000);
-  await AiLibraryFile.deleteMany({ user_id: userId, ...inTrash, deleted_at: { $ne: null, $lt: before } }).catch(() => {});
+  await deleteTrashed({ user_id: userId, ...inTrash, deleted_at: { $ne: null, $lt: before } }).catch(() => {});
 }
 const libraryChanged = (userId) => {
   try { getIO().to(userId.toString()).emit("ai_library_updated"); } catch (err) { console.error("Failed to emit socket event:", err); }
@@ -182,8 +222,10 @@ export const deleteFromLibrary = async (req, res) => {
         console.error('Error deleting from R2:', err);
       }
     }
-
     await AiLibraryFile.deleteOne({ _id: id });
+    // (a file in the Trash deleted for good: the AI-made file's own object on the CDN bucket goes too, once its
+    // record is gone)
+    await deleteAiMadeObjects([file]);
 
     let quota = await UserStorageQuota.findOne({ user_id: userId });
     if (quota) {
@@ -223,7 +265,7 @@ export const restoreFromTrash = async (req, res) => {
 export const emptyTrash = async (req, res) => {
   try {
     const userId = req.user._id;
-    const { deletedCount } = await AiLibraryFile.deleteMany({ user_id: userId, ...inTrash });
+    const deletedCount = await deleteTrashed({ user_id: userId, ...inTrash });
     libraryChanged(userId);
     return res.status(200).json({ success: true, deleted: deletedCount || 0, quota: await libraryStorageFor(req.user) });
   } catch (error) {
