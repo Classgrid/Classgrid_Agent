@@ -5,7 +5,8 @@
       "namespace": "android_app",
       "package_name": "com.classgrid.mobile",
       "sha256_cert_fingerprints": [
-        "65:CD:81:D9:AA:C5:2B:1D:02:D0:B6:F9:B1:6B:92:0B:B8:25:4B:0A:C8:DE:5B:A8:6B:3B:A5:81:AE:F6:48:09"
+        "65:CD:81:D9:AA:C5:2B:1D:02:D0:B6:F9:B1:6B:92:0B:B8:25:4B:0A:C8:DE:5B:A8:6B:3B:A5:81:AE:F6:48:09",
+        "52:BF:C0:24:DB:B8:3E:28:5C:99:5C:DC:CE:E2:E6:5E:1E:4B:46:DF:26:CC:53:EB:53:FF:6D:2E:21:51:95:C1"
       ]
     }
   }
