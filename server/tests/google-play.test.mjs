@@ -30,12 +30,12 @@ const subPurchase = (over = {}, item = {}) => ({
 
 test("subscription products and base plans map to a plan key and a term", () => {
     assert.deepEqual(R.planForSubscription("classgrid_pro", "pro-monthly"), { key: "pro", term: "month" });
-    assert.deepEqual(R.planForSubscription("classgrid_pro", "pro-yearly"), { key: "pro", term: "year" });
+    assert.deepEqual(R.planForSubscription("classgrid_pro", "pro-annual"), { key: "pro", term: "year" });
     assert.deepEqual(R.planForSubscription("classgrid_max", "max-monthly"), { key: "max", term: "month" });
-    assert.deepEqual(R.planForSubscription("classgrid_max", "max-yearly"), { key: "max", term: "year" });
+    assert.deepEqual(R.planForSubscription("classgrid_max", "max-annual"), { key: "max", term: "year" });
     // a base plan of the other product, unknown ids, and prototype names give nothing
     assert.equal(R.planForSubscription("classgrid_pro", "max-monthly"), null);
-    assert.equal(R.planForSubscription("classgrid_max", "pro-yearly"), null);
+    assert.equal(R.planForSubscription("classgrid_max", "pro-annual"), null);
     assert.equal(R.planForSubscription("classgrid_ultra", "pro-monthly"), null);
     assert.equal(R.planForSubscription("classgrid_pro", "toString"), null);
     assert.equal(R.planKeyForProduct("constructor"), null);
@@ -113,7 +113,7 @@ test("a subscription is refused for another account, an inactive state, the wron
         assert.deepEqual([r.ok, r.status], [false, 400], state);
     }
     assert.equal(R.readSubscription(subPurchase(), { productId: "classgrid_max", userId: USER, now: NOW }).ok, false);
-    assert.equal(R.readSubscription(subPurchase({}, { offerDetails: { basePlanId: "max-yearly" } }), { productId: "classgrid_pro", userId: USER, now: NOW }).ok, false);
+    assert.equal(R.readSubscription(subPurchase({}, { offerDetails: { basePlanId: "max-annual" } }), { productId: "classgrid_pro", userId: USER, now: NOW }).ok, false);
     assert.equal(R.readSubscription(subPurchase({}, { expiryTime: iso(NOW - 1000) }), { productId: "classgrid_pro", userId: USER, now: NOW }).ok, false);
 });
 
@@ -205,10 +205,10 @@ test("idempotency: what to do with a token that was seen before", () => {
 });
 
 test("plan changes: an upgrade's new token gives the new plan and names the token it replaced", () => {
-    const up = subPurchase({ linkedPurchaseToken: "old-token" }, { productId: "classgrid_max", offerDetails: { basePlanId: "max-yearly" }, expiryTime: iso(NOW + 365 * DAY) });
+    const up = subPurchase({ linkedPurchaseToken: "old-token" }, { productId: "classgrid_max", offerDetails: { basePlanId: "max-annual" }, expiryTime: iso(NOW + 365 * DAY) });
     const r = R.readSubscription(up, { productId: "classgrid_max", userId: USER, now: NOW });
     assert.equal(r.ok, true);
-    assert.deepEqual([r.key, r.term, r.productId, r.basePlanId, r.linkedPurchaseToken], ["max", "year", "classgrid_max", "max-yearly", "old-token"]);
+    assert.deepEqual([r.key, r.term, r.productId, r.basePlanId, r.linkedPurchaseToken], ["max", "year", "classgrid_max", "max-annual", "old-token"]);
     const plan = R.planFromSubscription({ id: "pro", billing: "play", status: "active", play_purchase_token: "old-token", expires_at: new Date(NOW + 5 * DAY) }, r, { productId: "classgrid_max", purchaseToken: "new-token", now: NOW });
     assert.equal(plan.play_purchase_token, "new-token");
     assert.equal(plan.id, "max");
@@ -246,8 +246,8 @@ test("a deferred downgrade keeps the higher plan until Google renews it as the l
 });
 
 test("the overview's plan source and term", () => {
-    assert.deepEqual(R.planSourceAndTerm({ billing: "play", play_product_id: "classgrid_max", play_base_plan_id: "max-yearly" }, "max"),
-        { source: "google_play", term: "year", product_id: "classgrid_max", base_plan_id: "max-yearly" });
+    assert.deepEqual(R.planSourceAndTerm({ billing: "play", play_product_id: "classgrid_max", play_base_plan_id: "max-annual" }, "max"),
+        { source: "google_play", term: "year", product_id: "classgrid_max", base_plan_id: "max-annual" });
     assert.deepEqual(R.planSourceAndTerm({ billing: "manual_monthly" }, "pro"), { source: "website", term: "month", product_id: null, base_plan_id: null });
     assert.deepEqual(R.planSourceAndTerm({ billing: "prepaid_yearly" }, "pro"), { source: "website", term: "year", product_id: null, base_plan_id: null });
     assert.deepEqual(R.planSourceAndTerm({ billing: "granted" }, "max"), { source: "granted", term: null, product_id: null, base_plan_id: null });
@@ -290,7 +290,7 @@ test("another paid plan: the same or a higher tier from elsewhere blocks a Play 
 });
 
 test("student offers: read from the line item; an approved student is the GET /api/ai/student rule (verified, not run out)", () => {
-    const r = R.readSubscription(subPurchase({}, { offerDetails: { basePlanId: "pro-yearly", offerId: "student-yearly" }, expiryTime: iso(NOW + 365 * DAY) }), { productId: "classgrid_pro", userId: USER, now: NOW });
+    const r = R.readSubscription(subPurchase({}, { offerDetails: { basePlanId: "pro-annual", offerId: "student-yearly" }, expiryTime: iso(NOW + 365 * DAY) }), { productId: "classgrid_pro", userId: USER, now: NOW });
     assert.equal(r.studentOffer, true);
     assert.equal(r.offerId, "student-yearly");
     assert.equal(R.planFromSubscription(null, r, { productId: "classgrid_pro", purchaseToken: "t", now: NOW }).note, "student price");
@@ -353,4 +353,11 @@ test("the credited mark is short and fixed per token", () => {
     assert.equal(R.creditMark("abc"), R.creditMark("abc"));
     assert.notEqual(R.creditMark("abc"), R.creditMark("abd"));
     assert.equal(R.creditMark("x".repeat(500)).length, 32);
+});
+
+test("the turned-off pro-yearly base plan (monthly by mistake) and max-yearly are never sold or granted", () => {
+    assert.equal(R.planForSubscription("classgrid_pro", "pro-yearly"), null);
+    assert.equal(R.planForSubscription("classgrid_max", "max-yearly"), null);
+    assert.deepEqual(R.planForSubscription("classgrid_pro", "pro-annual"), { key: "pro", term: "year" });
+    assert.deepEqual(R.planForSubscription("classgrid_max", "max-annual"), { key: "max", term: "year" });
 });

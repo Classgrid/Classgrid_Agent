@@ -3,8 +3,11 @@
 // services/google-play.service.js.
 //
 // The products made in the Play Console (the phone app uses exactly these names):
-//   subscriptions: classgrid_pro (base plans pro-monthly, pro-yearly) and classgrid_max (max-monthly, max-yearly);
+//   subscriptions: classgrid_pro (base plans pro-monthly, pro-annual) and classgrid_max (max-monthly, max-annual);
 //     student prices are developer-determined offers on those base plans: student-monthly and student-yearly
+//     (The yearly base plans are "-annual": the first "pro-yearly" was made in the Play Console with a monthly billing
+//     period by mistake on 2026-11-25, and Google lets neither the period of an active base plan be changed nor an id
+//     be used again. pro-yearly was turned off there and is not sold.)
 //   one-time credit packs (consumable): credits_500, credits_1000, credits_2000, credits_5000 (the rupee amount)
 // The phone puts the user's Mongo id in obfuscatedAccountId on every purchase; a purchase is only given to that user.
 import crypto from "crypto";
@@ -17,9 +20,9 @@ export const CREDIT_PACKS_INR = Object.freeze([500, 1000, 2000, 5000]);
 const SUBSCRIPTION_PLANS = Object.freeze({ classgrid_pro: "pro", classgrid_max: "max" });
 const BASE_PLANS = Object.freeze({
     "pro-monthly": { key: "pro", term: "month" },
-    "pro-yearly": { key: "pro", term: "year" },
+    "pro-annual": { key: "pro", term: "year" },
     "max-monthly": { key: "max", term: "month" },
-    "max-yearly": { key: "max", term: "year" },
+    "max-annual": { key: "max", term: "year" },
 });
 
 /** The plan key of a subscription product ("classgrid_pro" -> "pro"), or null for any other id */
