@@ -345,6 +345,7 @@ async function ownClaim({ client, existing, fields }) {
 }
 
 const HAS_OTHER_PLAN = "You already have a plan on Classgrid that is the same or higher. This Google Play purchase was not used, and Google will refund it.";
+const HAS_WEB_PLAN = "Your plan was bought on the Classgrid website, so it is changed there: chat.classgrid.in > Settings > Billing. This Google Play purchase was not used, and Google will refund it.";
 const NOT_STUDENT = "Student prices are for approved students. Apply for student prices in Settings > Billing. This Google Play purchase was not used, and Google will refund it.";
 
 async function grantSubscription({ client, userId, productId, purchaseToken, existing, io }) {
@@ -369,7 +370,7 @@ async function grantSubscription({ client, userId, productId, purchaseToken, exi
 
     // Another plan of the same or a higher tier still running (website, gift, seat, another Play subscription)
     const other = otherPlanDecision(me.plan, { key: sub.key, purchaseToken, linkedPurchaseToken: sub.linkedPurchaseToken });
-    if (other.block) throw new PlayError(409, HAS_OTHER_PLAN, "has_other_plan");
+    if (other.block) throw other.web ? new PlayError(409, HAS_WEB_PLAN, "has_web_plan") : new PlayError(409, HAS_OTHER_PLAN, "has_other_plan");
 
     const owned = await ownClaim({ client, existing, fields: { purchaseToken, userId, type: "subscription", productId, orderId: sub.orderId, linkedPurchaseToken: sub.linkedPurchaseToken } });
     if (owned.answer) return owned.answer;
@@ -828,7 +829,7 @@ export async function handlePlayNotification(n) {
 }
 
 // Final answers of a grant: the purchase is not given (and not acknowledged, so Google refunds it); not tried again
-const FINAL_REFUSALS = new Set(["has_other_plan", "not_student", "other_account", "topup_needs_plan", "wrong_product", "purchase_not_found"]);
+const FINAL_REFUSALS = new Set(["has_other_plan", "has_web_plan", "not_student", "other_account", "topup_needs_plan", "wrong_product", "purchase_not_found"]);
 
 /**
  * A purchase Google tells of before the phone sent it (the app closed or crashed after paying, or a slow UPI payment

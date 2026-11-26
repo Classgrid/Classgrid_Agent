@@ -279,8 +279,12 @@ export function playSubscriptionLive(plan, now = Date.now()) {
 export const PLAY_MANAGE_URL = (productId) =>
     `https://play.google.com/store/account/subscriptions?package=${PLAY_PACKAGE_NAME}${productId ? `&sku=${encodeURIComponent(productId)}` : ""}`;
 
+/** A plan paid on the website (Razorpay): bought, changed and renewed there only */
+export const WEB_BILLINGS = new Set(["manual_monthly", "prepaid_yearly", "upi_autopay"]);
+
 /**
  * Whether a Google Play subscription may replace the plan the user has now:
+ *   { block: true, web: true }   a plan bought on the website is still running: refused whatever the tier (has_web_plan)
  *   { block: true }   the user already has a plan from somewhere else (the website, a gift, a seat, or another Google
  *                     Play subscription that this one does not replace) of the same or a higher tier, still running:
  *                     the purchase is refused (code has_other_plan) and not acknowledged, so Google refunds it
@@ -292,6 +296,9 @@ export function otherPlanDecision(current, { key, purchaseToken, linkedPurchaseT
     if (current.billing === "play" && current.play_purchase_token && (current.play_purchase_token === purchaseToken || current.play_purchase_token === linkedPurchaseToken)) {
         return { block: false, replaces: null };
     }
+    // A plan bought on the website is changed on the website only, whatever the tier (owner, 2026-11-26: "billing or
+    // purchase can happen from one place", as ChatGPT does): code has_web_plan. The phone app shows no buy buttons then
+    if (WEB_BILLINGS.has(current.billing)) return { block: true, replaces: null, web: true };
     if (planTier(current.id) >= planTier(key)) return { block: true, replaces: null };
     return { block: false, replaces: current.billing || "none" };
 }

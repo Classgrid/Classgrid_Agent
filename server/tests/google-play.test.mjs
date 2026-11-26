@@ -276,7 +276,12 @@ test("another paid plan: the same or a higher tier from elsewhere blocks a Play 
     assert.equal(ask(at({ id: "max", billing: "prepaid_yearly" }), "pro").block, true); // website Max, buying Pro
     assert.equal(ask(at({ billing: "granted", expires_at: null }), "pro").block, true); // a gift with no end
     assert.equal(ask(at({ billing: "upi_autopay" }), "pro").block, true);
-    assert.deepEqual(ask(at({}), "max"), { block: false, replaces: "manual_monthly" }); // website Pro, upgrading to Max
+    // a website plan is changed on the website only: even a higher Play plan is refused (has_web_plan)
+    assert.deepEqual(ask(at({}), "max"), { block: true, replaces: null, web: true }); // website Pro, buying Max on Play
+    assert.equal(ask(at({ billing: "prepaid_yearly" }), "max").web, true);
+    assert.equal(ask(at({ billing: "upi_autopay" }), "max").web, true);
+    // a gift lower than the Play plan is still upgraded by it
+    assert.deepEqual(ask(at({ billing: "granted" }), "max"), { block: false, replaces: "granted" });
     // nothing running: ended, cancelled, or Free
     assert.equal(ask(at({ expires_at: new Date(NOW - 1000) }), "pro").block, false);
     assert.equal(ask(at({ status: "expired" }), "pro").block, false);

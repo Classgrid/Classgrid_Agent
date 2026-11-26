@@ -353,7 +353,7 @@ export function SettingsBillingSection() {
                 {student?.verified ? (
                   <>
                     <span className="flex items-center gap-2">{pill("Student", true)}<span>Student prices until {dayText(student.expires_at)}</span></span>
-                    <a className="underline hover:text-foreground" href={`${PRICING_URL}?student=1`} target="_blank" rel="noopener noreferrer">See student prices</a>
+                    {!playLive && <a className="underline hover:text-foreground" href={`${PRICING_URL}?student=1`} target="_blank" rel="noopener noreferrer">See student prices</a>}
                   </>
                 ) : student?.application?.status === "pending" ? (
                   <>
@@ -402,7 +402,10 @@ export function SettingsBillingSection() {
 
           <div className="text-lg font-semibold text-foreground mt-8 mb-2">Payment details</div>
           <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-            <div className="text-base font-semibold"><a className="text-blue-600 dark:text-blue-400 hover:underline" href={PRICING_URL} target="_blank" rel="noopener noreferrer">Plans</a> are bought on the website</div>
+            {/* (a plan bought in the phone app is changed in Google Play only: no link to buy another here) */}
+            {playLive
+              ? <div className="text-base font-semibold">Your plan is managed in <a className="text-blue-600 dark:text-blue-400 hover:underline" href={playUrl} onClick={openOutside(playUrl)} target="_blank" rel="noopener noreferrer">Google Play</a></div>
+              : <div className="text-base font-semibold"><a className="text-blue-600 dark:text-blue-400 hover:underline" href={PRICING_URL} target="_blank" rel="noopener noreferrer">Plans</a> are bought on the website</div>}
             <div className="text-sm text-muted-foreground mt-2 max-w-[520px] mx-auto">Credits are bought here, with Buy credits. UPI, cards and net banking. You pay once for a month or a year, or for the credits you choose. Nothing is charged by itself.</div>
           </div>
           <p className="text-xs text-muted-foreground mt-2.5">Receipts are sent to your email. Prices include GST.</p>

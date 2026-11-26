@@ -150,7 +150,8 @@ beforeEach(() => {
     for (const m of [User, GooglePlayPurchase, AiCreditTransaction, PlatformTransaction]) { m.rows.length = 0; for (const k of Object.keys(m.failNext)) delete m.failNext[k]; }
     google.subs = {}; google.products = {}; google.orders = {}; google.acks = []; google.consumes = [];
     User.rows.push(
-        { _id: ME, name: "Asha", email: "asha@example.com", plan: { id: "pro", status: "active", billing: "manual_monthly", expires_at: new Date(Date.now() + 10 * DAY) }, ai_tokens: { ai_credits_balance: 0, total_ai_credits_purchased: 0, ai_credits_end_date: null } },
+        // (a gifted Pro with an end date: a higher Play plan may replace it; a website plan may not, see has_web_plan)
+        { _id: ME, name: "Asha", email: "asha@example.com", plan: { id: "pro", status: "active", billing: "granted", expires_at: new Date(Date.now() + 10 * DAY) }, ai_tokens: { ai_credits_balance: 0, total_ai_credits_purchased: 0, ai_credits_end_date: null } },
         { _id: OTHER, name: "Ravi", email: "ravi@example.com", plan: { id: "free" }, ai_tokens: {} },
     );
 });
@@ -234,7 +235,7 @@ test("a plan change replacing another account's token is refused and not acknowl
     sub("B", { linked: "A" });
     await assert.rejects(verifySub("B"), (e) => e.status === 403 && e.body.code === "other_account");
     assert.equal(google.acks.length, 0);
-    assert.equal(me().plan.billing, "manual_monthly");
+    assert.equal(me().plan.billing, "granted");
     // also when the other account holds it on its plan without a row
     GooglePlayPurchase.rows.length = 0;
     User.rows.find((u) => u._id === OTHER).plan = { id: "pro", status: "active", billing: "play", play_purchase_token: "A", expires_at: new Date(Date.now() + DAY) };
@@ -270,17 +271,34 @@ test("a cancelled subscription still paid until its expiry is given until then",
 });
 
 test("another plan of the same or a higher tier refuses the Play purchase: has_other_plan, not acknowledged", async () => {
-    me().plan = { id: "max", status: "active", billing: "prepaid_yearly", expires_at: new Date(Date.now() + 100 * DAY) };
+    me().plan = { id: "max", status: "active", billing: "granted", expires_at: new Date(Date.now() + 100 * DAY) };
     sub("D");
     await assert.rejects(verifySub("D"), (e) => e.status === 409 && e.body.code === "has_other_plan");
     assert.equal(google.acks.length, 0);
     assert.equal(GooglePlayPurchase.rows.length, 0);
-    assert.equal(me().plan.billing, "prepaid_yearly");
-    // a lower website plan (Pro) upgraded to Max on Play: taken
-    me().plan = { id: "pro", status: "active", billing: "manual_monthly", expires_at: new Date(Date.now() + 10 * DAY) };
+    assert.equal(me().plan.billing, "granted");
+    // a lower gifted plan (Pro) upgraded to Max on Play: taken
+    me().plan = { id: "pro", status: "active", billing: "granted", expires_at: new Date(Date.now() + 10 * DAY) };
     const r = await verifySub("D");
     assert.equal(r.plan.key, "max");
     assert.equal(me().plan.billing, "play");
+});
+
+test("a plan bought on the website is changed on the website only: any Play plan is refused (has_web_plan), not acknowledged", async () => {
+    for (const plan of [
+        { id: "pro", status: "active", billing: "manual_monthly", expires_at: new Date(Date.now() + 10 * DAY) }, // lower than Max
+        { id: "max", status: "active", billing: "prepaid_yearly", expires_at: new Date(Date.now() + 100 * DAY) },
+    ]) {
+        me().plan = plan;
+        sub("W");
+        await assert.rejects(verifySub("W"), (e) => e.status === 409 && e.body.code === "has_web_plan");
+        assert.equal(google.acks.length, 0);
+        assert.equal(GooglePlayPurchase.rows.length, 0);
+        assert.equal(me().plan.billing, plan.billing);
+    }
+    // once the website plan has ended, the phone may sell one
+    me().plan = { id: "pro", status: "active", billing: "manual_monthly", expires_at: new Date(Date.now() - DAY) };
+    assert.equal((await verifySub("W")).plan.key, "max");
 });
 
 test("a student offer: refused (not_student, not acknowledged) unless the user is an approved student", async () => {

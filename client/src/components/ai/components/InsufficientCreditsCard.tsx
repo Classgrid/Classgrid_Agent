@@ -15,7 +15,7 @@ import React from 'react';
 import { XCircle, Sparkles } from 'lucide-react';
 import { Button } from './ui/button';
 import { usePlanOverview } from '@/features/shared/queries/usePlanOverview';
-import { openPricing } from './planInfo';
+import { openPricing, openOutside, usePlayManageUrl } from './planInfo';
 
 export interface InsufficientCreditsCardProps {
   onDismiss: () => void;
@@ -48,6 +48,8 @@ export function InsufficientCreditsCard({
   const { data: overview } = usePlanOverview();
   const plan = overview?.enabled && overview.plan?.limits && overview.plan.name ? overview.plan : null;
   const free = plan?.key === "free";
+  // (a phone plan on hold or paused: fixed in Google Play, never bought again here)
+  const playUrl = usePlayManageUrl();
 
   return (
     <div className="w-full max-w-md rounded-xl border border-border bg-card p-5 shadow-sm">
@@ -81,11 +83,11 @@ export function InsufficientCreditsCard({
 
         <Button
           variant="outline"
-          onClick={free ? openPricing : onUpgrade}
+          onClick={free ? (playUrl ? () => openOutside(playUrl) : openPricing) : onUpgrade}
           className="relative h-10 rounded-lg border-border bg-accent px-4 md:px-6 text-sm font-medium tracking-tight text-foreground/90 transition-all duration-200 hover:bg-slate-200 dark:hover:bg-accent/80 hover:border-border hover:text-foreground cursor-pointer flex items-center gap-2"
         >
           <Sparkles className="w-4 h-4" />
-          {plan ? (free ? "See plans" : "Top up") : "Purchase Credits"}
+          {plan ? (free ? (playUrl ? "Manage in Google Play" : "See plans") : "Top up") : "Purchase Credits"}
         </Button>
       </div>
     </div>

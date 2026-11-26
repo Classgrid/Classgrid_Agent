@@ -213,11 +213,19 @@ router.get("/plan", isAuthenticated, async (req, res) => {
         const [enabled, plan] = await Promise.all([plansEnabled(), planOf(req.user)]);
         const counters = enabled ? await weekCounters(req.user._id, req.user.ai_tokens) : null;
         const mine = req.user.plan || {};
+        // Where this plan is bought, changed and renewed (owner, 2026-11-26: one place only, as ChatGPT does):
+        // "google_play" (the phone app; play_live while Google still runs it: active, grace, on hold or paused),
+        // "website" (chat.classgrid.in, the desktop app and the extension), "granted" (a gift), or null (Free)
+        const { planSourceAndTerm, playSubscriptionLive, PLAY_MANAGE_URL } = await import("../services/google-play-rules.js");
+        const key = enabled ? planKeyOf(req.user) : "free";
+        const playLive = mine.billing === "play" && playSubscriptionLive(mine);
+        const source = playLive ? "google_play" : planSourceAndTerm(mine, key).source;
         res.json({
             enabled,
-            key: enabled ? planKeyOf(req.user) : "free",
+            key,
             name: plan?.name || "Free",
             status: mine.status || "active", billing: mine.billing || "none", expires_at: mine.expires_at || null, started_at: mine.started_at || null,
+            source: source || null, play_live: playLive, play_state: mine.play_state || null, manage_url: playLive ? PLAY_MANAGE_URL(mine.play_product_id || "") : null,
             limits: plan ? { tokens_per_window: plan.tokens_per_window, window_reset_value: plan.window_reset_value, window_reset_unit: plan.window_reset_unit, tokens_per_week: plan.tokens_per_week, claude_credits_per_week: plan.claude_credits_per_week, fable_share_percent: plan.fable_share_percent, images_per_period: plan.images_per_period, call_minutes_per_period: plan.call_minutes_per_period, projects_max: plan.projects_max, helpers_per_chat: plan.helpers_per_chat } : null,
             week: counters ? { used: counters.week_used, claude_used: counters.claude_week_used, fable_used: counters.fable_week_used, ends_at: counters.weekEnd } : null,
         });
