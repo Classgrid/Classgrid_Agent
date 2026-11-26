@@ -20,6 +20,11 @@ const CODES_PER_DAY = 5;
 const MAX_TRIES = 5;
 const EXTRA_MAX = MAX_ACCOUNT_EMAILS - 1;
 
+// The test college's addresses (owner, 2026-11-26): "@classgridtest.ac.in" does not exist, so its code is always
+// 123456 and no email is sent. Only this one test domain; every real address gets a real code.
+const TEST_EMAIL_DOMAIN = "classgridtest.ac.in";
+const TEST_EMAIL_CODE = "123456";
+const isTestEmail = (email) => String(email || "").toLowerCase().endsWith(`@${TEST_EMAIL_DOMAIN}`);
 const hashCode = (userId, email, code) => crypto.createHash("sha256").update(`${userId}:${email}:${code}`).digest("hex");
 
 export async function accountEmailsOf(userId) {
@@ -95,7 +100,7 @@ export const addAccountEmail = async (req, res) => {
         }
         const p = before.account_email_pending || {};
         const sentToday = p.codes_day === today ? Number(p.codes_today) || 0 : 0;
-        const code = String(crypto.randomInt(100000, 1000000));
+        const code = isTestEmail(email) ? TEST_EMAIL_CODE : String(crypto.randomInt(100000, 1000000));
         await User.updateOne({ _id: req.user._id }, { $set: {
             "account_email_pending.email": email,
             "account_email_pending.code_hash": hashCode(req.user._id, email, code),
@@ -105,6 +110,8 @@ export const addAccountEmail = async (req, res) => {
             "account_email_pending.codes_day": today,
             "account_email_pending.codes_today": sentToday + 1,
         } });
+        // (the test college's address gets no email: its code is 123456)
+        if (isTestEmail(email)) return res.json({ success: true, data: { pending_email: email, expires_in_minutes: CODE_TTL_MINUTES } });
         const name = String(user.name || "there").replace(/[<>&]/g, "");
         const html = baseTemplate({
             title: "Confirm your email for Classgrid",
