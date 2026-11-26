@@ -1567,7 +1567,7 @@ const CraftingBlock = () => {
     <div className="flex flex-col p-3 max-w-xl">
       <div className="flex items-center justify-start gap-2 mb-4">
         <p
-          className="cg-shine-text bg-[length:200%_100%] bg-clip-text text-base text-transparent animate-[shimmer_5s_linear_infinite]"
+          className="bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-base text-transparent animate-[shimmer_5s_linear_infinite]"
           style={{ animation: "shimmer 5s linear infinite" }}
         >
           Crafting

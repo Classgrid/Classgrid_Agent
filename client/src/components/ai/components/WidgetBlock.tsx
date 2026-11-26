@@ -257,7 +257,7 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
       {!done && (
         <div className="mt-2 flex items-center gap-1.5">
           <p
-            className="cg-shine-text bg-[length:200%_100%] bg-clip-text text-[14px] font-medium text-transparent"
+            className="bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-[14px] font-medium text-transparent"
             style={{ animation: "cgWorkShimmer 2.5s linear infinite" }}
           >
             Working

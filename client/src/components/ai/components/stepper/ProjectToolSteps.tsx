@@ -474,7 +474,7 @@ function HelperItem({ task, answer, failed, loading, live }: { task: string; ans
                   : <ExploreItem key={a.id} step={a} />)}
                 {running && live.state === 'running' && !live.text && !live.actions.some((a) => a.status === 'loading') && live.actions[live.actions.length - 1]?.tool !== '__thought' && (
                   // Same glowing "Thinking" as the main answer
-                  <p className="py-1 w-fit cg-shine-text bg-[length:200%_100%] bg-clip-text text-[13px] font-medium text-transparent" style={{ animation: "shimmer 2.5s linear infinite" }}>
+                  <p className="py-1 w-fit bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-[13px] font-medium text-transparent" style={{ animation: "shimmer 2.5s linear infinite" }}>
                     Thinking
                     <style>{`@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }`}</style>
                   </p>
