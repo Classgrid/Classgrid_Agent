@@ -242,6 +242,18 @@ export const buyPlan = async (req, res) => {
         const key = String(req.body?.plan || "").toLowerCase();
         const term = req.body?.term === "year" ? "year" : "month";
         const student = req.body?.student === true;
+        // A Google Play subscription still running (or on hold): a website plan would replace it while Google keeps
+        // charging every renewal, so it is changed or cancelled in Google Play instead
+        {
+            const { playSubscriptionLive, PLAY_MANAGE_URL } = await import("../services/google-play-rules.js");
+            const me = await User.findById(req.user._id).select("plan").lean();
+            if (playSubscriptionLive(me?.plan)) {
+                return res.status(409).json({
+                    success: false, code: "has_play_plan", manage_url: PLAY_MANAGE_URL(me.plan.play_product_id),
+                    error: "Your plan is a Google Play subscription. Change or cancel it in Google Play (Play Store > Payments & subscriptions), so you are not charged twice.",
+                });
+            }
+        }
         if (student) {
             // Student prices only for a confirmed student (Settings > Billing), until the verification runs out
             const me = await User.findById(req.user._id).select("student_verification").lean();

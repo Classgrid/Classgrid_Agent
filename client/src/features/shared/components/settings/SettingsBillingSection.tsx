@@ -1,7 +1,7 @@
 // Settings > Billing (owner, 2026-11-14, built from the HTML page he approved, laid out like Grok's Billing &
 // invoices): two tiles on top (Current plan with Upgrade; Additional usage with Auto top-up and Buy credits), then
 // Payment details; an Invoices tab with every payment, grant and top-up. Upgrade and Buy credits live only here.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -14,6 +14,16 @@ import { StudentApplyDialog } from "./StudentApplyDialog";
 import { usePlanOverview, useAutoTopup, useSaveAutoTopup, useStudent, n, inr, dayText, type AutoTopup } from "@/features/shared/queries/usePlanOverview";
 
 const PRICING_URL = "https://classgrid.in/pricing";
+// A plan bought in the phone app is changed and cancelled in Google Play, never on the pricing page (a second
+// subscription there would charge twice)
+const PLAY_PACKAGE = "com.classgrid.mobile";
+const playManageUrl = (productId?: string | null) =>
+  `https://play.google.com/store/account/subscriptions?${productId ? `sku=${encodeURIComponent(productId)}&` : ""}package=${PLAY_PACKAGE}`;
+/** Opens a link in the browser (Classgrid Code opens it in the computer's browser) */
+const openOutside = (url: string) => (e: MouseEvent<HTMLAnchorElement>) => {
+  const desk = import.meta.env.VITE_EDITOR === "1" ? (window as unknown as { classgridDesktop?: { openExternal?: (url: string) => Promise<unknown> } }).classgridDesktop : undefined;
+  if (desk?.openExternal) { e.preventDefault(); void desk.openExternal(url); }
+};
 // Credits are sold in fixed packs, on the website and in the phone app alike (owner, 2026-11-22; the server checks
 // the same: ai-credits-topup.controller.js). Everyone sees the same four packs.
 const PACKS: number[] = [500, 1000, 2000, 5000];
@@ -159,6 +169,22 @@ const typeText = (t: any) => {
   return "Adjustment";
 };
 const statusText = (s: string) => (s === "success" ? "Paid" : s === "active" ? "Active" : s === "expired" ? "Used up" : s ? s.charAt(0).toUpperCase() + s.slice(1) : "");
+/** A row's status: a refund that went through reads Refunded, never Paid */
+const rowStatusText = (t: any) => (t.type === "refund" && t.status === "success" ? "Refunded" : statusText(t.status));
+/** What a row cost: rupees, or what Google Play charged in another currency (amount_inr is 0 then; a refund row
+ *  takes it from the payment it refunds). A refund is shown with a minus sign. */
+const rowAmountText = (t: any, rows: any[]) => {
+  const refund = t.type === "refund";
+  const sign = refund ? "−" : "";
+  if (t.amount_inr > 0) return `${sign}${inr(t.amount_inr)}`;
+  const source = refund && t.metadata?.original_payment_id
+    ? rows.find((r) => r.razorpay_payment_id === t.metadata.original_payment_id) || t
+    : t;
+  const cur = source.metadata?.charged_currency;
+  const amt = Number(source.metadata?.charged_amount);
+  if (cur && cur !== "INR" && Number.isFinite(amt) && amt > 0) return `${sign}${cur} ${amt.toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  return "–";
+};
 
 export function SettingsBillingSection() {
   const { data, isLoading } = usePlanOverview();
@@ -263,7 +289,22 @@ export function SettingsBillingSection() {
   const staff = data.enabled && !data.plan.limits;
   const planName = staff ? "Staff" : data.enabled ? data.plan.name : "Free";
   const lim = data.plan.limits || {};
-  const yearly = data.plan.billing === "prepaid_yearly";
+  // A plan bought in the phone app (Google Play): its term is Google's base plan, it renews through Google Play, and
+  // it is changed there (an ended one no longer holds anyone back from buying on the website)
+  // (on hold, paused or in its grace period Google may still charge it, even when the plan itself has lapsed: the
+  // same rule as the server's playSubscriptionLive)
+  const play = data.plan.source === "google_play" || data.plan.billing === "play";
+  const playState = data.plan.play_state || "";
+  const playFix = playState === "SUBSCRIPTION_STATE_ON_HOLD" || playState === "SUBSCRIPTION_STATE_IN_GRACE_PERIOD";
+  const playLive = play && playState !== "SUBSCRIPTION_STATE_EXPIRED"
+    && (playFix || playState === "SUBSCRIPTION_STATE_PAUSED" || (data.enabled && data.plan.key !== "free"));
+  const playUrl = playManageUrl(data.plan.play_product_id);
+  const playRenewText = !play ? "" :
+    playFix ? "Fix your payment in Google Play"
+    : playState === "SUBSCRIPTION_STATE_PAUSED" ? "Paused in Google Play"
+    : data.plan.cancel_at_period_end || playState === "SUBSCRIPTION_STATE_CANCELED" ? (data.plan.expires_at ? `Cancelled, ends on ${dayText(data.plan.expires_at)}` : "Cancelled")
+    : data.plan.expires_at ? `Renews through Google Play on ${dayText(data.plan.expires_at)}` : "Renews through Google Play";
+  const yearly = play ? data.plan.term === "year" : data.plan.billing === "prepaid_yearly";
   const studentPaid = !!data.plan.student_price;
   // Top-ups are for paid plans (owner, 2026-11-15): on Free the tile offers Upgrade instead
   const freePlan = data.enabled && !!data.plan.limits && data.plan.key === "free"; // (staff: no plan limits, top-ups stay)
@@ -296,14 +337,18 @@ export function SettingsBillingSection() {
             <div className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-center justify-between gap-3">
                 <div className="text-sm text-muted-foreground">Current plan</div>
+                {playLive ? (
+                  <a className={btnWhite} href={playUrl} target="_blank" rel="noopener noreferrer" onClick={openOutside(playUrl)}>Manage in Google Play</a>
+                ) : (
                 <a className={btnWhite} href={PRICING_URL} target="_blank" rel="noopener noreferrer" onClick={(e) => {
                   // Classgrid Code shows the pricing page in the computer's browser
                   const desk = import.meta.env.VITE_EDITOR === "1" ? (window as unknown as { classgridDesktop?: { openExternal?: (url: string) => Promise<unknown> } }).classgridDesktop : undefined;
                   if (desk?.openExternal) { e.preventDefault(); void desk.openExternal(PRICING_URL); }
                 }}>Upgrade</a>
+                )}
               </div>
               <div className="text-[28px] font-semibold mt-2">{planName}</div>
-              <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-3.5"><span>{priceLine}</span>{data.enabled && data.plan.key !== "free" && data.plan.billing !== "granted" && <span>Does not renew by itself</span>}</div>
+              <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-3.5"><span>{priceLine}</span>{playLive ? <span className={`text-right ${playFix ? "text-amber-500" : ""}`}>{playRenewText}</span> : data.enabled && data.plan.key !== "free" && data.plan.billing !== "granted" && !play && <span>Does not renew by itself</span>}</div>
               <div className="flex justify-between gap-4 text-[13px] text-muted-foreground mt-1.5">
                 {student?.verified ? (
                   <>
@@ -326,7 +371,9 @@ export function SettingsBillingSection() {
             <div className="rounded-xl border border-border bg-card p-5">
               <div className="flex items-center justify-between gap-2">
                 <div className="text-sm text-muted-foreground">Additional usage</div>
-                {freePlan ? (
+                {freePlan && playLive ? (
+                  <a className={btnWhite} href={playUrl} target="_blank" rel="noopener noreferrer" onClick={openOutside(playUrl)}>Manage in Google Play</a>
+                ) : freePlan ? (
                   <a className={btnWhite} href={PRICING_URL} target="_blank" rel="noopener noreferrer">Upgrade</a>
                 ) : (
                   <div className="flex gap-2">
@@ -371,9 +418,9 @@ export function SettingsBillingSection() {
                     <tr key={t._id}>
                       <td className="px-5 py-3 border-b border-border last:border-b-0 whitespace-nowrap">{dayText(t.createdAt)}</td>
                       <td className="px-5 py-3 border-b border-border">{typeText(t)}</td>
-                      <td className="px-5 py-3 border-b border-border text-center">{t.amount_inr > 0 ? inr(t.amount_inr) : "–"}</td>
+                      <td className="px-5 py-3 border-b border-border text-center">{rowAmountText(t, rows)}</td>
                       <td className="px-5 py-3 border-b border-border text-center tabular-nums">{t.credits_added > 0 ? `+${n(t.credits_added)}` : "–"}</td>
-                      <td className="px-5 py-3 border-b border-border text-center">{statusText(t.status)}</td>
+                      <td className="px-5 py-3 border-b border-border text-center">{rowStatusText(t)}</td>
                     </tr>
                   ))}
                 </tbody>

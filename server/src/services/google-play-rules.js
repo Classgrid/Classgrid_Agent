@@ -133,9 +133,30 @@ export function activeSubscriptionItem(purchase, productId = null, now = Date.no
         || items.reduce((a, b) => (ms(b.expiryTime) > ms(a.expiryTime) ? b : a));
 }
 
+// How far ahead a plan in its grace period is kept on at a time (checked with Google again before then: playRefreshDue)
+const GRACE_STEP_MS = 12 * 3600 * 1000;
+
+/**
+ * In the grace period Google keeps the person's access while it retries the payment, but the line item's expiry can
+ * already be in the past. Then the plan's line item is kept paid for a short step at a time (GRACE_STEP_MS), and the
+ * next check moves it on, until Google says the payment came (renewed) or failed (on hold).
+ */
+export function graceItem(purchase, productId = null, now = Date.now()) {
+    if (purchase?.subscriptionState !== SUB_GRACE) return null;
+    const items = (Array.isArray(purchase?.lineItems) ? purchase.lineItems : [])
+        .filter((li) => planForSubscription(li?.productId, li?.offerDetails?.basePlanId));
+    if (!items.length) return null;
+    const li = (productId && items.find((x) => x.productId === productId))
+        || items.reduce((a, b) => ((ms(b.expiryTime) || 0) > (ms(a.expiryTime) || 0) ? b : a));
+    const until = Math.max(ms(li.expiryTime) || 0, ms(now) + GRACE_STEP_MS);
+    return { ...li, expiryTime: new Date(until).toISOString() };
+}
+
 /** The line item paid for now, only while the subscription's state is a paid one */
 export const entitledItem = (purchase, productId = null, now = Date.now()) =>
-    (subscriptionGrantable(purchase?.subscriptionState) ? activeSubscriptionItem(purchase, productId, now) : null);
+    (subscriptionGrantable(purchase?.subscriptionState)
+        ? activeSubscriptionItem(purchase, productId, now) || graceItem(purchase, productId, now)
+        : null);
 
 /** The purchase is about this product: one of its line items is it, or will be replaced by it (a deferred change) */
 export const purchaseNamesProduct = (purchase, productId) => (Array.isArray(purchase?.lineItems) ? purchase.lineItems : [])
@@ -190,7 +211,7 @@ export function readSubscription(purchase, { productId, userId, now = Date.now()
     if (!purchaseNamesProduct(purchase, productId)) return { ok: false, status: 400, error: "This purchase is not for that product." };
     // What is paid for now (after a deferred downgrade: still the higher plan, until Google renews it as the lower one;
     // a cancelled subscription: until its expiry)
-    const li = activeSubscriptionItem(purchase, productId, now);
+    const li = activeSubscriptionItem(purchase, productId, now) || graceItem(purchase, productId, now);
     if (!li) {
         const named = subscriptionLineItem(purchase, productId);
         if (named && !planForSubscription(named.productId, named.offerDetails?.basePlanId)) return { ok: false, status: 400, error: "This subscription plan is not sold by Classgrid." };
@@ -213,8 +234,20 @@ export function readSubscription(purchase, { productId, userId, now = Date.now()
         orderId: li.latestSuccessfulOrderId || purchase.latestOrderId || "",
         recurringPrice: moneyValue(li.autoRenewingPlan?.recurringPrice),
         needsAck: purchase.acknowledgementState === ACK_PENDING,
+        test: isTestSubscription(purchase),
     };
 }
+
+/**
+ * A test purchase (a license tester's, paid with Google's test card: no real money). Subscriptions carry
+ * testPurchase (subscriptionsv2), one-time products purchaseType 0 (products.get). Such purchases are given like
+ * real ones, so testers can try everything, but booked at 0 and marked, so revenue counts only real money.
+ */
+export const isTestSubscription = (purchase) => !!purchase?.testPurchase;
+export const isTestProduct = (purchase) => purchase?.purchaseType === 0;
+
+/** What a payment is booked at: what Google charged, or nothing when it was a test purchase */
+export const bookedAmount = (charged, test) => (test ? { currency: charged?.currency || "INR", amount: 0, inr: 0, known: true, test: true } : charged);
 
 // The plans in order: a higher tier gives more
 const PLAN_TIER = Object.freeze({ free: 0, pro: 1, max: 2, enterprise: 3 });
@@ -226,6 +259,25 @@ export function paidPlanOn(plan, now = Date.now()) {
     if (plan.status && !["active", "past_due"].includes(plan.status)) return false;
     return !plan.expires_at || ms(plan.expires_at) > ms(now);
 }
+
+export const SUB_ON_HOLD = "SUBSCRIPTION_STATE_ON_HOLD";
+export const SUB_PAUSED = "SUBSCRIPTION_STATE_PAUSED";
+
+/**
+ * The user's plan is a Google Play subscription that Google may still charge for: paid now, or on hold, paused or in
+ * its grace period (Google takes the money again when the payment is fixed or the pause ends). A plan bought
+ * elsewhere (the website, a gift) would replace it while Google keeps charging, so those are refused while this is
+ * true (ai-credits-topup.controller.js buyPlan, super-admin/ai-plans.controller.js).
+ */
+export function playSubscriptionLive(plan, now = Date.now()) {
+    if (!plan || plan.billing !== "play" || !plan.play_purchase_token) return false;
+    if (plan.play_state === SUB_EXPIRED) return false;
+    if ([SUB_ON_HOLD, SUB_PAUSED, SUB_GRACE].includes(plan.play_state)) return true;
+    return paidPlanOn(plan, now);
+}
+
+export const PLAY_MANAGE_URL = (productId) =>
+    `https://play.google.com/store/account/subscriptions?package=${PLAY_PACKAGE_NAME}${productId ? `&sku=${encodeURIComponent(productId)}` : ""}`;
 
 /**
  * Whether a Google Play subscription may replace the plan the user has now:
@@ -316,6 +368,7 @@ export function playRenewalUpdate(plan, purchase, now = Date.now()) {
         return {
             set, extended: !Number.isFinite(end) || expiry > end, newOrder, orderId,
             key: mapped.key, term: mapped.term, recurringPrice: moneyValue(li.autoRenewingPlan?.recurringPrice),
+            autoRenew: !set.cancel_at_period_end, test: isTestSubscription(purchase),
         };
     }
     // Not paid now (expired, revoked, refunded, on hold, paused): the plan ends at Google's end, or now, if that is
@@ -382,7 +435,7 @@ export function readProductPurchase(purchase, { productId, userId }) {
     const paid = Number(purchase.purchaseTimeMillis);
     return {
         ok: true, amountInr, orderId: purchase.orderId || "", regionCode: String(purchase.regionCode || "").toUpperCase(),
-        paidAt: paid > 0 ? new Date(paid) : null,
+        paidAt: paid > 0 ? new Date(paid) : null, test: isTestProduct(purchase),
     };
 }
 

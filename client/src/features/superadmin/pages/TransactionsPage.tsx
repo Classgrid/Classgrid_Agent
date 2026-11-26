@@ -87,6 +87,12 @@ import { getSocket } from "@/lib/socketClient";
 const INR = (n: number) =>
   new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(Math.abs(n));
 
+/** An amount in its own currency: rupees as ₹, anything else (a Google Play payment abroad) with its currency code */
+const money = (n: number, currency?: string) =>
+  !currency || currency === "INR" ? INR(n) : `${currency} ${Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+const isInr = (t: any) => !t.currency || t.currency === "INR";
+const isPlay = (t: any) => t.type === "google_play" || t.paymentMethod === "google_play";
+
 const fetchTransactions = (status: string, type: string) =>
   apiClient.get<any>("/api/super-admin/transactions", { params: { status: status || undefined, type: type || undefined, limit: 200 } }).then(r => r.data);
 
@@ -106,6 +112,7 @@ const TYPE_BADGE: Record<string, any> = {
   refund: { variant: "warning", label: "Refund" },
   credit: { variant: "success", label: "Credit" },
   adjustment: { variant: "neutral", label: "Adjustment" },
+  google_play: { variant: "info", label: "Google Play" },
 };
 
 export function TransactionsPage() {
@@ -161,8 +168,9 @@ export function TransactionsPage() {
     onError: () => toast.error("Failed to record transaction."),
   });
 
-  const totalRevenue = txns.filter(t => t.status === "success" && t.type !== "refund").reduce((s, t) => s + (t.amount ?? 0), 0);
-  const totalRefunds = txns.filter(t => t.type === "refund").reduce((s, t) => s + Math.abs(t.amount ?? 0), 0);
+  // Rupee totals only: payments in other currencies (Google Play abroad) are never added into a ₹ figure
+  const totalRevenue = txns.filter(t => t.status === "success" && t.type !== "refund" && isInr(t)).reduce((s, t) => s + (t.amount ?? 0), 0);
+  const totalRefunds = txns.filter(t => t.type === "refund" && isInr(t)).reduce((s, t) => s + Math.abs(t.amount ?? 0), 0);
   const successCount = txns.filter(t => t.status === "success").length;
   const refundCount = txns.filter(t => t.type === "refund").length;
 
@@ -183,7 +191,7 @@ export function TransactionsPage() {
       cell: ({ row, getValue }) => {
         const amt = getValue<number>();
         const isRefund = row.original.type === "refund";
-        return <span >{isRefund ? "−" : "+"}{INR(amt)}</span>;
+        return <span >{isRefund ? "−" : "+"}{money(amt, row.original.currency)}</span>;
       },
     },
     {
@@ -206,7 +214,8 @@ export function TransactionsPage() {
       id: "actions", header: "Actions", size: 100,
       cell: ({ row }) => {
         const t = row.original;
-        if (t.status !== "success" || t.type === "refund") return null;
+        // (a Google Play payment is refunded in the Play Console; the server hears of it from Google by itself)
+        if (t.status !== "success" || t.type === "refund" || isPlay(t)) return null;
         return (
           <Button size="sm" variant="outline" onClick={() => setRefundTarget(t)}>
             <RotateCcw size={12} /> Refund

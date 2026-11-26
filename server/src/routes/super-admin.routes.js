@@ -2990,6 +2990,11 @@ router.post("/transactions/:id/refund", async (req, res) => {
         if (original.status === "refunded") {
             return res.status(400).json({ success: false, message: "Already refunded" });
         }
+        // A Google Play payment is refunded in the Play Console (Order management); Classgrid then hears of it by
+        // itself and takes the plan or credits back (google-play.service.js applyVoidedPurchase)
+        if (original.type === "google_play" || original.paymentMethod === "google_play") {
+            return res.status(400).json({ success: false, message: "Google Play payments are refunded in the Play Console (Order management). Classgrid updates this row by itself after that." });
+        }
 
         // Mark original as refunded
         await PlatformTransaction.findByIdAndUpdate(req.params.id, {

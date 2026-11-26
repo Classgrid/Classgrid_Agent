@@ -186,7 +186,10 @@ export const TransactionTable: React.FC<{
       width: "w-[120px]",
       render: (_: any, tx: any) => (
         <span className="text-sm font-medium text-foreground">
-          <MoneyDisplay amountPaise={tx.amountPaise} />
+          {/* (a Google Play payment abroad is in its own currency: shown with its code, never as ₹) */}
+          {tx.currency && tx.currency !== 'INR'
+            ? `${tx.currency} ${(Math.abs(tx.amountPaise || 0) / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`
+            : <MoneyDisplay amountPaise={tx.amountPaise} />}
         </span>
       ),
     },

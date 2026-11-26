@@ -104,13 +104,19 @@ mock.module("../src/models/User.js", { defaultExport: User });
 mock.module("../src/models/GooglePlayPurchase.js", { defaultExport: GooglePlayPurchase });
 mock.module("../src/models/AiCreditTransaction.js", { defaultExport: AiCreditTransaction });
 mock.module("../src/models/PlatformTransaction.js", { defaultExport: PlatformTransaction });
-mock.module("../src/config/redis.js", { defaultExport: { set: async () => "OK" } });
+mock.module("../src/config/redis.js", { defaultExport: { set: async () => "OK", del: async () => 1 } });
+// The receipts and team alerts (play-emails.js): recorded, never sent
+const sentEmails = [];
+mock.module("../src/services/play-emails.js", { namedExports: {
+    sendPlayPlanEmails: async (args) => { sentEmails.push({ kind: "plan", ...args }); },
+    sendPlayPackEmails: async (args) => { sentEmails.push({ kind: "pack", ...args }); },
+} });
 mock.module("../src/services/socket.service.js", { namedExports: { getIO: () => null } });
 mock.module("../src/services/plan-limits.service.js", {
     namedExports: { planKeyOf: (u) => (u?.plan?.id && u.plan.status !== "expired" && (!u.plan.expires_at || new Date(u.plan.expires_at) > new Date()) ? u.plan.id : "free") },
 });
 mock.module("../src/controllers/ai-credits-topup.controller.js", {
-    namedExports: { topupBlockedByPlan: async () => false, TOPUP_NEEDS_PLAN: "Top-ups are for the Pro and Max plans. Upgrade your plan first." },
+    namedExports: { topupBlockedByPlan: async (user) => user?.plan?.id === "free", TOPUP_NEEDS_PLAN: "Top-ups are for the Pro and Max plans. Upgrade your plan first." },
 });
 mock.module("../src/services/ai-credits.service.js", { namedExports: { calculateCreditsFromAmount: async (inr) => inr * 3000 } });
 
@@ -299,4 +305,69 @@ test("a voided pack takes back what is left of its credits, once", async () => {
     assert.equal(refund.status, "success");
     assert.equal(refund.metadata.credits_taken, 1000000);
     assert.ok(PlatformTransaction.rows.some((r) => r.type === "refund" && r.status === "refunded"));
+});
+
+// ── Receipts, test purchases, and purchases Google tells of before the phone sends them (2026-11-26) ──
+
+const flush = () => new Promise((r) => setTimeout(r, 20));
+
+test("a pack's receipt and team alert go out once per Google order; a test purchase is booked at 0 and marked", async () => {
+    sentEmails.length = 0;
+    pack("e1", { purchaseType: 0 });
+    google.orders["GPA.e1"] = { total: { currencyCode: "INR", units: "500" } };
+    await verifyPack("e1");
+    await verifyPack("e1");
+    await flush();
+    assert.equal(sentEmails.filter((e) => e.kind === "pack").length, 1);
+    assert.equal(sentEmails[0].test, true);
+    assert.equal(sentEmails[0].charged.amount, 500); // (the email shows the price; the books show 0)
+    const inv = AiCreditTransaction.rows.find((r) => r.razorpay_payment_id === "gplay:GPA.e1");
+    assert.equal(inv.amount_inr, 0);
+    assert.equal(inv.metadata.test_purchase, true);
+    assert.equal(PlatformTransaction.rows[0].amount, 0);
+    assert.match(PlatformTransaction.rows[0].note, /test purchase/);
+    assert.equal(me().ai_tokens.ai_credits_balance, 1500000); // (a tester still gets the credits)
+});
+
+test("a plan's receipt goes out once; a real purchase is booked at what Google charged", async () => {
+    sentEmails.length = 0;
+    sub("e2");
+    google.orders["GPA.e2"] = { total: { currencyCode: "INR", units: "2999" } };
+    await verifySub("e2");
+    await verifySub("e2");
+    await flush();
+    const plans = sentEmails.filter((e) => e.kind === "plan");
+    assert.equal(plans.length, 1);
+    assert.equal(plans[0].key, "max");
+    assert.equal(plans[0].test, false);
+    assert.equal(AiCreditTransaction.rows.find((r) => r.razorpay_payment_id === "gplay:GPA.e2").amount_inr, 2999);
+});
+
+test("a subscription Google tells of before the phone sent it is given to the account named in it", async () => {
+    sub("n1");
+    const r = await S.handlePlayNotification({ kind: "subscription", type: "SUBSCRIPTION_PURCHASED", token: "n1" });
+    assert.equal(r, "granted");
+    assert.equal(me().plan.id, "max");
+    assert.equal(me().plan.play_purchase_token, "n1");
+    assert.equal(google.acks.length, 1);
+    // the phone's own verify afterwards: the same answer, nothing given twice
+    assert.equal((await verifySub("n1")).ok, true);
+    assert.equal(AiCreditTransaction.rows.filter((x) => x.type === "plan").length, 1);
+});
+
+test("a pack Google tells of before the phone sent it is credited once; a refused one is not retried", async () => {
+    pack("n2");
+    assert.equal(await S.handlePlayNotification({ kind: "product", type: "ONE_TIME_PRODUCT_PURCHASED", token: "n2", productId: "credits_500" }), "granted");
+    assert.equal(me().ai_tokens.ai_credits_balance, 1500000);
+    assert.equal(google.consumes.length, 1);
+    // a pending payment is left for its own notification when it completes
+    pack("n3", { purchaseState: 2 });
+    assert.equal(await S.handlePlayNotification({ kind: "product", type: "ONE_TIME_PRODUCT_PURCHASED", token: "n3", productId: "credits_500" }), "not_paid");
+    // Ravi is on Free: top-ups need a plan, so it is refused for good (204 to Pub/Sub, Google refunds it)
+    pack("n4", { obfuscatedExternalAccountId: OTHER });
+    assert.equal(await S.handlePlayNotification({ kind: "product", type: "ONE_TIME_PRODUCT_PURCHASED", token: "n4", productId: "credits_500" }), "refused");
+});
+
+test("a notification for a token Google no longer knows is answered as done, not sent again", async () => {
+    assert.equal(await S.handlePlayNotification({ kind: "subscription", type: "SUBSCRIPTION_EXPIRED", token: "gone-token" }), "gone");
 });

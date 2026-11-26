@@ -10,6 +10,11 @@ export type PlanOverview = {
   plan: {
     key: string; name: string; tagline: string; status: string; billing: string; started_at: string | null; expires_at: string | null;
     subscribed: boolean; limits: Record<string, any> | null; student_price?: boolean;
+    // Where the plan came from and its term (null on Free), the Google Play product and base plan, whether it ends at
+    // expires_at instead of renewing, and Google's subscription state (SUBSCRIPTION_STATE_*) for a Play plan
+    source?: "google_play" | "website" | "granted" | null; term?: "month" | "year" | null;
+    play_product_id?: string | null; play_base_plan_id?: string | null;
+    cancel_at_period_end?: boolean; play_state?: string | null;
   };
   // Pictures and files one message may carry (the plan's files_per_message; the most any plan allows with no plan)
   files_per_message?: number;

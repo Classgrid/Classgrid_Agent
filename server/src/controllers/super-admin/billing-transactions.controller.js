@@ -456,7 +456,7 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 // The webhook writes "Refund of ₹X for payment pay_…" on every refund row; it is the only link from a plan refund
 // back to the plan purchase.
 const REFUND_NOTE_PAY_ID_RE = /for payment (pay_[A-Za-z0-9]+)/;
-const PAID_WITH_LABELS = { upi: "UPI", card: "Card", netbanking: "Net banking", wallet: "Wallet", emi: "EMI" };
+const PAID_WITH_LABELS = { upi: "UPI", card: "Card", netbanking: "Net banking", wallet: "Wallet", emi: "EMI", google_play: "Google Play" };
 const PAYMENT_TYPES_IN_CREDITS = ["plan", "topup"];
 const REFUND_ROW_FIELDS = "razorpayPaymentId amount note refundOf refundReason refundedAt createdAt";
 

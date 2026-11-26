@@ -139,6 +139,10 @@ export async function planOverviewFor(userId) {
                     const s = planSourceAndTerm(mine, enabled ? planKeyOf(user) : "free");
                     return { source: s.source, term: s.term, play_product_id: s.product_id, play_base_plan_id: s.base_plan_id };
                 })(),
+                // True when it does not renew (auto-renew off: paid until expires_at, then it ends) and, for a Google
+                // Play plan, Google's state of the subscription (SUBSCRIPTION_STATE_*), so the Billing page can say so
+                cancel_at_period_end: !!mine.cancel_at_period_end,
+                play_state: mine.billing === "play" ? (mine.play_state || null) : null,
             },
             // Pictures and files one message may carry (the chat boxes read it; services/plan-limits.service.js)
             files_per_message: await filesPerMessage(user).catch(() => DEFAULT_FILES_PER_MESSAGE),

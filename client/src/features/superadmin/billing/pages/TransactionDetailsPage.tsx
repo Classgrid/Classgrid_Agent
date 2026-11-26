@@ -72,6 +72,9 @@ export default function TransactionDetailsPage() {
   // Extract method details
   const rawMethod = tx.paymentMethod || '';
   const [methodType, methodDetail] = rawMethod.includes(':') ? rawMethod.split(':', 2) : [rawMethod, ''];
+  // A Google Play payment: its method in words, and its amount in its own currency (with the code when not rupees)
+  const playPaid = methodType === 'google_play' || tx.type === 'google_play';
+  const money = tx.currency && tx.currency !== 'INR' ? `${tx.currency} ` : '₹';
 
   const isSuccess = tx.status === 'success' || tx.status === 'CAPTURED';
   const isFailed = tx.status === 'failed';
@@ -120,7 +123,7 @@ export default function TransactionDetailsPage() {
           <div>
             <p className="text-sm text-muted-foreground mb-1">Total Amount</p>
             <p className="text-4xl font-bold text-foreground tracking-tight">
-              ₹{tx.amount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || (tx.amountPaise ? (tx.amountPaise / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—')}
+              {money}{tx.amount?.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) || (tx.amountPaise ? (tx.amountPaise / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '—')}
             </p>
             <p className="text-xs text-muted-foreground mt-2 font-mono">
               {tx.razorpayPaymentId || tx._id}
@@ -238,7 +241,7 @@ export default function TransactionDetailsPage() {
                 <div className="flex justify-between items-center text-sm border-b border-border/50 pb-2">
                   <span className="text-muted-foreground shrink-0 mr-4">Method</span>
                   <span className="font-medium uppercase flex items-center gap-1.5 text-right">
-                    {methodType.toLowerCase() === 'upi' ? '📱' : methodType.toLowerCase() === 'card' ? '💳' : '🏦'} {methodType || tx.method || '—'}
+                    {playPaid ? 'Google Play' : <>{methodType.toLowerCase() === 'upi' ? '📱' : methodType.toLowerCase() === 'card' ? '💳' : '🏦'} {methodType || tx.method || '—'}</>}
                   </span>
                 </div>
                 <div className="flex justify-between items-center text-sm border-b border-border/50 pb-2">
@@ -303,7 +306,7 @@ export default function TransactionDetailsPage() {
                 <span className="text-foreground">Net Received</span>
                 <span className="text-emerald-500">{
                   tx.amount != null
-                    ? `₹${(tx.amount - (tx.feePaise || 0) / 100 - (tx.taxPaise || 0) / 100).toFixed(2)}`
+                    ? `${money}${(tx.amount - (tx.feePaise || 0) / 100 - (tx.taxPaise || 0) / 100).toFixed(2)}`
                     : '—'
                 }</span>
               </div>

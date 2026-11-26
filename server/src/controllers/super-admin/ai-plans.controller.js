@@ -133,6 +133,13 @@ export const setUserPlan = async (req, res) => {
         if (planId !== "free" && (!planRow || planRow.coming_soon === true)) return res.status(400).json({ success: false, message: "This plan is not open yet." });
         const user = await User.findById(userId).select("plan email name");
         if (!user) return res.status(404).json({ success: false, message: "User not found." });
+        // A Google Play subscription still running (or on hold): replacing it here would leave Google charging the
+        // person every renewal for a plan Classgrid no longer follows. It ends in Google Play first (the person cancels,
+        // or a refund/revoke in the Play Console), then Classgrid hears of it by itself.
+        const { playSubscriptionLive } = await import("../../services/google-play-rules.js");
+        if (playSubscriptionLive(user.plan?.toObject ? user.plan.toObject() : user.plan)) {
+            return res.status(409).json({ success: false, code: "has_play_plan", message: "This person pays for their plan through Google Play. Google would keep charging them, so it can't be changed here. It must first be cancelled in Google Play (by them, or refunded/revoked in the Play Console)." });
+        }
         const before = user.plan ? { id: user.plan.id, status: user.plan.status, billing: user.plan.billing, started_at: user.plan.started_at, expires_at: user.plan.expires_at } : null;
         user.plan = {
             id: planId,

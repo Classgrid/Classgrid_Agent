@@ -724,6 +724,8 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                     } catch (mailErr) {
                         console.error("[Razorpay Webhook] plan receipt email failed:", mailErr.message);
                     }
+                    // (the cached profile, GET /api/users/profile, kept 30 minutes, shows the new plan at once)
+                    import("../config/redis.js").then((m) => m.default.del(`user:profile:v2:${userId}`)).catch(() => {});
                     const io = req.app.get("io");
                     if (io) {
                         io.to(userId.toString()).emit("ai_token_update");

@@ -180,7 +180,7 @@ test("a renewal moves the end date to Google's; an expired subscription ends", (
 
 test("a credit pack purchase: purchased, for this account and product, not used yet", () => {
     const p = { purchaseState: 0, consumptionState: 0, orderId: "GPA.9999", obfuscatedExternalAccountId: USER, productId: "credits_1000" };
-    assert.deepEqual(R.readProductPurchase({ ...p, regionCode: "in", purchaseTimeMillis: String(NOW) }, { productId: "credits_1000", userId: USER }), { ok: true, amountInr: 1000, orderId: "GPA.9999", regionCode: "IN", paidAt: new Date(NOW) });
+    assert.deepEqual(R.readProductPurchase({ ...p, regionCode: "in", purchaseTimeMillis: String(NOW) }, { productId: "credits_1000", userId: USER }), { ok: true, amountInr: 1000, orderId: "GPA.9999", regionCode: "IN", paidAt: new Date(NOW), test: false });
     assert.equal(R.readProductPurchase({ ...p, productId: undefined }, { productId: "credits_1000", userId: USER }).ok, true);
     assert.deepEqual(R.readProductPurchase(p, { productId: "credits_300", userId: USER }).status, 400);
     assert.deepEqual(R.readProductPurchase({ ...p, obfuscatedExternalAccountId: "x" }, { productId: "credits_1000", userId: USER }).status, 403);
@@ -360,4 +360,37 @@ test("the turned-off pro-yearly base plan (monthly by mistake) and max-yearly ar
     assert.equal(R.planForSubscription("classgrid_max", "max-yearly"), null);
     assert.deepEqual(R.planForSubscription("classgrid_pro", "pro-annual"), { key: "pro", term: "year" });
     assert.deepEqual(R.planForSubscription("classgrid_max", "max-annual"), { key: "max", term: "year" });
+});
+
+test("grace period: access stays while Google retries the payment, even when the line item's expiry has passed", () => {
+    const grace = subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_IN_GRACE_PERIOD" }, { expiryTime: iso(NOW - DAY) });
+    const li = R.entitledItem(grace, null, NOW);
+    assert.ok(li);
+    assert.ok(new Date(li.expiryTime).getTime() > NOW);
+    const r = R.readSubscription(grace, { productId: "classgrid_pro", userId: USER, now: NOW });
+    assert.equal(r.ok, true);
+    assert.ok(r.expiresAt.getTime() > NOW);
+    // not for an expired or on-hold subscription
+    assert.equal(R.entitledItem(subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_ON_HOLD" }, { expiryTime: iso(NOW - DAY) }), null, NOW), null);
+    assert.equal(R.graceItem(subPurchase({ subscriptionState: "SUBSCRIPTION_STATE_EXPIRED" }, { expiryTime: iso(NOW - DAY) }), null, NOW), null);
+});
+
+test("test purchases are told apart and booked at 0", () => {
+    assert.equal(R.readSubscription(subPurchase({ testPurchase: {} }), { productId: "classgrid_pro", userId: USER, now: NOW }).test, true);
+    assert.equal(R.readSubscription(subPurchase(), { productId: "classgrid_pro", userId: USER, now: NOW }).test, false);
+    assert.equal(R.isTestProduct({ purchaseType: 0 }), true);
+    assert.equal(R.isTestProduct({}), false);
+    assert.deepEqual(R.bookedAmount({ currency: "INR", amount: 499, inr: 499, known: true }, true), { currency: "INR", amount: 0, inr: 0, known: true, test: true });
+    assert.deepEqual(R.bookedAmount({ currency: "INR", amount: 499, inr: 499, known: true }, false), { currency: "INR", amount: 499, inr: 499, known: true });
+});
+
+test("a Google Play subscription still running or on hold blocks a plan from the website or a gift", () => {
+    const play = { id: "pro", status: "active", billing: "play", play_purchase_token: "tok", expires_at: new Date(NOW + DAY), play_state: "SUBSCRIPTION_STATE_ACTIVE" };
+    assert.equal(R.playSubscriptionLive(play, NOW), true);
+    assert.equal(R.playSubscriptionLive({ ...play, expires_at: new Date(NOW - DAY), play_state: "SUBSCRIPTION_STATE_ON_HOLD" }, NOW), true);
+    assert.equal(R.playSubscriptionLive({ ...play, expires_at: new Date(NOW - DAY), play_state: "SUBSCRIPTION_STATE_PAUSED" }, NOW), true);
+    assert.equal(R.playSubscriptionLive({ ...play, expires_at: new Date(NOW - DAY), play_state: "SUBSCRIPTION_STATE_CANCELED" }, NOW), false);
+    assert.equal(R.playSubscriptionLive({ ...play, play_state: "SUBSCRIPTION_STATE_EXPIRED" }, NOW), false);
+    assert.equal(R.playSubscriptionLive({ ...play, billing: "manual_monthly" }, NOW), false);
+    assert.match(R.PLAY_MANAGE_URL("classgrid_pro"), /package=com\.classgrid\.mobile&sku=classgrid_pro/);
 });

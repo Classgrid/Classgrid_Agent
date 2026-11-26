@@ -242,7 +242,8 @@ router.post("/confirm", async (req, res) => {
 
         let signatureValid = false;
         let providerPayment;
-        if (handoff.payment_type === "saas_invoice" || handoff.payment_type === "AI_TOPUP") {
+        // (AI top-ups and plans are paid to the platform Razorpay account: startPlatformPayment in ai-credits-topup.controller.js)
+        if (handoff.payment_type === "saas_invoice" || handoff.payment_type === "AI_TOPUP" || handoff.payment_type === "AI_PLAN") {
             signatureValid = razorpayService.verifyPlatformSignature(orderId, paymentId, signature);
             if (signatureValid) providerPayment = await razorpayService.fetchPlatformPayment(paymentId);
         } else {
@@ -298,7 +299,9 @@ router.post("/confirm", async (req, res) => {
 
         let attachments = [];
         try {
-            if (handoff.payment_type === "AI_TOPUP") {
+            if (handoff.payment_type === "AI_PLAN") {
+                // (a plan's receipt is the webhook's own email: razorpay-webhook.routes.js AI_PLAN)
+            } else if (handoff.payment_type === "AI_TOPUP") {
                 const { calculateCreditsFromAmount } = await import("../services/ai-credits.service.js");
                 const creditsAdded = await calculateCreditsFromAmount(handoff.amountPaise / 100);
                 const pdfBuffer = await generateAiReceiptPdfBuffer({
@@ -336,7 +339,10 @@ router.post("/confirm", async (req, res) => {
         }
 
         const emailTitle = `Payment Successful — ${amountFormatted} | Classgrid`;
-        const adminEmailTitle = `New AI Credit Purchase: ${amountFormatted} from ${payerName}`;
+        const isPlanPayment = handoff.payment_type === "AI_PLAN";
+        const adminEmailTitle = isPlanPayment
+            ? `New plan purchase: ${handoff.context?.label || "Classgrid plan"}, ${amountFormatted} from ${payerName}`
+            : `New AI Credit Purchase: ${amountFormatted} from ${payerName}`;
 
         let creditsReceivedStr = "";
         if (handoff.payment_type === "AI_TOPUP") {
@@ -359,8 +365,9 @@ router.post("/confirm", async (req, res) => {
             attemptTime
         );
 
-        // Send receipt to user (HTML-based email with beautiful template)
-        await sendEmail({
+        // Send receipt to user (HTML-based email with beautiful template). A plan's receipt is sent by the webhook
+        // (razorpay-webhook.routes.js AI_PLAN), so it is not sent twice
+        if (!isPlanPayment) await sendEmail({
             to: handoff.email,
             subject: emailTitle,
             fromName: "Classgrid Billing",

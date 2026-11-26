@@ -35,7 +35,7 @@ type Payment = {
 const PLAN_NAMES: Record<string, string> = { free: 'Free', pro: 'Pro', max: 'Max', enterprise: 'Enterprise' };
 const date = (iso?: string | null) => (iso ? new Date(iso).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '');
 const inr = (n?: number) => (typeof n === 'number' ? `₹${Math.round(n).toLocaleString('en-IN')}` : '');
-const billingText = (b?: string) => (b === 'prepaid_yearly' ? 'Paid, 1 year' : b === 'manual_monthly' ? 'Paid, 1 month' : b === 'granted' ? 'Granted' : b || '');
+const billingText = (b?: string) => (b === 'prepaid_yearly' ? 'Paid, 1 year' : b === 'manual_monthly' ? 'Paid, 1 month' : b === 'granted' ? 'Granted' : b === 'play' ? 'Bought in the phone app' : b || '');
 
 const useSubscribers = () => useQuery({
   queryKey: ['ai-plan-subscribers'],

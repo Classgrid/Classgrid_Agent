@@ -34,8 +34,9 @@ import {
     PLAY_PACKAGE_NAME, parseServiceAccount, readSubscription, planFromSubscription, readProductPurchase,
     purchaseDecision, playRefreshDue, playRenewalUpdate, planSourceAndTerm, entitledItem, subscriptionLineItem,
     otherPlanDecision, studentVerified, chargedAmount, packFallbackPrice, packAmountInr, creditMark, voidEndsPlan,
-    CLAIM_STALE_MS, ACK_PENDING, SUB_EXPIRED,
+    bookedAmount, isTestSubscription, CLAIM_STALE_MS, ACK_PENDING, SUB_EXPIRED,
 } from "./google-play-rules.js";
+import { sendPlayPlanEmails, sendPlayPackEmails } from "./play-emails.js";
 import { planKeyOf } from "./plan-limits.service.js";
 
 const SCOPE = "https://www.googleapis.com/auth/androidpublisher";
@@ -260,12 +261,16 @@ const chargedMeta = (charged) => ({ charged_currency: charged.currency || null, 
 
 const termText = (term) => (term === "year" ? "1 year" : "1 month");
 
+// The apps, the open super admin pages (Plans & Usage, and Revenue: billing_payments_updated, as a website payment
+// sends it) and the cached profile (GET /api/users/profile keeps it 30 minutes) learn of a change
 function announce(io, userId, events) {
+    redis.del(`user:profile:v2:${userId}`).catch(() => {});
     try {
         io = io || null;
         if (!io) return;
         for (const [name, payload] of events) io.to(String(userId)).emit(name, payload);
         io.to("superadmin:ai_usage").emit("ai_usage_updated");
+        io.to("superadmin:billing").emit("billing_payments_updated");
     } catch { /* (a socket problem never stops a payment) */ }
 }
 
@@ -386,9 +391,11 @@ async function grantSubscription({ client, userId, productId, purchaseToken, exi
             await GooglePlayPurchase.updateOne({ purchaseToken: sub.linkedPurchaseToken }, { $set: { replacedBy: purchaseToken } }).catch(() => {});
         }
 
-        // The Invoices row (one per Google order) at what Google charged, and the super admin's copy
+        // The Invoices row (one per Google order) at what Google charged, and the super admin's copy (a test
+        // purchase: booked at 0 and marked)
         const order = await readOrder(client, sub.orderId);
-        const charged = chargedAmount(order, null);
+        const realCharge = chargedAmount(order, sub.recurringPrice && !sub.studentOffer && !sub.offerId ? sub.recurringPrice : null);
+        const charged = bookedAmount(realCharge, sub.test);
         if (!charged.known) console.warn(`[Google Play] order ${sub.orderId || "(none)"}: the price could not be read; booked at 0`);
         const paymentId = playPaymentId(sub.orderId, purchaseToken);
         const written = await writeInvoiceRow({
@@ -396,9 +403,13 @@ async function grantSubscription({ client, userId, productId, purchaseToken, exi
             razorpay_payment_id: paymentId, razorpay_order_id: sub.orderId || "google_play",
             type: "plan", status: "success", plan_key: sub.key, plan_term: sub.term, plan_period_start: now, plan_period_end: plan.expires_at,
             ...userInfo(me), paymentMethod: "google_play", paymentTime: now,
-            metadata: { source: "google_play", productId: sub.productId, basePlanId: sub.basePlanId, offerId: sub.offerId || undefined, linkedPurchaseToken: sub.linkedPurchaseToken || undefined, ...chargedMeta(charged) },
+            metadata: { source: "google_play", productId: sub.productId, basePlanId: sub.basePlanId, offerId: sub.offerId || undefined, linkedPurchaseToken: sub.linkedPurchaseToken || undefined, test_purchase: sub.test || undefined, ...chargedMeta(charged) },
         });
-        if (written) await recordPlatformPayment({ user: me, flow: "ai_plan", charged, paymentId, orderId: sub.orderId, note: `Classgrid ${sub.key} plan, ${termText(sub.term)} (Google Play)`, paidAt: now, expiresAt: plan.expires_at });
+        if (written) {
+            await recordPlatformPayment({ user: me, flow: "ai_plan", charged, paymentId, orderId: sub.orderId, note: `Classgrid ${sub.key} plan, ${termText(sub.term)} (Google Play)${sub.test ? " (test purchase)" : ""}`, paidAt: now, expiresAt: plan.expires_at });
+            // The receipt and the team alert, once per Google order (play-emails.js), after the reply
+            sendPlayPlanEmails({ user: { ...me, _id: userId }, key: sub.key, term: sub.term, charged: sub.test ? realCharge : charged, paymentId, orderId: sub.orderId, from: now, to: plan.expires_at, autoRenew: sub.autoRenew, productId: sub.productId, test: sub.test }).catch(() => {});
+        }
 
         const granted = { plan: { key: sub.key, term: sub.term, expires_at: plan.expires_at.toISOString() } };
         await GooglePlayPurchase.updateOne({ _id: row._id }, { $set: { status: "granted", granted, orderId: sub.orderId, acknowledged: !sub.needsAck } });
@@ -487,7 +498,9 @@ async function finishCreditPack(client, row, { pack = null, paidAt = null } = {}
         const p = pack || { amountInr, regionCode: row.regionCode || "", orderId: row.orderId || "" };
         const me = await User.findById(userId).select("name email phoneNumber role organization_id").populate("organization_id", "name").lean();
         const order = await readOrder(client, p.orderId);
-        const charged = chargedAmount(order, packFallbackPrice(p));
+        const realCharge = chargedAmount(order, packFallbackPrice(p));
+        const test = p.test === true;
+        const charged = bookedAmount(realCharge, test);
         if (!charged.known) console.warn(`[Google Play] pack order ${p.orderId || "(none)"} bought in ${p.regionCode || "?"}: the price could not be read; booked at 0`);
         const when = paidAt || new Date();
         const paymentId = playPaymentId(p.orderId, row.purchaseToken);
@@ -495,9 +508,13 @@ async function finishCreditPack(client, row, { pack = null, paidAt = null } = {}
             userId, orgId: me?.organization_id?._id || null, amount_inr: charged.inr, credits_added: credits,
             razorpay_payment_id: paymentId, razorpay_order_id: p.orderId || "google_play",
             type: "topup", status: "success", ...userInfo(me), paymentMethod: "google_play", paymentTime: when,
-            metadata: { source: "google_play", productId: row.productId, pack_inr: amountInr, regionCode: p.regionCode || undefined, ...chargedMeta(charged) },
+            metadata: { source: "google_play", productId: row.productId, pack_inr: amountInr, regionCode: p.regionCode || undefined, test_purchase: test || undefined, ...chargedMeta(charged) },
         });
-        if (written) await recordPlatformPayment({ user: me, flow: "ai_topup", charged, paymentId, orderId: p.orderId, note: `AI Top-Up Purchase, ${row.productId} (Google Play)`, paidAt: when });
+        if (written) {
+            await recordPlatformPayment({ user: me, flow: "ai_topup", charged, paymentId, orderId: p.orderId, note: `AI Top-Up Purchase, ${row.productId} (Google Play)${test ? " (test purchase)" : ""}`, paidAt: when });
+            // The receipt and the team alert, once per Google order (play-emails.js)
+            sendPlayPackEmails({ user: { ...me, _id: userId }, productId: row.productId, credits, charged: test ? realCharge : charged, paymentId, orderId: p.orderId, paidAt: when, regionCode: p.regionCode, test }).catch(() => {});
+        }
         await GooglePlayPurchase.updateOne({ _id: row._id }, { $set: { status: "granted", credited: true, granted: { credits_added: credits } } });
         await consumeProduct(client, row);
         return true;
@@ -551,23 +568,31 @@ async function syncPlaySubscription(user, { purchase = null, timeoutMs = 8000, t
         const updated = await User.findOneAndUpdate(
             { _id: userId, "plan.billing": "play", "plan.play_purchase_token": token },
             { $set: set },
-            { returnDocument: "after", projection: { plan: 1, name: 1, email: 1, phoneNumber: 1, role: 1 } },
-        ).lean();
+            { returnDocument: "after", projection: { plan: 1, name: 1, email: 1, phoneNumber: 1, role: 1, organization_id: 1 } },
+        ).populate("organization_id", "name").lean();
         if (!updated) return null;
         if (change.newOrder) {
-            // The renewal's Invoices row (one per Google order) at what Google charged, else the recurring price
+            // The renewal's Invoices row (one per Google order) at what Google charged, else the recurring price (a
+            // test purchase: booked at 0 and marked). Its period starts where the paid period before it ended
             const now = new Date();
+            const prevEnd = plan.expires_at ? new Date(plan.expires_at).getTime() : NaN;
+            const periodStart = Number.isFinite(prevEnd) && prevEnd <= now.getTime() + 3 * DAY ? new Date(prevEnd) : now;
             const order = await readOrder(client, change.newOrder);
-            const charged = chargedAmount(order, change.recurringPrice);
+            const realCharge = chargedAmount(order, change.recurringPrice);
+            const charged = bookedAmount(realCharge, change.test);
             const paymentId = playPaymentId(change.newOrder, token);
             const written = await writeInvoiceRow({
                 userId, orgId: null, amount_inr: charged.inr, credits_added: 0,
                 razorpay_payment_id: paymentId, razorpay_order_id: change.newOrder,
-                type: "plan", status: "success", plan_key: change.key, plan_term: change.term || "", plan_period_start: now, plan_period_end: updated.plan?.expires_at || null,
+                type: "plan", status: "success", plan_key: change.key, plan_term: change.term || "", plan_period_start: periodStart, plan_period_end: updated.plan?.expires_at || null,
                 ...userInfo(updated), paymentMethod: "google_play", paymentTime: now,
-                metadata: { source: "google_play", renewal: true, productId: updated.plan?.play_product_id || "", ...chargedMeta(charged) },
+                metadata: { source: "google_play", renewal: true, productId: updated.plan?.play_product_id || "", test_purchase: change.test || undefined, ...chargedMeta(charged) },
             }).catch(() => false);
-            if (written) await recordPlatformPayment({ user: updated, flow: "ai_plan", charged, paymentId, orderId: change.newOrder, note: `Classgrid ${change.key} plan renewed, ${termText(change.term)} (Google Play)`, paidAt: now, expiresAt: updated.plan?.expires_at || null });
+            if (written) {
+                await recordPlatformPayment({ user: updated, flow: "ai_plan", charged, paymentId, orderId: change.newOrder, note: `Classgrid ${change.key} plan renewed, ${termText(change.term)} (Google Play)${change.test ? " (test purchase)" : ""}`, paidAt: now, expiresAt: updated.plan?.expires_at || null });
+                // The renewal's receipt and the team alert, once per Google order (play-emails.js)
+                sendPlayPlanEmails({ user: updated, key: change.key, term: change.term, charged: change.test ? realCharge : charged, paymentId, orderId: change.newOrder, from: periodStart, to: updated.plan?.expires_at || now, autoRenew: change.autoRenew, productId: updated.plan?.play_product_id || "", test: change.test, renewal: true }).catch(() => {});
+            }
             console.log(`[Google Play] order ${change.newOrder} booked for user ${userId}; plan until ${new Date(updated.plan?.expires_at).toISOString()}`);
         }
         if (purchase.acknowledgementState === ACK_PENDING && entitledItem(purchase)) {
@@ -648,18 +673,25 @@ export async function applyVoidedPurchase({ purchaseToken, orderId = "", reason 
     }
 
     const done = {};
-    if (row.type === "product") {
-        const { takeFromPool } = await import("./credit-expiry.js");
-        done.credits_taken = await takeFromPool(User, userId, "bought", Number(row.granted?.credits_added) || Number(row.creditsPlanned) || 0);
-    } else if (voidEndsPlan(user?.plan, { purchaseToken, orderId: voidedOrder }, purchase)) {
-        const now = new Date();
-        const ended = await User.updateOne(
-            { _id: userId, "plan.billing": "play", "plan.play_purchase_token": purchaseToken },
-            { $set: { "plan.status": "expired", "plan.expires_at": now, "plan.play_state": SUB_EXPIRED, "plan.cancel_at_period_end": true } },
-        );
-        done.plan_ended = (ended?.modifiedCount || 0) > 0;
-    } else {
-        done.plan_ended = false;
+    try {
+        if (row.type === "product") {
+            const { takeFromPool } = await import("./credit-expiry.js");
+            done.credits_taken = await takeFromPool(User, userId, "bought", Number(row.granted?.credits_added) || Number(row.creditsPlanned) || 0);
+        } else if (voidEndsPlan(user?.plan, { purchaseToken, orderId: voidedOrder }, purchase)) {
+            const now = new Date();
+            const ended = await User.updateOne(
+                { _id: userId, "plan.billing": "play", "plan.play_purchase_token": purchaseToken },
+                { $set: { "plan.status": "expired", "plan.expires_at": now, "plan.play_state": SUB_EXPIRED, "plan.cancel_at_period_end": true } },
+            );
+            done.plan_ended = (ended?.modifiedCount || 0) > 0;
+        } else {
+            done.plan_ended = false;
+        }
+    } catch (err) {
+        // Nothing was taken back: the pending row goes, so the next run (the daily job or Google sending the
+        // notification again) does it, instead of stopping at "already" for good
+        await AiCreditTransaction.deleteOne({ _id: refundRow._id, status: "pending" }).catch(() => {});
+        throw err;
     }
     await AiCreditTransaction.updateOne({ _id: refundRow._id }, { $set: { status: "success", "metadata.credits_taken": done.credits_taken ?? null, "metadata.plan_ended": done.plan_ended ?? null } });
     await GooglePlayPurchase.updateOne({ _id: row._id }, { $addToSet: { voidedOrders: voidedOrder || "(token)" } }).catch(() => {});
@@ -766,12 +798,71 @@ export async function retryUnfinished() {
  * Google again: never trusted on its own. Throws when Google can't be read, so Pub/Sub sends it again.
  */
 export async function handlePlayNotification(n) {
+    try {
+        return await applyPlayNotification(n);
+    } catch (err) {
+        // A token Google no longer knows (an old purchase): nothing to apply, and nothing for Pub/Sub to send again
+        if (err instanceof PlayError && err.body?.code === "purchase_not_found") return "gone";
+        throw err;
+    }
+}
+
+// Final answers of a grant: the purchase is not given (and not acknowledged, so Google refunds it); not tried again
+const FINAL_REFUSALS = new Set(["has_other_plan", "not_student", "other_account", "topup_needs_plan", "wrong_product", "purchase_not_found"]);
+
+/**
+ * A purchase Google tells of before the phone sent it (the app closed or crashed after paying, or a slow UPI payment
+ * that finished later): given from here, to the account named in the purchase (obfuscatedExternalAccountId, the
+ * user's id the phone put on it), exactly as the phone's verify would give it. Without this, a purchase the phone
+ * never sends is refunded by Google after 3 days. Returns what was done.
+ */
+async function grantFromNotification(n) {
+    const client = await requireClient();
+    let type; let productId; let accountId;
+    if (n.kind === "subscription") {
+        const purchase = await readSub(client, n.token);
+        if (!entitledItem(purchase)) return "not_paid";
+        type = "subscription";
+        productId = (entitledItem(purchase) || subscriptionLineItem(purchase))?.productId || "";
+        accountId = purchase?.externalAccountIdentifiers?.obfuscatedExternalAccountId;
+    } else if (n.kind === "product" && n.type === "ONE_TIME_PRODUCT_PURCHASED" && n.productId) {
+        const purchase = await askGoogle("product read", () => client.purchases.products.get({ packageName: PLAY_PACKAGE_NAME, productId: n.productId, token: n.token }));
+        // (0 = paid; a pending payment is told of again when it completes)
+        if (purchase?.purchaseState !== 0 || purchase?.consumptionState === 1) return "not_paid";
+        type = "product";
+        productId = n.productId;
+        accountId = purchase?.obfuscatedExternalAccountId;
+    } else {
+        return "ignored";
+    }
+    if (!/^[a-f0-9]{24}$/i.test(String(accountId || ""))) return "no_account";
+    const user = await User.findById(accountId).select("-password").lean();
+    if (!user) return "no_account";
+    try {
+        await verifyPlayPurchase({ user, type, productId, purchaseToken: n.token, io: await socketServer() });
+        console.log(`[Google Play] ${type} ${productId} given to user ${accountId} from Google's notification`);
+        return "granted";
+    } catch (err) {
+        if (err instanceof PlayError && FINAL_REFUSALS.has(err.body?.code || "")) {
+            console.warn(`[Google Play] ${type} ${productId} for user ${accountId} not given (${err.body.code}): ${err.message}`);
+            return "refused";
+        }
+        if (err instanceof PlayError && err.status === 400) {
+            console.warn(`[Google Play] ${type} ${productId} for user ${accountId} not given: ${err.message}`);
+            return "refused";
+        }
+        throw err;
+    }
+}
+
+async function applyPlayNotification(n) {
     if (n.kind === "test") { console.log("[Google Play] test notification received"); return "test"; }
     if (n.kind === "voided") return applyVoidedPurchase({ purchaseToken: n.token, orderId: n.orderId, source: "rtdn" });
     if (!n.token) return "ignored";
     const row = await GooglePlayPurchase.findOne({ purchaseToken: n.token }).lean();
-    // (a purchase the phone has not sent yet is given when it does)
-    if (!row) return "not_ours";
+    // A purchase the phone has not sent yet: given from here (a replaced token is never given again: verify answers
+    // with the plan the user has now)
+    if (!row) return grantFromNotification(n);
     if (n.kind === "subscription") {
         const user = await User.findById(row.userId).select("plan name email phoneNumber role").lean();
         // (a replaced token, or a plan bought since elsewhere: nothing of this user's plan follows it any more)

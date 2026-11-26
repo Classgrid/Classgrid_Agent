@@ -33,6 +33,7 @@ const METHOD_LABELS: Record<string, string> = {
   netbanking: "Net banking",
   wallet: "Wallet",
   emi: "EMI",
+  google_play: "Google Play",
 };
 
 export const methodLabel = (m: string | null | undefined) => {
