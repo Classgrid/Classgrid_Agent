@@ -12,6 +12,8 @@
  */
 import React, { useEffect, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, Folder, Github } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { themeIcons } from 'seti-icons';
 import { Spinner } from '@/components/marketing_ui/spinner';
 import { CombinedReasoningBlock } from './CombinedReasoningBlock';
@@ -604,18 +606,25 @@ export function helperReportsOf(content: unknown): HelperReport[] | null {
 
 // The one collapsed line + expandable body that every "Message from ..." row uses: a helper's report, a message from
 // another Classgrid session (PeerMessageLine below) and the receipt of a message sent to one (tool-results/renderers.tsx)
-export function ReportRow({ label, body, defaultOpen = false }: { label: string; body: string; defaultOpen?: boolean }) {
+// markdown: the text is shown formatted (bold, lists, code), as the answer it came from looked in its own chat, not
+// with its ** and - marks (owner, 2026-11-27: a message between sessions showed "raw input")
+const ROW_MD = { a: ({ href, children }: any) => <a href={href} target="_blank" rel="noreferrer" className="underline">{children}</a> };
+const ROW_MD_LOOK = "text-[14px] text-slate-500 dark:text-[#8a8a8a] break-words [&_p]:my-1.5 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:my-0.5 [&_strong]:font-semibold [&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_code]:font-mono [&_code]:text-[13px] [&_pre]:my-2 [&_pre]:whitespace-pre-wrap";
+const plainLine = (s: string) => s.replace(/\*\*|`/g, '').replace(/\s+/g, ' ').trim();
+export function ReportRow({ label, body, defaultOpen = false, markdown = false }: { label: string; body: string; defaultOpen?: boolean; markdown?: boolean }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="flex flex-col">
       <button type="button" onClick={() => setOpen(!open)} className="flex min-w-0 items-center gap-1.5 py-1 pl-10 text-left text-[14px] italic text-slate-500 dark:text-[#8a8a8a] hover:text-foreground">
         {/* (open: the whole text is right under it, so the line is only who it is from) */}
-        <span className="min-w-0 truncate">{open ? label : `${label}: ${body.replace(/\s+/g, ' ').trim()}`}</span>
+        <span className="min-w-0 truncate">{open ? label : `${label}: ${markdown ? plainLine(body) : body.replace(/\s+/g, ' ').trim()}`}</span>
         {open ? <ChevronDown className="size-3.5 shrink-0" /> : <ChevronRight className="size-3.5 shrink-0" />}
       </button>
       {open && (
         <FollowBox className="ml-10 mb-2 max-h-[360px]" follow={0}>
-          <div className="whitespace-pre-wrap text-[14px] text-slate-500 dark:text-[#8a8a8a]">{body}</div>
+          {markdown
+            ? <div className={ROW_MD_LOOK}><ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={ROW_MD}>{body}</ReactMarkdown></div>
+            : <div className="whitespace-pre-wrap text-[14px] text-slate-500 dark:text-[#8a8a8a]">{body}</div>}
         </FollowBox>
       )}
     </div>
@@ -664,8 +673,8 @@ export function stepMessagesOf(result: unknown): StepMessage[] {
 }
 
 // A message from another Classgrid session (hidden turn started by lib/peerSessions.ts): "Message from @name: text"
-// Shown open: the person reads the whole message as it came, not one cut line (owner, 2026-11-23: "I can never see
-// what it is messaging"). `to`: a message this session's AI sent, "Message to @name".
+// "Message from" and "Message to" are closed until clicked; opened, the whole message shows as it came (owner, 2026-11-27,
+// "both closed by default"; on 2026-11-23 they were open). `to`: a message this session sent, "Message to @name".
 // `receipt`: what the other session's inbox answered when a message was sent, in the tool's own words ("Delivered to
 // @name's inbox (message id ..., not read yet). It is busy; it will read it at its next step."), shown under the sent
 // message (owner, 2026-11-23, about this line in Claude Code: "this is the best thing", "the most important line").
@@ -673,7 +682,7 @@ export function PeerMessageLine({ name, text, to = false, receipt }: { name: str
   const label = to ? (name ? `Message to @${name}` : 'Message to another session') : `Message from @${name}`;
   return (
     <div className="mb-3 flex flex-col">
-      <ReportRow label={label} body={text} defaultOpen />
+      <ReportRow label={label} body={text} markdown />
       {receipt && <div className="pl-10 pr-2 pt-0.5 text-[13px] text-slate-500 dark:text-[#8a8a8a] break-words">{receipt}</div>}
     </div>
   );

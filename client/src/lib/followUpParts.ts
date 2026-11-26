@@ -1,26 +1,35 @@
 // The parts of "a message sent while the AI works" that need nothing from the app (no React, no network), so they
 // can be checked on their own (server/tests/follow-up-parts.test.mjs). The rest, and the story, is lib/followUps.ts.
 
-/** A message that waits for the running answer's next step */
-export type SentNote = { id: string; text: string };
+/** A file sent with such a message (already uploaded: its link; a desktop picture: its data: URL) */
+export type NoteFile = { url: string; name: string; mimeType?: string };
+/** A message that waits for the running answer's next step, with the files and pasted text that came with it */
+export type SentNote = { id: string; text: string; files?: NoteFile[]; pasted?: string[] };
 
-/** Only plain words can join a running answer */
-export function plainFollowUp(m: { text: string; files?: number; pasted?: number; codeNotes?: number }): boolean {
+/**
+ * What can join a running answer: words, files and pasted text (owner, 2026-11-27: "remove the queue for uploads
+ * too"; until then a message with a file or pasted text waited in the queue). Code comments and a "/" command still
+ * take the queue, and so does a message whose file is still uploading.
+ */
+export function plainFollowUp(m: { text: string; files?: number; pasted?: number; codeNotes?: number; uploading?: number }): boolean {
   const text = String(m.text || "").trim();
-  if (!text || text.startsWith("/")) return false;
-  return !(m.files || m.pasted || m.codeNotes);
+  if (text.startsWith("/") || m.codeNotes || m.uploading) return false;
+  return !!(text || m.files || m.pasted);
 }
 
 /**
  * The messages that waited for the answer to end go out together, and stay separate messages: the last one is the
  * message that is sent, the ones before it go with it (`earlier`) and are drawn and saved as their own messages in
  * front of it. The AI reads them all and gives one answer. (They were joined into one bubble at first: owner,
- * 2026-11-24, "they were separate messages, you are merging them into one".)
+ * 2026-11-24, "they were separate messages, you are merging them into one".) Their files and pasted text all go
+ * with the message that is sent.
  */
-export function waitedMessages(notes: SentNote[]): { earlier: string[]; last: string } | null {
+export function waitedMessages(notes: SentNote[]): { earlier: string[]; last: string; files: NoteFile[]; pasted: string[] } | null {
   const texts = notes.map((n) => n.text.trim()).filter(Boolean);
-  if (!texts.length) return null;
-  return { earlier: texts.slice(0, -1), last: texts[texts.length - 1]! };
+  const files = notes.flatMap((n) => n.files || []);
+  const pasted = notes.flatMap((n) => n.pasted || []);
+  if (!texts.length && !files.length && !pasted.length) return null;
+  return { earlier: texts.slice(0, -1), last: texts[texts.length - 1] ?? "", files, pasted };
 }
 
 /**
@@ -49,17 +58,17 @@ export const isUserNoteStep = (s: StepLike | null | undefined): boolean => !!s &
  * happened. `thoughtAt` on a message's step is how much of the thinking was written when it was read.
  * An answer with no such message is one part with everything (drawn as before).
  */
-export function partsAtUserNotes<S extends StepLike>(steps: S[] | undefined, thought: string | undefined): { steps: S[]; thought: string; said?: string; saidId?: string }[] {
+export function partsAtUserNotes<S extends StepLike>(steps: S[] | undefined, thought: string | undefined): { steps: S[]; thought: string; said?: string; saidId?: string; saidFiles?: NoteFile[]; saidPasted?: number }[] {
   const all = steps || [];
   const whole = String(thought || "");
   if (!all.some(isUserNoteStep)) return [{ steps: all, thought: whole }];
-  const parts: { steps: S[]; thought: string; said?: string; saidId?: string }[] = [];
+  const parts: { steps: S[]; thought: string; said?: string; saidId?: string; saidFiles?: NoteFile[]; saidPasted?: number }[] = [];
   let work: S[] = [];
   let from = 0;
   for (const s of all) {
     if (!isUserNoteStep(s)) { work.push(s); continue; }
     const at = Math.max(from, Math.min(whole.length, Number.isFinite(Number(s.args?.thoughtAt)) ? Number(s.args.thoughtAt) : whole.length));
-    parts.push({ steps: work, thought: whole.slice(from, at), said: String(s.args.message), saidId: s.id });
+    parts.push({ steps: work, thought: whole.slice(from, at), said: String(s.args.message), saidId: s.id, ...(Array.isArray(s.args?.files) && s.args.files.length ? { saidFiles: s.args.files } : {}), ...(Number(s.args?.pasted) > 0 ? { saidPasted: Number(s.args.pasted) } : {}) });
     work = [];
     from = at;
   }

@@ -9,8 +9,8 @@
 //                     chat then draws it at that place in the answer. A message the AI did not get to (it was
 //                     writing its final answer) goes out when the answer ends, together with every other message
 //                     that waited, as ONE message: several messages get one answer.
-// A message that carries files, pasted text or code comments, or is a "/" command, always takes the queue: only
-// plain words can join an answer that is already running.
+// Files and pasted text go with it (owner, 2026-11-27: "remove the queue for uploads too"). A message with code
+// comments, a file still uploading, or a "/" command takes the queue.
 import { useEffect, useState } from "react";
 import { fetchWithRescue } from "@/lib/rescue";
 import type { SentNote } from "./followUpParts";
@@ -60,7 +60,7 @@ export async function sayToAnswer(apiBase: string, turnId: string, note: SentNot
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ type: "say", id: note.id, text: note.text }),
+        body: JSON.stringify({ type: "say", id: note.id, text: note.text, ...(note.files?.length ? { files: note.files } : {}), ...(note.pasted?.length ? { pasted: note.pasted } : {}) }),
       });
       if (r.ok) return true;
       if (r.status === 400 || r.status === 404) return false;

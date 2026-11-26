@@ -11,23 +11,32 @@ const { plainFollowUp, waitedMessages, runningCommandFor, partsAtUserNotes, isUs
 const tool = (id, name, args = {}) => ({ id, type: "tool", tool: name, args, status: "success", result: "ok" });
 const said = (id, message, thoughtAt) => ({ id: `said-${id}`, type: "tool", tool: USER_NOTE_TOOL, args: { message, thoughtAt }, status: "success", result: "Read." });
 
-test("only plain words join a running answer; files, pasted text, code comments and commands take the queue", () => {
+test("words, files and pasted text join a running answer; code comments, uploads in progress and commands take the queue", () => {
     assert.equal(plainFollowUp({ text: "use port 5000" }), true);
     assert.equal(plainFollowUp({ text: "  use port 5000  ", files: 0, pasted: 0, codeNotes: 0 }), true);
-    assert.equal(plainFollowUp({ text: "see this", files: 1 }), false);
-    assert.equal(plainFollowUp({ text: "see this", pasted: 2 }), false);
+    // (owner, 2026-11-27: "remove the queue for uploads too")
+    assert.equal(plainFollowUp({ text: "see this", files: 1 }), true);
+    assert.equal(plainFollowUp({ text: "", files: 2 }), true, "a file alone");
+    assert.equal(plainFollowUp({ text: "see this", pasted: 2 }), true);
+    assert.equal(plainFollowUp({ text: "see this", files: 1, uploading: 1 }), false, "a file still uploading waits");
     assert.equal(plainFollowUp({ text: "fix this line", codeNotes: 1 }), false);
     assert.equal(plainFollowUp({ text: "/remote" }), false);
     assert.equal(plainFollowUp({ text: "   " }), false);
     assert.equal(plainFollowUp({ text: "" }), false);
 });
 
+test("messages that waited take their files and pasted text with them", () => {
+    const waited = waitedMessages([{ id: "a", text: "look", files: [{ url: "https://x/a.png", name: "a.png" }] }, { id: "b", text: "", pasted: ["log line"] }]);
+    assert.deepEqual(waited, { earlier: [], last: "look", files: [{ url: "https://x/a.png", name: "a.png" }], pasted: ["log line"] });
+    assert.equal(waitedMessages([{ id: "c", text: "  " }]), null);
+});
+
 test("the messages that waited go out together and stay separate messages (never joined into one)", () => {
     // what the owner typed while an answer worked, 2026-11-24: four messages, shown as one bubble "gg gg g g"
     const waited = waitedMessages([{ id: "a", text: "gg" }, { id: "b", text: "gg" }, { id: "c", text: " g " }, { id: "d", text: "g" }]);
-    assert.deepEqual(waited, { earlier: ["gg", "gg", "g"], last: "g" });
+    assert.deepEqual(waited, { earlier: ["gg", "gg", "g"], last: "g", files: [], pasted: [] });
     assert.equal(waited.earlier.length + 1, 4, "four messages stay four");
-    assert.deepEqual(waitedMessages([{ id: "a", text: "one" }]), { earlier: [], last: "one" });
+    assert.deepEqual(waitedMessages([{ id: "a", text: "one" }]), { earlier: [], last: "one", files: [], pasted: [] });
     assert.equal(waitedMessages([]), null);
     assert.equal(waitedMessages([{ id: "a", text: "   " }]), null);
 });

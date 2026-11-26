@@ -249,7 +249,7 @@ import { usePlanOverview } from "@/features/shared/queries/usePlanOverview";
 const DEFAULT_FILES_PER_MESSAGE = 6;
 import { fetchWithRescue } from "@/lib/rescue";
 import { commandStarted, commandEnded } from "@/lib/runningCommands";
-import { waitedMessages, partsAtUserNotes, plainFollowUp, sayToAnswer, useFollowUpMode, USER_NOTE_TOOL, type SentNote } from "@/lib/followUps";
+import { waitedMessages, partsAtUserNotes, plainFollowUp, sayToAnswer, useFollowUpMode, USER_NOTE_TOOL, type NoteFile, type SentNote } from "@/lib/followUps";
 import { ANSWER_FEEDBACK_ASK, ANSWER_FEEDBACK_SET, closeReading, getReading, startReading, useReadingOf, useReadingOn } from "../reading";
 import { ReadingBar } from "./ReadingBar";
 import { docContextLine, getOpenDoc, openDocInStudio, splitDocContext, type OpenDoc } from "@/features/live-docs/docContext";
@@ -301,6 +301,26 @@ function chatProjectOf(sData: any): string | null {
 function isHiddenMessage(m: { role?: string; content?: unknown; hidden?: boolean } | null | undefined): boolean {
   if (!m) return false;
   return !!m.hidden || (m.role === "user" && typeof m.content === "string" && (m.content.trim().startsWith("[SYSTEM:") || isPeerContent(m.content)));
+}
+
+// The session whose message this answer answers (the turn it started), or null. That answer is sent back to it
+// whole when the turn ends, so it is shown as "Message to @name" (what was sent), never as an answer in the main chat
+// (owner, 2026-11-27). Not for an answer to that session's reply or notice (those go to the person), nor when the AI
+// already answered with message_classgrid_session (then its text is not what was sent).
+function peerAnswerTo(list: any[], index: number): string | null {
+  const answer = list[index];
+  if (!answer || answer.role !== "assistant") return null;
+  if ((answer.steps || []).some((s: any) => s?.tool === "message_classgrid_session")) return null;
+  for (let j = index - 1; j >= 0; j--) {
+    const u = list[j];
+    if (u?.role !== "user") continue;
+    const raw = String(u.content || "");
+    if (raw.includes("This is that session's answer to the message you sent it")) return null;
+    const p = u.meta?.peer || isPeerContent(raw) ? parsePeerContent(raw) : null;
+    if (!p || p.notice) return null;
+    return u.meta?.peer?.from?.name || p.name || null;
+  }
+  return null;
 }
 
 // The chat request's JSON, gzipped where the browser can (Chromium, Electron): the plain text where it can't or when
@@ -541,12 +561,27 @@ export type ChatMessage = {
 // A message the person sent while the AI worked: their bubble, inside the answer where the AI read it, or at the
 // end of the chat while it still waits for the AI's next step. It looks the same in both places, like any message of
 // theirs (it was dimmed while it waited: owner, 2026-11-24, "don't make these messages blur")
-function SaidWhileWorking({ text, waiting = false }: { text: string; waiting?: boolean }) {
+// (files and pasted text sent with it: a chip each under the words, owner 2026-11-27 "remove the queue for uploads")
+function SaidWhileWorking({ text, waiting = false, files, pasted = 0 }: { text: string; waiting?: boolean; files?: { name: string; url?: string }[]; pasted?: number }) {
+  const chips = [...(files || []).map((f) => f.name), ...Array.from({ length: pasted }, (_, i) => (pasted > 1 ? `Pasted text ${i + 1}.txt` : "Pasted text.txt"))];
   return (
-    <div className={cn("flex w-full justify-end", waiting ? "mb-3" : "mb-4")}>
-      <div className={cn("max-w-[75%] rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C] text-[15px] leading-relaxed text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]")}>{text}</div>
+    <div className={cn("flex w-full flex-col items-end gap-1.5", waiting ? "mb-3" : "mb-4")}>
+      {chips.length > 0 && (
+        <div className="flex max-w-[75%] flex-wrap justify-end gap-1.5">
+          {chips.map((name, i) => <span key={`${name}-${i}`} className="max-w-[220px] truncate rounded-lg border border-black/10 dark:border-white/10 px-2.5 py-1 text-[13px] text-muted-foreground">{name}</span>)}
+        </div>
+      )}
+      {text.trim() && <div className={cn("max-w-[75%] rounded-[16px] px-[14px] py-[6px] bg-[#f1f1ef] dark:bg-[#2C2C2C] text-[15px] leading-relaxed text-foreground whitespace-pre-wrap [overflow-wrap:anywhere]")}>{text}</div>}
     </div>
   );
+}
+
+// A queued message's own files and pasted text, for askQuestion (a queued message went out without them until
+// 2026-11-27: askQuestion only read the chat box's, which had been cleared when it was queued)
+function queuedFilesOf(m: { attachedFiles?: UIFileAttachment[]; pastedTexts?: string[] }): { files?: NoteFile[]; pasted?: string[] } {
+  const files = (m.attachedFiles || []).filter((f) => f.status === "done" && f.url).map((f) => ({ url: f.url!, name: f.name, mimeType: f.type }));
+  const pasted = (m.pastedTexts || []).filter((t) => t.trim());
+  return files.length || pasted.length ? { files, pasted } : {};
 }
 
 export type QueuedMessage = {
@@ -4798,7 +4833,9 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   // (saidBefore: messages sent while the last answer worked that the AI did not get to. They go with this one, each
   // drawn and saved as its own message in front of it; lib/followUpParts.ts waitedMessages)
-  async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null; codeNotes?: CodeNote[]; meta?: ChatMessage["meta"]; saidBefore?: string[] }) {
+  // (files / pasted: a queued or waited message's own files and pasted text, sent with it; the chat box's are left
+  // alone, they belong to what the person is writing now. Before 2026-11-27 a queued message went out without them.)
+  async function askQuestion(question: string, options?: { hidden?: boolean; isEdit?: boolean; explicitSessionId?: string | null; codeNotes?: CodeNote[]; meta?: ChatMessage["meta"]; saidBefore?: string[]; files?: NoteFile[]; pasted?: string[] }) {
     if (chatEnded) { setSubmitting(false); return; } // ended chats take no new messages
     // Desktop app: a chat another account on this computer had goes on under this account. Its messages are
     // copied into a new chat of this account first, then the message is sent there (the AI has the whole chat)
@@ -4836,9 +4873,12 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     // A hidden message (Mastero's card telling the AI what the user picked, a login done...) is for the AI only: what the
     // user is typing, their files and pasted text stay in the chat box for their own next message
     const hiddenSend = !!options?.hidden;
-    const sentPasted = hiddenSend ? [] : pastedTexts;
+    const ownFiles = options?.files !== undefined || options?.pasted !== undefined;
+    const sentPasted = hiddenSend ? [] : ownFiles ? (options?.pasted || []) : pastedTexts;
     // Only send files that uploaded
-    const filesToUpload = (hiddenSend ? [] : attachedFiles)
+    const filesToUpload = hiddenSend ? [] : ownFiles
+      ? (options?.files || []).filter((f) => f.url).map((f) => ({ name: f.name, url: f.url, mimeType: f.mimeType || "", size: 0 }))
+      : attachedFiles
       .filter(f => f.status === "done" && f.url)
       .map(f => ({
         name: f.name,
@@ -4887,11 +4927,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
     setError("");
     if (!hiddenSend) {
       clearTyped();
-      setAttachedFiles([]);
-      setPastedTexts([]);
+      // (a queued or waited message brought its own files: the box's files are the next message's)
+      if (!ownFiles) {
+        setAttachedFiles([]);
+        setPastedTexts([]);
+        localStorage.removeItem("askAiDraftFiles");
+        localStorage.removeItem("askAiDraftPastedTexts");
+      }
       localStorage.removeItem("askAiDraftInput");
-      localStorage.removeItem("askAiDraftFiles");
-      localStorage.removeItem("askAiDraftPastedTexts");
       localStorage.removeItem("askAiDraftContext");
     }
 
@@ -5675,7 +5718,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                 // The AI has read a message sent while it worked: it leaves the waiting bubbles and becomes a step
                 // of this answer at this place (drawn as the person's message there; the server saves the same step)
                 const noteId = String(event.id);
-                const noteStep: AgentStep = { id: `said-${noteId}`, type: 'tool', tool: USER_NOTE_TOOL, args: { message: String(event.text || ""), thoughtAt: typeof event.thoughtAt === "number" ? event.thoughtAt : undefined }, result: "Read.", status: 'success' };
+                const noteStep: AgentStep = { id: `said-${noteId}`, type: 'tool', tool: USER_NOTE_TOOL, args: { message: String(event.text || ""), thoughtAt: typeof event.thoughtAt === "number" ? event.thoughtAt : undefined, ...(Array.isArray(event.files) && event.files.length ? { files: event.files } : {}), ...(Number(event.pasted) > 0 ? { pasted: Number(event.pasted) } : {}) }, result: "Read.", status: 'success' };
                 setSentNotes((prev) => prev.filter((n) => n.id !== noteId));
                 setMessages((prev) => {
                   const lastMsg = prev[prev.length - 1];
@@ -5898,12 +5941,16 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     const isTyping = messages.length > 0 && messages[messages.length - 1]?.typing === true;
     if (thinking || submitting || isTyping || wordTypingActiveRef.current) {
-      // "Send immediately" (Settings → Input box; the desktop app, Classgrid Code and the extension): plain words
-      // join the answer that is running. They show in the chat at once and are posted to the answer; the AI reads
-      // them with its next step. A message with files, pasted text or code comments, and a "/" command, wait in
-      // the queue as before.
-      if (followMode === "now" && plainFollowUp({ text: finalInput, files: attachedFiles.length, pasted: pastedTexts.length, codeNotes: notesToSend.length })) {
-        const note: SentNote = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, text: finalInput.trim() };
+      // "Send immediately" (Settings → Input box; the desktop app, Classgrid Code and the extension): the message
+      // joins the answer that is running, with its files and pasted text. It shows in the chat at once and is
+      // posted to the answer; the AI reads it with its next step. A message with code comments, a file still
+      // uploading, or a "/" command waits in the queue as before.
+      const readyFiles = attachedFiles.filter((f) => f.status === "done" && f.url);
+      if (followMode === "now" && plainFollowUp({ text: finalInput, files: readyFiles.length, pasted: pastedTexts.length, codeNotes: notesToSend.length, uploading: attachedFiles.filter((f) => f.status === "uploading").length })) {
+        const noteFiles: NoteFile[] = readyFiles.map((f) => ({ url: f.url!, name: f.name, mimeType: f.type }));
+        // (a desktop picture is kept on this computer, so the chat can show it again, as for a question)
+        noteFiles.forEach((f) => { if (f.url.startsWith("data:image/")) void keepLocalImage(f.url); });
+        const note: SentNote = { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`, text: finalInput.trim(), ...(noteFiles.length ? { files: noteFiles } : {}), ...(pastedTexts.length ? { pasted: [...pastedTexts] } : {}) };
         setSentNotes((prev) => [...prev, note]);
         const turnId = activeTurnIdRef.current;
         // (no answer id yet: it is posted the moment the id arrives, see turn_info)
@@ -5961,7 +6008,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         setSentNotes([]);
         if (waited) {
           setSubmitting(true);
-          setTimeout(() => { askQuestionRef.current?.(waited.last, waited.earlier.length ? { saidBefore: waited.earlier } : undefined); }, 50);
+          setTimeout(() => { askQuestionRef.current?.(waited.last, { ...(waited.earlier.length ? { saidBefore: waited.earlier } : {}), ...(waited.files.length || waited.pasted.length ? { files: waited.files, pasted: waited.pasted } : {}) }); }, 50);
         }
       }
       // Then check if there is a priority message
@@ -5970,10 +6017,11 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
         const textToSend = priorityMessage.text;
         const isEditMsg = priorityMessage.isEdit;
         const notesToSend = priorityMessage.codeNotes;
+        const own = queuedFilesOf(priorityMessage);
         setPriorityMessage(null);
         setTimeout(() => {
           if (askQuestionRef.current) {
-            askQuestionRef.current(textToSend, { isEdit: isEditMsg, codeNotes: notesToSend });
+            askQuestionRef.current(textToSend, { isEdit: isEditMsg, codeNotes: notesToSend, ...own });
           }
         }, 50); // fast fire
       }
@@ -5987,7 +6035,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
         setTimeout(() => {
           if (askQuestionRef.current) {
-            askQuestionRef.current(nextMsg.text, { isEdit: nextMsg.isEdit, codeNotes: nextMsg?.codeNotes });
+            askQuestionRef.current(nextMsg.text, { isEdit: nextMsg.isEdit, codeNotes: nextMsg?.codeNotes, ...queuedFilesOf(nextMsg || {}) });
           }
         }, 50); // fast fire
       }
@@ -6485,7 +6533,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                             <ReplySteps thought={part.thought} steps={part.steps} live={lastPart && liveNow} thinking={lastPart && thinkingNow} workedMs={lastPart ? message.workedMs : undefined} />
                                           </div>
                                         )}
-                                        {part.said !== undefined && <SaidWhileWorking text={part.said} />}
+                                        {part.said !== undefined && <SaidWhileWorking text={part.said} files={part.saidFiles} pasted={part.saidPasted} />}
                                       </React.Fragment>
                                     );
                                   });
@@ -6627,6 +6675,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                     </p>
                                   </div>
                                 </div>
+                              ) : peerAnswerTo(messages, index) ? (
+                                <PeerMessageLine to name={peerAnswerTo(messages, index) || ""} text={String(message.content || "")} />
                               ) : (
                                 <AssistantMessageContent
                                   content={message.content}
@@ -6836,7 +6886,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             {peerPending > 0 && <div className="ml-10 w-fit rounded-full border border-border/60 px-2.5 py-0.5 text-xs text-muted-foreground">{peerPending} message{peerPending === 1 ? "" : "s"} from another session waiting</div>}
 
             {/* Sent while the AI works and not read yet: they wait here, then move into the answer */}
-            {sentNotes.map((n) => <SaidWhileWorking key={n.id} text={n.text} waiting />)}
+            {sentNotes.map((n) => <SaidWhileWorking key={n.id} text={n.text} files={n.files} pasted={n.pasted?.length || 0} waiting />)}
 
             {/* Rendering priority message right after the normal messages */}
             {priorityMessage && (
