@@ -301,18 +301,14 @@ test("a plan bought on the website is changed on the website only: any Play plan
     assert.equal((await verifySub("W")).plan.key, "max");
 });
 
-test("a student offer: refused (not_student, not acknowledged) unless the user is an approved student", async () => {
+test("a student offer bought on Google Play is refused (student_web_only, not acknowledged), even for an approved student", async () => {
     me().plan = { id: "free" };
     sub("E", { productId: "classgrid_pro", basePlanId: "pro-monthly", offerId: "student-monthly" });
-    await assert.rejects(verifySub("E", "classgrid_pro"), (e) => e.status === 403 && e.body.code === "not_student");
-    assert.equal(google.acks.length, 0);
-    me().student_verification = { verified_at: new Date(Date.now() - 400 * DAY), expires_at: new Date(Date.now() - DAY) }; // run out
-    await assert.rejects(verifySub("E", "classgrid_pro"), (e) => e.body.code === "not_student");
+    await assert.rejects(verifySub("E", "classgrid_pro"), (e) => e.status === 403 && e.body.code === "student_web_only");
     me().student_verification = { verified_at: new Date(Date.now() - DAY), expires_at: new Date(Date.now() + 300 * DAY) };
-    const r = await verifySub("E", "classgrid_pro");
-    assert.equal(r.plan.key, "pro");
-    assert.equal(me().plan.note, "student price");
-    assert.equal(google.acks.length, 1);
+    await assert.rejects(verifySub("E", "classgrid_pro"), (e) => e.body.code === "student_web_only");
+    assert.equal(google.acks.length, 0);
+    assert.equal(me().plan.id, "free");
 });
 
 test("a voided pack takes back what is left of its credits, once", async () => {

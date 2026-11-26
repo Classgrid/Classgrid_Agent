@@ -46,13 +46,15 @@ export function showPhonePlanCard() {
   const close = () => { root.unmount(); el.remove(); };
   root.render(
     <Dialog open onOpenChange={(o) => { if (!o) close(); }}>
-      <DialogContent className="sm:max-w-[400px] p-6" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
+      <DialogContent showCloseButton={false} className="sm:max-w-[420px] rounded-[28px] p-6 gap-0 border-0" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
         <DialogTitle className="sr-only">Your plan</DialogTitle>
+        {/* (like ChatGPT's "You can't make changes to your subscription inside this app" card: big text, one OK pill) */}
         <DialogDescription className="text-[15px] leading-relaxed text-foreground">
-          You can't change your plan here, because you bought it in the Classgrid phone app. Change it in the app, under Settings &gt; Billing.
+          You can't change your plan here, because you bought it in the Classgrid phone app.
         </DialogDescription>
-        <DialogFooter>
-          <button type="button" className="inline-flex items-center justify-center h-9 px-6 rounded-full text-[13px] font-medium cursor-pointer bg-foreground text-background hover:bg-foreground/90" onClick={close}>OK</button>
+        <p className="text-[15px] leading-relaxed text-foreground mt-3">Please open the Classgrid app, under Settings &gt; Billing, to change your plan.</p>
+        <DialogFooter className="mt-6 sm:justify-stretch">
+          <button type="button" className="w-full h-11 rounded-full text-[14px] font-medium cursor-pointer bg-foreground text-background hover:bg-foreground/90" onClick={close}>OK</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>,

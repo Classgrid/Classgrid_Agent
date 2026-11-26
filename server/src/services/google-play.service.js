@@ -347,6 +347,8 @@ async function ownClaim({ client, existing, fields }) {
 const HAS_OTHER_PLAN = "You already have a plan on Classgrid that is the same or higher. This Google Play purchase was not used, and Google will refund it.";
 const HAS_WEB_PLAN = "Your plan was bought on the Classgrid dashboard (chat.classgrid.in), so it is changed there, under Settings > Billing. This Google Play purchase was not used, and Google will refund it.";
 const NOT_STUDENT = "Student prices are for approved students. Apply for student prices in Settings > Billing. This Google Play purchase was not used, and Google will refund it.";
+// Student prices are bought on the dashboard only (owner, 2026-11-26: "student plan only on web, not on phone")
+const STUDENT_WEB_ONLY = "Student prices are bought on the Classgrid dashboard only (chat.classgrid.in, under Settings > Billing). This Google Play purchase was not used, and Google will refund it.";
 
 async function grantSubscription({ client, userId, productId, purchaseToken, existing, io }) {
     const purchase = await readSub(client, purchaseToken);
@@ -357,7 +359,7 @@ async function grantSubscription({ client, userId, productId, purchaseToken, exi
     if (!me) throw new PlayError(404, "Your account was not found.");
 
     // Student offers only for an approved student (the rule of GET /api/ai/student: verified and not run out)
-    if (sub.studentOffer && !studentVerified(me.student_verification)) throw new PlayError(403, NOT_STUDENT, "not_student");
+    if (sub.studentOffer) throw new PlayError(403, STUDENT_WEB_ONLY, "student_web_only");
 
     // A plan change: the token it replaces must be this user's (never take over another account's subscription)
     if (sub.linkedPurchaseToken) {
@@ -829,7 +831,7 @@ export async function handlePlayNotification(n) {
 }
 
 // Final answers of a grant: the purchase is not given (and not acknowledged, so Google refunds it); not tried again
-const FINAL_REFUSALS = new Set(["has_other_plan", "has_web_plan", "not_student", "other_account", "topup_needs_plan", "wrong_product", "purchase_not_found"]);
+const FINAL_REFUSALS = new Set(["has_other_plan", "has_web_plan", "not_student", "student_web_only", "other_account", "topup_needs_plan", "wrong_product", "purchase_not_found"]);
 
 /**
  * A purchase Google tells of before the phone sent it (the app closed or crashed after paying, or a slow UPI payment
