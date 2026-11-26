@@ -382,11 +382,13 @@
         if (!text) {
           // No text: a picture (a screenshot, a copied image) is read by the editor and pasted as a file, so the
           // chat attaches it like a paste in the browser
-          return call("clipboardImage").then(function (img) {
-            if (!img || !img.data) return;
-            var image = new DataTransfer();
-            image.items.add(new File([fromB64(img.data)], img.name, { type: img.type }));
-            el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: image, bubbles: true, cancelable: true }));
+          // (every file copied in File Explorer comes, as in the desktop app; an older editor part sends one object)
+          return call("clipboardImage").then(function (got) {
+            var list = Array.isArray(got) ? got : got && got.data ? [got] : [];
+            if (!list.length) return;
+            var files = new DataTransfer();
+            list.forEach(function (f) { if (f && f.data) files.items.add(new File([fromB64(f.data)], f.name, { type: f.type })); });
+            if (files.items.length) el.dispatchEvent(new ClipboardEvent("paste", { clipboardData: files, bubbles: true, cancelable: true }));
           });
         }
         // the box's own paste handling first (long texts become a chip, formatted text stays formatted)

@@ -488,18 +488,24 @@ function micCancel() {
   setTimeout(() => { try { rec.proc.kill(); } catch { /* gone */ } fs.rm(rec.file, { force: true }, () => {}); }, 3000);
 }
 
-// A picture on the clipboard as { name, type, data (base64) }, or null. The editor's clipboard has text only, so
-// Windows' own clipboard is read: an image file copied in File Explorer, else the PNG a browser or app copies (it
-// keeps transparency), else the plain bitmap (a screenshot)
+// The files on the clipboard as [{ name, type, data (base64) }], or null. The editor's clipboard has text only, so
+// Windows' own clipboard is read: the files copied in File Explorer (every one of them, up to 10, as the desktop app
+// pastes them: owner, 2026-11-27, "I copied 4, only one came"; only the first picture was taken before), else the
+// PNG a browser or app copies, else the plain bitmap (a screenshot). The bitmap is made a JPEG, not a PNG: PowerShell
+// wrote a full-screen PNG of several MB on every paste, which made pasting slow ("too much slow"), and the chat makes
+// every picture a JPEG for the AI anyway (lib/desktopImages.ts shrinkForAi).
 const IMAGE_TYPES = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".bmp": "image/bmp", ".svg": "image/svg+xml", ".ico": "image/x-icon", ".avif": "image/avif", ".tif": "image/tiff", ".tiff": "image/tiff" };
+const FILE_TYPES = { ...IMAGE_TYPES, ".pdf": "application/pdf", ".txt": "text/plain", ".md": "text/markdown", ".csv": "text/csv", ".json": "application/json", ".doc": "application/msword", ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ".xls": "application/vnd.ms-excel", ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", ".ppt": "application/vnd.ms-powerpoint", ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation", ".zip": "application/zip", ".mp3": "audio/mpeg", ".wav": "audio/wav", ".mp4": "video/mp4" };
+const CLIP_MAX_FILES = 10;
+const CLIP_MAX_BYTES = 50 * 1024 * 1024; // a bigger file is left out (it would go through the editor's message channel)
 // One PowerShell stays open (started with the editor), so a paste doesn't wait for PowerShell to start each time
 const CLIP_END = "__cg_clip_end__";
 const CLIP_SETUP = [
   "Add-Type -AssemblyName System.Windows.Forms,System.Drawing",
   "function CgClip { $c=[System.Windows.Forms.Clipboard]; "
-    + "if($c::ContainsFileDropList()){$f=@($c::GetFileDropList()|?{$_ -match '\\.(png|jpe?g|gif|webp|bmp|svg|ico|avif|tiff?)$'})[0];if($f){return 'file|'+$f}}; "
+    + "if($c::ContainsFileDropList()){$f=@($c::GetFileDropList()|?{Test-Path -LiteralPath $_ -PathType Leaf}|Select-Object -First " + CLIP_MAX_FILES + ");if($f.Count){return 'files|'+($f -join '|')}}; "
     + "$p=$c::GetData('PNG');if($p -is [System.IO.MemoryStream]){return 'png|'+[Convert]::ToBase64String($p.ToArray())}; "
-    + "$i=$c::GetImage();if($i){$m=New-Object System.IO.MemoryStream;$i.Save($m,[System.Drawing.Imaging.ImageFormat]::Png);return 'png|'+[Convert]::ToBase64String($m.ToArray())}; '' }",
+    + "$i=$c::GetImage();if($i){$m=New-Object System.IO.MemoryStream;$i.Save($m,[System.Drawing.Imaging.ImageFormat]::Jpeg);return 'jpg|'+[Convert]::ToBase64String($m.ToArray())}; '' }",
 ].join("\n") + "\n";
 let clipHost = null;
 function clipboardHost() {
@@ -532,10 +538,14 @@ function clipboardImage() {
       clearTimeout(timer);
       const [kind, value] = String(out || "").trim().split(/\|(.*)/s);
       if (!value) return resolve(null);
-      if (kind === "png") return resolve({ name: `pasted-image-${Date.now()}.png`, type: "image/png", data: value.trim() });
-      try {
-        resolve({ name: path.basename(value), type: IMAGE_TYPES[path.extname(value).toLowerCase()] || "image/png", data: fs.readFileSync(value.trim()).toString("base64") });
-      } catch { resolve(null); }
+      if (kind === "png") return resolve([{ name: `pasted-image-${Date.now()}.png`, type: "image/png", data: value.trim() }]);
+      if (kind === "jpg") return resolve([{ name: `pasted-image-${Date.now()}.jpg`, type: "image/jpeg", data: value.trim() }]);
+      // (files: read side by side, each left out on its own if it can't be read or is too big)
+      Promise.all(value.split("|").map((p) => p.trim()).filter(Boolean).slice(0, CLIP_MAX_FILES).map((p) => fs.promises.stat(p)
+        .then((st) => (st.isFile() && st.size <= CLIP_MAX_BYTES ? fs.promises.readFile(p) : null))
+        .then((buf) => (buf ? { name: path.basename(p), type: FILE_TYPES[path.extname(p).toLowerCase()] || "application/octet-stream", data: buf.toString("base64") } : null))
+        .catch(() => null)))
+        .then((files) => { const got = files.filter(Boolean); resolve(got.length ? got : null); }, () => resolve(null));
     });
     host.proc.stdin.write(`CgClip; '${CLIP_END}'\n`);
   });
