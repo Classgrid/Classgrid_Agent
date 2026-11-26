@@ -9,7 +9,9 @@ import crypto from "node:crypto";
 
 export const INLINE_IMAGE_PREFIX = "desktop-image:";
 export const INLINE_IMAGE_NOTE = "(sent from the desktop app, not stored)";
-export const MAX_INLINE_IMAGES = 6;
+// (How many pictures one message may carry is the plan's files_per_message, checked by the chat controller right
+// after this: there was a fixed 6 here, and a 7th to 15th picture on Max was dropped without a word: owner,
+// 2026-11-27, "I sent all 15, it only got 6". The app keeps the request under the server's size limit itself.)
 export const MAX_INLINE_IMAGE_BYTES = 5 * 1024 * 1024; // the picture itself (the client sends at most this)
 
 const DATA_IMAGE_URL = /^data:(image\/[a-z0-9.+-]+);base64,/i;
@@ -44,7 +46,7 @@ export function takeInlineImages(body, { allowed }) {
         if (byUrl.has(url)) return byUrl.get(url);
         let placeholder = null;
         const m = allowed ? url.match(DATA_IMAGE_URL) : null;
-        if (m && images.length < MAX_INLINE_IMAGES && decodedBytes(url.slice(m[0].length)) <= MAX_INLINE_IMAGE_BYTES) {
+        if (m && decodedBytes(url.slice(m[0].length)) <= MAX_INLINE_IMAGE_BYTES) {
             const mimeType = m[1].toLowerCase();
             const id = inlineImageId(url);
             const shownName = cleanName(name, mimeType);

@@ -584,6 +584,9 @@ function queuedFilesOf(m: { attachedFiles?: UIFileAttachment[]; pastedTexts?: st
   return files.length || pasted.length ? { files, pasted } : {};
 }
 
+// The most picture data (data: URL characters) one message carries inside the request; the server takes 50 MB
+const INLINE_BUDGET_CHARS = 36 * 1024 * 1024;
+
 export type QueuedMessage = {
   id: string;
   text: string;
@@ -3285,19 +3288,27 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
     // Desktop app: a picture (PNG, JPEG, GIF, WebP up to 5 MB) is read on this computer and goes to the AI inside
     // the chat request, like Claude Code; it is never uploaded or stored. Other files are uploaded as before.
+    // Every picture the plan allows goes this way (owner, 2026-11-27: "I sent all 15, it only got 6"; the server
+    // kept 6 and dropped the rest). Pictures inside one message stay under INLINE_BUDGET_CHARS together, so the
+    // request stays under the server's 50 MB limit; a picture past it is uploaded like any other file.
     const sentInline = new Set<string>();
-    await Promise.all(accepted.filter(f => f.file && sendsInline(f)).map(async (f) => {
+    const shrunk = await Promise.all(accepted.filter(f => f.file && sendsInline(f)).map(async (f) => {
       try {
         // (made small here first: a full-screen screenshot of 1-3 MB took 10-15 s to send; see shrinkForAi)
         const { blob, converted } = await shrinkForAi(f.file!);
         const dataUrl = await readAsDataUrl(blob);
-        if (!dataUrl.startsWith("data:image/")) return;
-        sentInline.add(f.id);
-        setAttachedFiles(prev => prev.map(x => x.id === f.id
-          ? { ...x, status: "done", url: dataUrl, ...(converted ? { name: jpegName(x.name), type: "image/jpeg", size: blob.size } : {}) }
-          : x));
-      } catch { /* not readable here: uploaded below like any other file */ }
+        return dataUrl.startsWith("data:image/") ? { f, blob, converted, dataUrl } : null;
+      } catch { return null; /* not readable here: uploaded below like any other file */ }
     }));
+    let inlineChars = attachedFiles.reduce((n, x) => n + (x.url?.startsWith("data:") ? x.url.length : 0), 0);
+    for (const s of shrunk) {
+      if (!s || inlineChars + s.dataUrl.length > INLINE_BUDGET_CHARS) continue;
+      inlineChars += s.dataUrl.length;
+      sentInline.add(s.f.id);
+      setAttachedFiles(prev => prev.map(x => x.id === s.f.id
+        ? { ...x, status: "done", url: s.dataUrl, ...(s.converted ? { name: jpegName(x.name), type: "image/jpeg", size: s.blob.size } : {}) }
+        : x));
+    }
     const toUpload = accepted.filter(f => !sentInline.has(f.id));
 
     let rateLimitToastShown = false;
@@ -5365,7 +5376,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
             } catch { return undefined; }
           })(),
           // Desktop app pictures sent inline go only in attachments (the server lists them in fileUrls itself), so
-          // the request carries each picture once: 6 pictures of 5 MB stay under the server's 50 MB limit
+          // the request carries each picture once (and together they stay under INLINE_BUDGET_CHARS, see processFiles)
           fileUrls: uploadedAttachments.length > 0 ? uploadedAttachments.filter(a => !a.url.startsWith("data:")).map(a => a.url) : [],
           attachments: uploadedAttachments.length > 0 ? uploadedAttachments.map(a => ({ url: a.url, name: a.name, mimeType: a.mimeType })) : undefined,
           // (the chat history is NOT sent: the server owns it and ignores body.history; sending up to 500 messages of
