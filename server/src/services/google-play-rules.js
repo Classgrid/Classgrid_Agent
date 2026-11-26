@@ -513,3 +513,30 @@ export function purchaseDecision(row, { userId, productId, now = Date.now() }) {
     const at = ms(row.updatedAt || row.createdAt);
     return Number.isFinite(at) && ms(now) - at < CLAIM_STALE_MS ? "in_progress" : "stale";
 }
+
+/**
+ * Which notice email a change of a Play subscription sends (owner, 2026-11-26: "cancel email from our side is
+ * missing, add emails from our side too"), from the plan before the change and playRenewalUpdate's answer:
+ *   "canceled"  renewal turned off, still paid until the end      "restarted"  renewal turned back on
+ *   "grace"     Google could not take a renewal payment, plan on   "on_hold"    payment still not taken, plan stopped
+ *   "paused"    paused by the person in Google Play                "expired"    the plan has ended
+ * or null. A refund is told by applyVoidedPurchase. A renewal (a new order) has its own receipt.
+ */
+export function playNoticeOf(before, change) {
+    if (!change?.set) return null;
+    const was = before?.play_state || "";
+    const now = change.set.play_state || "";
+    const wasCanceled = before?.cancel_at_period_end === true;
+    if (change.autoRenew !== undefined) {
+        // Still paid
+        if (now === SUB_GRACE && was !== SUB_GRACE) return "grace";
+        if (change.set.cancel_at_period_end && !wasCanceled) return "canceled";
+        if (!change.set.cancel_at_period_end && wasCanceled && !change.newOrder) return "restarted";
+        return null;
+    }
+    if (now === was) return null;
+    if (now === SUB_ON_HOLD) return "on_hold";
+    if (now === SUB_PAUSED) return "paused";
+    if (now === SUB_EXPIRED) return "expired";
+    return null;
+}

@@ -110,6 +110,9 @@ const sentEmails = [];
 mock.module("../src/services/play-emails.js", { namedExports: {
     sendPlayPlanEmails: async (args) => { sentEmails.push({ kind: "plan", ...args }); },
     sendPlayPackEmails: async (args) => { sentEmails.push({ kind: "pack", ...args }); },
+    sendPlayNoticeEmails: async (args) => { sentEmails.push({ ...args, email: "notice" }); },
+    sendPlayRefundEmails: async (args) => { sentEmails.push({ ...args, email: "refund" }); },
+    moneyText: (c) => (c?.known ? `${c.currency === "INR" ? "₹" : `${c.currency} `}${c.amount}` : ""),
 } });
 mock.module("../src/services/socket.service.js", { namedExports: { getIO: () => null } });
 mock.module("../src/services/plan-limits.service.js", {
@@ -305,6 +308,11 @@ test("a voided pack takes back what is left of its credits, once", async () => {
     assert.equal(refund.status, "success");
     assert.equal(refund.metadata.credits_taken, 1000000);
     assert.ok(PlatformTransaction.rows.some((r) => r.type === "refund" && r.status === "refunded"));
+    // One refund email, with the credits taken back (the second run stopped at "already")
+    const refundMails = sentEmails.filter((e) => e.email === "refund" && e.orderId === "GPA.v1");
+    assert.equal(refundMails.length, 1);
+    assert.equal(refundMails[0].type, "product");
+    assert.equal(refundMails[0].creditsTaken, 1000000);
 });
 
 // ── Receipts, test purchases, and purchases Google tells of before the phone sends them (2026-11-26) ──

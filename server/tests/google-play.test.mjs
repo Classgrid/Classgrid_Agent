@@ -394,3 +394,24 @@ test("a Google Play subscription still running or on hold blocks a plan from the
     assert.equal(R.playSubscriptionLive({ ...play, billing: "manual_monthly" }, NOW), false);
     assert.match(R.PLAY_MANAGE_URL("classgrid_pro"), /package=com\.classgrid\.mobile&sku=classgrid_pro/);
 });
+
+test("playNoticeOf: which notice email a subscription change sends", () => {
+    const paid = (set, extra = {}) => ({ set, autoRenew: !set.cancel_at_period_end, newOrder: null, ...extra });
+    const ended = (state) => ({ set: { play_state: state }, extended: false, newOrder: null });
+    // renewal turned off, still paid
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_ACTIVE, cancel_at_period_end: false }, paid({ play_state: R.SUB_CANCELED, cancel_at_period_end: true })), "canceled");
+    // the same notification again: nothing
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_CANCELED, cancel_at_period_end: true }, paid({ play_state: R.SUB_CANCELED, cancel_at_period_end: true })), null);
+    // renewal on again
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_CANCELED, cancel_at_period_end: true }, paid({ play_state: R.SUB_ACTIVE, cancel_at_period_end: false })), "restarted");
+    // a payment that failed: grace, then on hold
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_ACTIVE }, paid({ play_state: R.SUB_GRACE, cancel_at_period_end: false })), "grace");
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_GRACE }, ended(R.SUB_ON_HOLD)), "on_hold");
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_ACTIVE }, ended(R.SUB_PAUSED)), "paused");
+    // the end, once
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_CANCELED, cancel_at_period_end: true }, ended(R.SUB_EXPIRED)), "expired");
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_EXPIRED }, ended(R.SUB_EXPIRED)), null);
+    // a plain renewal: its receipt, no notice
+    assert.equal(R.playNoticeOf({ play_state: R.SUB_ACTIVE, cancel_at_period_end: false }, paid({ play_state: R.SUB_ACTIVE, cancel_at_period_end: false }, { newOrder: "GPA.2" })), null);
+    assert.equal(R.playNoticeOf(null, null), null);
+});

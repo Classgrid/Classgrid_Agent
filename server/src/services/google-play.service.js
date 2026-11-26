@@ -34,9 +34,9 @@ import {
     PLAY_PACKAGE_NAME, parseServiceAccount, readSubscription, planFromSubscription, readProductPurchase,
     purchaseDecision, playRefreshDue, playRenewalUpdate, planSourceAndTerm, entitledItem, subscriptionLineItem,
     otherPlanDecision, studentVerified, chargedAmount, packFallbackPrice, packAmountInr, creditMark, voidEndsPlan,
-    bookedAmount, isTestSubscription, CLAIM_STALE_MS, ACK_PENDING, SUB_EXPIRED,
+    bookedAmount, isTestSubscription, playNoticeOf, CLAIM_STALE_MS, ACK_PENDING, SUB_EXPIRED,
 } from "./google-play-rules.js";
-import { sendPlayPlanEmails, sendPlayPackEmails } from "./play-emails.js";
+import { sendPlayPlanEmails, sendPlayPackEmails, sendPlayNoticeEmails, sendPlayRefundEmails, moneyText } from "./play-emails.js";
 import { planKeyOf } from "./plan-limits.service.js";
 
 const SCOPE = "https://www.googleapis.com/auth/androidpublisher";
@@ -571,6 +571,16 @@ async function syncPlaySubscription(user, { purchase = null, timeoutMs = 8000, t
             { returnDocument: "after", projection: { plan: 1, name: 1, email: 1, phoneNumber: 1, role: 1, organization_id: 1 } },
         ).populate("organization_id", "name").lean();
         if (!updated) return null;
+        // A notice email (renewal off or on again, a payment problem, on hold, paused, ended), once per change: both
+        // server processes and Google's repeated notifications may see the same change (play-emails.js)
+        const notice = playNoticeOf(plan, change);
+        if (notice) {
+            const once = await redis.set(`gplay:notice:${tokenHash(token)}:${notice}:${new Date(updated.plan?.expires_at || 0).getTime()}`, "1", "EX", 40 * 86400, "NX").catch(() => "OK");
+            if (once === "OK") {
+                sendPlayNoticeEmails({ user: updated, kind: notice, key: updated.plan?.id || plan.id, productId: updated.plan?.play_product_id || plan.play_product_id || "", until: updated.plan?.expires_at || null, test: change.test ?? isTestSubscription(purchase) }).catch(() => {});
+            }
+            console.log(`[Google Play] ${notice} notice for user ${userId}`);
+        }
         if (change.newOrder) {
             // The renewal's Invoices row (one per Google order) at what Google charged, else the recurring price (a
             // test purchase: booked at 0 and marked). Its period starts where the paid period before it ended
@@ -714,6 +724,16 @@ export async function applyVoidedPurchase({ purchaseToken, orderId = "", reason 
         console.error("[Google Play] refund row for the super admin failed:", e.message);
     }
 
+    // The refund email to the person and the team (play-emails.js), once: only the run that wrote the refund row gets here
+    {
+        const meta = original?.metadata || {};
+        const amountText = moneyText({ known: meta.charged_amount !== null && meta.charged_amount !== undefined, amount: meta.charged_amount, currency: meta.charged_currency || "INR" })
+            || (Number(original?.amount_inr) ? moneyText({ known: true, amount: Number(original.amount_inr), currency: "INR" }) : "");
+        sendPlayRefundEmails({
+            user, type: row.type, key: row.granted?.plan?.key || user?.plan?.id || "", amountText, orderId: voidedOrder,
+            planEnded: !!done.plan_ended, creditsTaken: done.credits_taken || 0, test: !!meta.test_purchase,
+        }).catch(() => {});
+    }
     announce(await socketServer(), userId, [["ai_token_update"], ...(done.plan_ended ? [["plan_update", { plan: "free" }]] : [])]);
     console.log(`[Google Play] voided ${row.type} order ${voidedOrder || "(token)"} for user ${userId} (${source}):`, JSON.stringify(done));
     return "applied";

@@ -146,3 +146,143 @@ export async function sendPlayPackEmails({ user, productId, credits, charged, pa
         console.error("[Google Play] pack emails failed:", err.message);
     }
 }
+
+// The refund policy (classgrid.in/terms, section 7 "Refunds"), linked from every notice and refund email
+const REFUND_POLICY_URL = "https://classgrid.in/terms#refunds";
+
+const policyLine = (manage) => `<p style="color:#555;font-size:13px">${manage ? `Manage your subscription in Google Play: <a href="${manage}">Manage subscription</a>. ` : ""}Refund policy: <a href="${REFUND_POLICY_URL}">classgrid.in/terms#refunds</a>. Questions: reply to this email.</p>`;
+const openButton = `<p><a href="https://chat.classgrid.in/c" style="display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Open Classgrid</a></p>`;
+
+/**
+ * A change of a Google Play subscription told to the person and the team (google-play-rules.js playNoticeOf picks
+ * the kind): "canceled" | "restarted" | "grace" | "on_hold" | "paused" | "expired".
+ * { user: { _id, name, email }, kind, key, productId, until (the plan's end), test }
+ */
+export async function sendPlayNoticeEmails({ user, kind, key, productId = "", until = null, test = false }) {
+    try {
+        const { sendEmail } = await import("./aws-ses.service.js");
+        const { baseTemplate } = await import("./email-templates.service.js");
+        const { name } = await planName(key || "pro");
+        const n = esc(name);
+        const end = until ? fmtDate(until) : "";
+        const manage = PLAY_MANAGE_URL(productId);
+        const testMark = test ? "[Test] " : "";
+        const notices = {
+            canceled: {
+                subject: `Your Classgrid ${name} plan won't renew`,
+                heading: `Your ${n} plan won't renew`,
+                body: `You turned off renewal in Google Play, so you won't be charged again. Your ${n} plan stays on${end ? ` until <strong>${end}</strong>` : " until the end of the period you paid for"}; after that your account moves to Free. Changed your mind? Turn renewal back on in Google Play before then.`,
+                team: "Google Play plan cancelled (renewal off)",
+            },
+            restarted: {
+                subject: `Your Classgrid ${name} plan will renew again`,
+                heading: `Your ${n} plan will renew again`,
+                body: `You turned renewal back on in Google Play. Your ${n} plan goes on${end ? `, and Google Play renews it by itself on <strong>${end}</strong>` : ""}.`,
+                team: "Google Play plan restarted (renewal on again)",
+            },
+            grace: {
+                subject: `Payment problem: your Classgrid ${name} plan`,
+                heading: "Google Play could not take your payment",
+                body: `Google Play could not take this period's payment for your ${n} plan. Your plan stays on for now. Please fix your payment method in Google Play, so the plan is not stopped.`,
+                team: "Google Play payment failed (grace period)",
+            },
+            on_hold: {
+                subject: `Your Classgrid ${name} plan is on hold`,
+                heading: `Your ${n} plan is on hold`,
+                body: `Google Play still could not take the payment, so your ${n} plan is on hold and your account uses Free for now. It comes back as soon as the payment is fixed in Google Play.`,
+                team: "Google Play plan on hold (payment not taken)",
+            },
+            paused: {
+                subject: `Your Classgrid ${name} plan is paused`,
+                heading: `Your ${n} plan is paused`,
+                body: `You paused your ${n} plan in Google Play. Your account uses Free until the plan restarts on its own.`,
+                team: "Google Play plan paused",
+            },
+            expired: {
+                subject: `Your Classgrid ${name} plan has ended`,
+                heading: `Your ${n} plan has ended`,
+                body: `Your ${n} plan has ended${end ? ` (${end})` : ""} and your account is on Free now. You can buy it again any time from Upgrade in the Classgrid app.`,
+                team: "Google Play plan ended",
+            },
+        };
+        const notice = notices[kind];
+        if (!notice) return;
+        if (user?.email) {
+            const html = baseTemplate({
+                title: notice.heading,
+                content: `
+                    <h2 style="margin:0 0 12px">${notice.heading}</h2>
+                    <p>Hi ${esc(user.name || "there")},</p>
+                    <p>${notice.body}</p>
+                    ${openButton}
+                    ${policyLine(manage)}`,
+            });
+            await sendEmail({ to: user.email, subject: `${testMark}${notice.subject}`, html, ...FROM, userId: user._id || null })
+                .catch((e) => console.error(`[Google Play] ${kind} email failed:`, e.message));
+        }
+        const teamHtml = baseTemplate({
+            title: notice.team,
+            content: `
+                <p style="margin:0 0 12px;font-size:18px;font-weight:700">${test ? "Test purchase: " : ""}${notice.team}</p>
+                <table style="border-collapse:collapse;margin:16px 0" cellpadding="6">
+                    <tr><td style="color:#666">Plan</td><td><strong>${n}</strong></td></tr>
+                    <tr><td style="color:#666">User</td><td>${esc(user?.name || "Unknown")} (${esc(user?.email || "no email")})</td></tr>
+                    ${end ? `<tr><td style="color:#666">Plan until</td><td>${end}</td></tr>` : ""}
+                    <tr><td style="color:#666">Time</td><td>${fmtTime(new Date())} IST</td></tr>
+                </table>`,
+        });
+        await sendEmail({ to: TEAM, subject: `${test ? "[TEST] " : ""}${notice.team}: ${name} for ${user?.name || "Unknown"}`, html: teamHtml, ...FROM })
+            .catch((e) => console.error(`[Google Play] team ${kind} email failed:`, e.message));
+    } catch (err) {
+        console.error("[Google Play] notice emails failed:", err.message);
+    }
+}
+
+/**
+ * A Google Play refund (a voided order: refunded, charged back or revoked) told to the person and the team.
+ * { user, type "subscription"|"product", key (a plan's), amountText ("₹499", "" when not known), orderId,
+ *   planEnded, creditsTaken, test }
+ */
+export async function sendPlayRefundEmails({ user, type, key = "", amountText = "", orderId = "", planEnded = false, creditsTaken = 0, test = false }) {
+    try {
+        const { sendEmail } = await import("./aws-ses.service.js");
+        const { baseTemplate } = await import("./email-templates.service.js");
+        const what = type === "subscription" ? `Classgrid ${(await planName(key || "pro")).name} plan` : "Classgrid credit pack";
+        const amount = amountText ? ` of ${esc(amountText)}` : "";
+        const result = type === "subscription"
+            ? (planEnded ? "The plan has ended and your account is on Free now." : "This refund was for an earlier period: the plan you have now stays on.")
+            : `${Number(creditsTaken || 0).toLocaleString()} credits were taken back from your account (credits already used stay used).`;
+        const testMark = test ? "[Test] " : "";
+        if (user?.email) {
+            const html = baseTemplate({
+                title: "Your refund",
+                content: `
+                    <h2 style="margin:0 0 12px">Refund: ${esc(what)}</h2>
+                    <p>Hi ${esc(user.name || "there")},</p>
+                    <p>Google Play refunded your payment${amount} for the ${esc(what)}${orderId ? ` (order ${esc(orderId)})` : ""}. The money goes back the way you paid.</p>
+                    <p>${result}</p>
+                    ${openButton}
+                    ${policyLine("")}`,
+            });
+            await sendEmail({ to: user.email, subject: `${testMark}Refund: ${what}${amountText ? `, ${amountText}` : ""}`, html, ...FROM, userId: user._id || null })
+                .catch((e) => console.error("[Google Play] refund email failed:", e.message));
+        }
+        const teamHtml = baseTemplate({
+            title: "Google Play refund",
+            content: `
+                <p style="margin:0 0 12px;font-size:18px;font-weight:700">${test ? "Test purchase: " : ""}Google Play refund</p>
+                <table style="border-collapse:collapse;margin:16px 0" cellpadding="6">
+                    <tr><td style="color:#666">What</td><td><strong>${esc(what)}</strong></td></tr>
+                    <tr><td style="color:#666">Amount</td><td>${esc(amountText || "not known")}</td></tr>
+                    <tr><td style="color:#666">User</td><td>${esc(user?.name || "Unknown")} (${esc(user?.email || "no email")})</td></tr>
+                    <tr><td style="color:#666">Google Play order</td><td style="font-family:monospace">${esc(orderId || "-")}</td></tr>
+                    <tr><td style="color:#666">Done</td><td>${esc(result)}</td></tr>
+                    <tr><td style="color:#666">Time</td><td>${fmtTime(new Date())} IST</td></tr>
+                </table>`,
+        });
+        await sendEmail({ to: TEAM, subject: `${test ? "[TEST] " : ""}Google Play refund: ${what}${amountText ? `, ${amountText}` : ""} for ${user?.name || "Unknown"}`, html: teamHtml, ...FROM })
+            .catch((e) => console.error("[Google Play] team refund email failed:", e.message));
+    } catch (err) {
+        console.error("[Google Play] refund emails failed:", err.message);
+    }
+}
