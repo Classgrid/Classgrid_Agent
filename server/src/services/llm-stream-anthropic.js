@@ -1102,7 +1102,13 @@ export async function streamClaudeChat({
             // All results go back in one user message, which keeps Claude making parallel calls.
             let saidMeanwhile = null;
             if (userNotes && !stopAnswer) { try { saidMeanwhile = userNotes(); } catch { saidMeanwhile = null; } }
-            conversation.push({ role: "user", content: [...toolResults, ...extraTexts.map((text) => ({ type: "text", text: `Rules for the tools just loaded:\n${text}` })), ...(saidMeanwhile ? [{ type: "text", text: String(saidMeanwhile) }] : [])] });
+            // (pictures sent with what the person said: shown to Claude as pictures, like a question's pictures)
+            const saidText = saidMeanwhile ? (typeof saidMeanwhile === "string" ? saidMeanwhile : String(saidMeanwhile.text || "")) : "";
+            const saidPics = saidMeanwhile && typeof saidMeanwhile === "object" ? (saidMeanwhile.images || []).map((p) => {
+                const m = /^data:([^;]+);base64,(.*)$/s.exec(String(p?.dataUrl || ""));
+                return m ? { type: "image", source: { type: "base64", media_type: m[1].toLowerCase() === "image/jpg" ? "image/jpeg" : m[1].toLowerCase(), data: m[2] } } : null;
+            }).filter(Boolean) : [];
+            conversation.push({ role: "user", content: [...toolResults, ...extraTexts.map((text) => ({ type: "text", text: `Rules for the tools just loaded:\n${text}` })), ...(saidText ? [{ type: "text", text: saidText }] : []), ...saidPics] });
             earlierCalls.push(...callsThisRound);
             if (onConversation) { try { await onConversation(conversation, usage); } catch { /* the answer goes on without the saved copy */ } }
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun, servedModel };

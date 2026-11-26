@@ -314,7 +314,7 @@ test("a message with files and pasted text is taken, and the model reads them th
     assert.equal(notes.add({ id: "f3", text: "", files: [{ url: "data:image/png;base64,AAAA", name: "x.png" }] }), false, "an inline picture never reaches the notes as base64");
     const got = notes.take();
     assert.deepEqual(got.notes[0].files, [{ url: "https://cdn.example/a.pdf", name: "a.pdf", mimeType: "application/pdf" }]);
-    assert.match(got.text, /Message 1:\nAttached Files:\nhttps:\/\/cdn\.example\/a\.pdf\n\(Open them with your file tools/);
+    assert.match(got.text, /Message 1:\nAttached Files:\nhttps:\/\/cdn\.example\/a\.pdf\n\(The pictures among them are attached to this message when you can see pictures/);
     assert.match(got.text, /Message 2:\nlook at this\n\n\[PASTED TEXT 1\]:\nline one\nline two/);
 });
 
@@ -325,4 +325,40 @@ test("the say command passes files and pasted text on", async () => {
     assert.deepEqual(r, { ok: true });
     assert.deepEqual(said, { id: "s1", text: "", files: [{ url: "https://cdn.example/b.png", name: "b.png" }], pasted: ["hello"] });
     loop.dispose?.();
+});
+
+// ── Pictures sent while the AI works reach a model that sees pictures as pictures (owner's test, 2026-11-27: four
+// pasted screenshots reached Claude only as desktop-image: links and it said it could not see them) ──
+
+const PNG = "data:image/png;base64,iVBORw0KGgo=";
+test("Claude gets the pictures sent with a message as image blocks, with the message's text", T, async () => {
+    loops["Claude (streamClaudeChat)"].script(["tool", "answer"]);
+    const notes = makeUserNotes();
+    const r = await loops["Claude (streamClaudeChat)"].run({
+        toolHandlers: { computer_terminal: async () => { notes.add({ id: "p1", text: "see these", files: [{ url: "desktop-image:abc/x.png (sent from the desktop app, not stored)", name: "x.png" }], images: [{ mimeType: "image/png", dataUrl: PNG }] }); return "ok"; } },
+        userNotes: () => { const got = notes.take(); return got ? (got.images ? { text: got.text, images: got.images } : got.text) : null; },
+    });
+    assert.equal(r.answer, "All done.");
+    const last = claudeSent[claudeSent.length - 1];
+    const blocks = last.flatMap((m) => (Array.isArray(m.content) ? m.content : []));
+    assert.ok(blocks.some((b) => b.type === "text" && String(b.text).includes("see these")));
+    assert.deepEqual(blocks.filter((b) => b.type === "image").map((b) => b.source), [{ type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" }]);
+});
+
+test("a Cloudflare model that sees pictures gets them as image parts; one that does not gets the text only", T, async () => {
+    for (const sees of [true, false]) {
+        cfSent.length = 0;
+        loops["Cloudflare (streamChat)"].script(["tool", "answer"]);
+        const notes = makeUserNotes();
+        await loops["Cloudflare (streamChat)"].run({
+            seesImages: sees,
+            toolHandlers: { computer_terminal: async () => { notes.add({ id: `c-${sees}`, text: "see this", images: [{ mimeType: "image/png", dataUrl: PNG }] }); return "ok"; } },
+            userNotes: () => { const got = notes.take(); return got ? (got.images ? { text: got.text, images: got.images } : got.text) : null; },
+        });
+        const req = cfSent[cfSent.length - 1].messages;
+        const said = req.find((m) => m.role === "user" && (typeof m.content === "string" ? m.content : m.content?.[0]?.text || "").startsWith("[The user sent"));
+        assert.ok(said, "the message reached the model");
+        if (sees) assert.deepEqual(said.content.slice(1), [{ type: "image_url", image_url: { url: PNG } }]);
+        else assert.equal(typeof said.content, "string");
+    }
 });

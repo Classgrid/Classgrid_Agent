@@ -3911,8 +3911,9 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                 accSteps.push({ id: `said-${note.id}`, type: "tool", tool: "user_message", args: { message: note.text, thoughtAt, ...extra }, status: "success", result: "Read." });
                 try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "user_note_read", id: note.id, text: note.text, thoughtAt, ...extra })}\n\n`); } catch { /* the stream is gone */ }
             }
-            console.log(`[AI-STREAM] ${got.notes.length} message(s) the person sent meanwhile went to the model with this round's results`);
-            return got.text;
+            console.log(`[AI-STREAM] ${got.notes.length} message(s) the person sent meanwhile went to the model with this round's results${got.images ? ` (${got.images.length} picture(s))` : ""}`);
+            // (pictures sent with them go with the text, for the model loops to show to a model that sees pictures)
+            return got.images ? { text: got.text, images: got.images } : got.text;
         };
         // Shows a tool's step in the chat (the terminal box, file steps...) while it runs and with its result. A helper
         // calling the same handler passes { fromHelper: true }: its steps show under the helper, not as the main AI's.
@@ -7560,7 +7561,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                     const room = Math.max(0, MAX_INLINE_IMAGES - inlineImages.length);
                     const pics = takeInlineImages(holder, { allowed: !fromWebsite && room > 0 }).slice(0, room);
                     inlineImages.push(...pics);
-                    return saidMeanwhile.add({ ...note, files: holder.attachments.filter((a) => !isDataUrl(a.url)) });
+                    // (and the pictures themselves, for a model that sees pictures: it gets them with the message)
+                    return saidMeanwhile.add({ ...note, files: holder.attachments.filter((a) => !isDataUrl(a.url)), images: pics.map((p) => ({ mimeType: p.mimeType, dataUrl: p.dataUrl })) });
                 },
                 // (every other stop aborts streamAbort too: the durable turn's grace running out, a newer message)
                 signal: streamAbort.signal,

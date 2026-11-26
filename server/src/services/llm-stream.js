@@ -823,7 +823,12 @@ export async function streamChat({
             if (userNotes && !stopAnswer) {
                 let said = null;
                 try { said = userNotes(); } catch { said = null; }
-                if (said) conversation.push({ role: "user", content: String(said) });
+                if (said) {
+                    // (pictures sent with it: shown to a model that sees pictures; another opens them with analyze_image)
+                    const saidText = typeof said === "string" ? said : String(said.text || "");
+                    const saidPics = typeof said === "object" && seesImages ? (said.images || []) : [];
+                    conversation.push({ role: "user", content: saidPics.length ? [{ type: "text", text: saidText }, ...saidPics.map((p) => ({ type: "image_url", image_url: { url: p.dataUrl } }))] : saidText });
+                }
             }
             if (onConversation) { try { await onConversation(conversation, usage); } catch { /* the answer goes on without the saved copy */ } }
             if (stopAnswer) return { answer: stopAnswer, usage, toolsRun };

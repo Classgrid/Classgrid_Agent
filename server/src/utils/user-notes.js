@@ -46,7 +46,7 @@ export function noteBody(n) {
     const pasted = Array.isArray(n?.pasted) ? n.pasted : [];
     if (pasted.length) parts.push(pasted.map((t, i) => `[PASTED TEXT ${i + 1}]:\n${t}`).join("\n\n"));
     const files = Array.isArray(n?.files) ? n.files : [];
-    if (files.length) parts.push(`Attached Files:\n${files.map((f) => f.url).join("\n")}\n(Open them with your file tools: analyze_image for pictures, parse_document for documents.)`);
+    if (files.length) parts.push(`Attached Files:\n${files.map((f) => f.url).join("\n")}\n(The pictures among them are attached to this message when you can see pictures: look at them yourself. Open any other file with your file tools: analyze_image for a picture, parse_document for a document.)`);
     return parts.filter(Boolean).join("\n\n");
 }
 
@@ -62,7 +62,7 @@ export function userNotesText(notes) {
 /**
  * The messages waiting for one answer. add({ id, text }) takes a message once (the app posts until it gets through,
  * so the same id can come twice) and says whether it was taken; take() hands over everything that waits, as
- * { text, notes } for the model and the chat, or null; waiting() is how many wait.
+ * { text, notes, images? } for the model and the chat, or null; waiting() is how many wait.
  */
 export function makeUserNotes() {
     const seen = new Set();
@@ -82,14 +82,20 @@ export function makeUserNotes() {
             if (!id || (!text && !files.length && !pasted.length)) return false;
             if (seen.has(id)) return true; // (already here: said to be taken, never taken twice)
             seen.add(id);
-            waiting.push({ id, text, ...(files.length ? { files } : {}), ...(pasted.length ? { pasted } : {}) });
+            // images: the pictures themselves ({ mimeType, dataUrl }), for a model that sees pictures; never saved
+            const images = (Array.isArray(note?.images) ? note.images : [])
+                .filter((i) => i && typeof i.dataUrl === "string" && /^data:image\/[a-z0-9.+-]+;base64,/i.test(i.dataUrl))
+                .slice(0, USER_NOTE_MAX_FILES)
+                .map((i) => ({ mimeType: String(i.mimeType || i.dataUrl.slice(5, i.dataUrl.indexOf(";"))), dataUrl: i.dataUrl }));
+            waiting.push({ id, text, ...(files.length ? { files } : {}), ...(pasted.length ? { pasted } : {}), ...(images.length ? { images } : {}) });
             return true;
         },
         take() {
             if (!waiting.length) return null;
             const notes = waiting;
             waiting = [];
-            return { text: userNotesText(notes), notes };
+            const images = notes.flatMap((n) => n.images || []);
+            return { text: userNotesText(notes), notes, ...(images.length ? { images } : {}) };
         },
         waiting: () => waiting.length,
     };
