@@ -1,6 +1,7 @@
 // Settings > Billing (owner, 2026-11-14, built from the HTML page he approved, laid out like Grok's Billing &
 // invoices): two tiles on top (Current plan with Upgrade; Additional usage with Auto top-up and Buy credits), then
 // Payment details; an Invoices tab with every payment, grant and top-up. Upgrade and Buy credits live only here.
+import { showPhonePlanCard } from "@/components/ai/components/planInfo";
 import { useEffect, useMemo, useState, type MouseEvent } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -299,6 +300,8 @@ export function SettingsBillingSection() {
   const playLive = play && playState !== "SUBSCRIPTION_STATE_EXPIRED"
     && (playFix || playState === "SUBSCRIPTION_STATE_PAUSED" || (data.enabled && data.plan.key !== "free"));
   const playUrl = playManageUrl(data.plan.play_product_id);
+  // (a plan bought in the phone app: the pricing links show "You can't change your plan here ..." instead)
+  const phoneCard = (e: MouseEvent<HTMLAnchorElement>) => { if (playLive) { e.preventDefault(); showPhonePlanCard(); } };
   const playRenewText = !play ? "" :
     playFix ? "Fix your payment in Google Play"
     : playState === "SUBSCRIPTION_STATE_PAUSED" ? "Paused in Google Play"
@@ -353,7 +356,7 @@ export function SettingsBillingSection() {
                 {student?.verified ? (
                   <>
                     <span className="flex items-center gap-2">{pill("Student", true)}<span>Student prices until {dayText(student.expires_at)}</span></span>
-                    {!playLive && <a className="underline hover:text-foreground" href={`${PRICING_URL}?student=1`} target="_blank" rel="noopener noreferrer">See student prices</a>}
+                    <a className="underline hover:text-foreground" href={`${PRICING_URL}?student=1`} target="_blank" rel="noopener noreferrer" onClick={phoneCard}>See student prices</a>
                   </>
                 ) : student?.application?.status === "pending" ? (
                   <>
@@ -402,10 +405,7 @@ export function SettingsBillingSection() {
 
           <div className="text-lg font-semibold text-foreground mt-8 mb-2">Payment details</div>
           <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
-            {/* (a plan bought in the phone app is changed in Google Play only: no link to buy another here) */}
-            {playLive
-              ? <div className="text-base font-semibold">Managed on your phone<div className="text-sm font-normal text-muted-foreground mt-1">Your plan was bought in the Classgrid phone app. Change or cancel it there, under Settings &gt; Billing.</div></div>
-              : <div className="text-base font-semibold"><a className="text-blue-600 dark:text-blue-400 hover:underline" href={PRICING_URL} target="_blank" rel="noopener noreferrer">Plans</a> are bought on the website</div>}
+            <div className="text-base font-semibold"><a className="text-blue-600 dark:text-blue-400 hover:underline" href={PRICING_URL} target="_blank" rel="noopener noreferrer" onClick={phoneCard}>Plans</a> are bought on the website</div>
             <div className="text-sm text-muted-foreground mt-2 max-w-[520px] mx-auto">Credits are bought here, with Buy credits. UPI, cards and net banking. You pay once for a month or a year, or for the credits you choose. Nothing is charged by itself.</div>
           </div>
           <p className="text-xs text-muted-foreground mt-2.5">Receipts are sent to your email. Prices include GST.</p>

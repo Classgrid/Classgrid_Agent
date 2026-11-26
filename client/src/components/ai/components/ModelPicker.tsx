@@ -14,7 +14,8 @@
 // The list mirrors docs/AI_MODEL_PICKER_LIST.md (models checked live on 8 Oct 2026).
 // The chosen id is sent to /api/ai/ask as `selectedModel`; "auto" lets the backend router decide.
 
-import { useModelPlans, openPricing, usePlayManageUrl } from "./planInfo";
+import { useModelPlans, openPricing } from "./planInfo";
+import { usePlanOverview } from "@/features/shared/queries/usePlanOverview";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/marketing_ui/dialog";
 import React from "react";
 import { Check, ChevronDown, Sparkles, Lock } from "lucide-react";
@@ -191,8 +192,7 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
   // The plans each model is in ("Pro, Max or Enterprise"); a model the user's plan lacks opens "Upgrade to use"
   const modelPlans = useModelPlans(access?.plan?.key ?? null);
   const [upgradeFor, setUpgradeFor] = React.useState<{ model: string; plan: string } | null>(null);
-  // (a plan bought in the phone app is upgraded in Google Play, never on the pricing page)
-  const playUrl = usePlayManageUrl();
+  usePlanOverview(); // (its Upgrade shows the "bought in the phone app" card for a phone plan: planInfo.tsx openPricing)
 
   // A locked Fable that is still selected (e.g. saved from before) falls back to Auto
   React.useEffect(() => {
@@ -323,11 +323,11 @@ export function ModelPicker({ value, onChange, disabled }: ModelPickerProps) {
       <DialogContent className="sm:max-w-[400px] p-6" overlayClassName="supports-backdrop-filter:backdrop-blur-none !backdrop-blur-none !bg-black/40">
         <DialogHeader>
           <DialogTitle className="text-lg font-semibold">Upgrade to use {upgradeFor?.plan}</DialogTitle>
-          <DialogDescription>{upgradeFor?.model} requires a {upgradeFor?.plan} plan.{playUrl ? " Your plan is managed on your phone: change it in the Classgrid app, under Settings > Billing." : ""}</DialogDescription>
+          <DialogDescription>{upgradeFor?.model} requires a {upgradeFor?.plan} plan.</DialogDescription>
         </DialogHeader>
         <DialogFooter className="gap-2">
           <button type="button" className="inline-flex items-center h-8 px-3.5 rounded-full text-[13px] font-medium cursor-pointer bg-black/[0.06] dark:bg-white/[0.09] text-foreground hover:bg-black/[0.1] dark:hover:bg-white/[0.14]" onClick={() => setUpgradeFor(null)}>Cancel</button>
-          {!playUrl && <button type="button" className="inline-flex items-center h-8 px-3.5 rounded-full text-[13px] font-medium cursor-pointer bg-foreground text-background hover:bg-foreground/90" onClick={() => { setUpgradeFor(null); openPricing(); }}>Upgrade</button>}
+          <button type="button" className="inline-flex items-center h-8 px-3.5 rounded-full text-[13px] font-medium cursor-pointer bg-foreground text-background hover:bg-foreground/90" onClick={() => { setUpgradeFor(null); openPricing(); }}>Upgrade</button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
