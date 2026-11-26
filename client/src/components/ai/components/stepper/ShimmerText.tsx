@@ -26,7 +26,7 @@ export function ShimmerText({ active, className, children, timer = true }: { act
   return (
     <>
       <span
-        className={cn(className, 'bg-[linear-gradient(110deg,#404040,35%,#fff,50%,#404040,75%,#404040)] bg-[length:200%_100%] bg-clip-text text-transparent')}
+        className={cn(className, 'cg-shine-text bg-[length:200%_100%] bg-clip-text text-transparent')}
         // Inline colour wins over any text colour the caller passes (e.g. dark:text-…), which would hide the shine
         style={{ animation: 'shimmer 2.5s linear infinite', color: 'transparent', WebkitTextFillColor: 'transparent' }}
       >

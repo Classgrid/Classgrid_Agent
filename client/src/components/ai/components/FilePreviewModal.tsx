@@ -384,7 +384,7 @@ export default function FilePreviewModal({ file, onClose, onDelete }: FilePrevie
         </div>
 
         {/* ── Keyboard hint ── */}
-        <div className="shrink-0 text-center py-2 text-[10px] text-zinc-500 dark:text-zinc-600 select-none">
+        <div className="shrink-0 text-center py-2 text-[10px] text-zinc-500 dark:text-zinc-400 select-none">
           {isImage(mime) ? "Scroll to zoom · + / − keys · Esc to close" : "Esc to close"}
         </div>
       </motion.div>
