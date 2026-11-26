@@ -404,7 +404,7 @@ export function SettingsBillingSection() {
           <div className="rounded-xl border border-border bg-card px-6 py-10 text-center">
             {/* (a plan bought in the phone app is changed in Google Play only: no link to buy another here) */}
             {playLive
-              ? <div className="text-base font-semibold">Your plan is managed in <a className="text-blue-600 dark:text-blue-400 hover:underline" href={playUrl} onClick={openOutside(playUrl)} target="_blank" rel="noopener noreferrer">Google Play</a></div>
+              ? <div className="text-base font-semibold">Managed on your phone<div className="text-sm font-normal text-muted-foreground mt-1">Your plan was bought in the Classgrid phone app. Change or cancel it there, under Settings &gt; Billing.</div></div>
               : <div className="text-base font-semibold"><a className="text-blue-600 dark:text-blue-400 hover:underline" href={PRICING_URL} target="_blank" rel="noopener noreferrer">Plans</a> are bought on the website</div>}
             <div className="text-sm text-muted-foreground mt-2 max-w-[520px] mx-auto">Credits are bought here, with Buy credits. UPI, cards and net banking. You pay once for a month or a year, or for the credits you choose. Nothing is charged by itself.</div>
           </div>

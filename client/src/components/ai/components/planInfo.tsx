@@ -93,7 +93,7 @@ export function PlanPill() {
       {playUrl ? (
         <>
           <span aria-hidden>·</span>
-          <button type="button" onClick={() => openOutside(playUrl)} className="underline underline-offset-2 hover:text-foreground cursor-pointer">Manage in Google Play</button>
+          <span title="Change it in the Classgrid phone app, under Settings > Billing">Managed on your phone</span>
         </>
       ) : !top && (
         <>

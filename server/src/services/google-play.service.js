@@ -345,7 +345,7 @@ async function ownClaim({ client, existing, fields }) {
 }
 
 const HAS_OTHER_PLAN = "You already have a plan on Classgrid that is the same or higher. This Google Play purchase was not used, and Google will refund it.";
-const HAS_WEB_PLAN = "Your plan was bought on the Classgrid website, so it is changed there: chat.classgrid.in > Settings > Billing. This Google Play purchase was not used, and Google will refund it.";
+const HAS_WEB_PLAN = "Your plan was bought on the Classgrid dashboard (chat.classgrid.in), so it is changed there, under Settings > Billing. This Google Play purchase was not used, and Google will refund it.";
 const NOT_STUDENT = "Student prices are for approved students. Apply for student prices in Settings > Billing. This Google Play purchase was not used, and Google will refund it.";
 
 async function grantSubscription({ client, userId, productId, purchaseToken, existing, io }) {
