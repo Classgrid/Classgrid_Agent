@@ -286,6 +286,14 @@
       var w = waiting[m.cgReply];
       delete waiting[m.cgReply];
       if (m.error) w.no(new Error(m.error)); else w.ok(m.result);
+    } else if (m.cgStorage) {
+      // A setting changed in another of our open pages (the Settings tab, say): this page's copy follows, without
+      // sending it back (setItem/removeItem above would), and the page hears it like a change made in another window
+      var c = m.cgStorage;
+      var old = null;
+      try { old = localStorage.getItem(c.key); } catch (err) { /* storage blocked */ }
+      try { if (c.op === "set") setItem.call(localStorage, c.key, c.value); else removeItem.call(localStorage, c.key); } catch (err) { /* storage blocked */ }
+      try { window.dispatchEvent(new StorageEvent("storage", { key: c.key, oldValue: old, newValue: c.op === "set" ? c.value : null, storageArea: localStorage })); } catch (err) { /* no StorageEvent */ }
     } else if (m.cgEvent === "overlayRect") {
       coverWindow(m.data);
     } else if (m.cgEvent === "overlayOff") {

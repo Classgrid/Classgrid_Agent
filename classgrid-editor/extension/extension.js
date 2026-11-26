@@ -41,6 +41,10 @@ let log = null; // the "Classgrid" output (page errors and what failed)
 let storage = {}; // our screens' saved settings and login (localStorage), kept in the editor's secret storage
 let saveTimer = null;
 const loaders = new Set(); // each open panel's "load our screens again"
+// Every page of our screens that is open (the Agent panel, the chats sidebar, the Settings tab...): a setting changed in
+// one is passed to the others, which are separate pages with their own copy of the settings (owner, 2026-11-26: Send
+// immediately turned on in the Settings tab, the Agent panel still queued messages until the editor was restarted)
+const pages = new Set();
 // The Agent panel (right side) and the chats sidebar (the window's left edge, classgrid-left-strip.patch)
 const screens = { agent: null, chats: null };
 // Session-to-session messaging (desktop/sessions.js): this editor's session handle, and the messages and notices that
@@ -265,6 +269,7 @@ function deactivate() {
 
 // Our screens in a panel, straight from the editor's files: the page with the bridge first, then the app's own code
 function holdScreens(webview, startPath) {
+  pages.add(webview);
   const drives = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").filter((l) => { try { return fs.existsSync(`${l}:\\`); } catch { return false; } });
   webview.options = { enableScripts: true, localResourceRoots: [vscode.Uri.file(APP_DIR), ...drives.map((l) => vscode.Uri.file(`${l}:\\`))] };
   const slash = (u) => String(u).replace(/\/?$/, "/");
@@ -304,7 +309,18 @@ function holdScreens(webview, startPath) {
     if (m?.cgPasteCode) return pasteSignInCode();
     if (m?.cgFetch) return proxyFetch(webview, m);
     if (m?.cgFetchAbort) return FETCHES.get(m.cgFetchAbort)?.ac.abort();
-    if (m?.cgStore) return keepStorage(m);
+    if (m?.cgStore) {
+      keepStorage(m);
+      // (the other open pages take the same change: bridge.js cgStorage)
+      if (m.cgStore === "set" || m.cgStore === "remove") {
+        for (const other of pages) {
+          if (other === webview) continue;
+          try { Promise.resolve(other.postMessage({ cgStorage: { op: m.cgStore, key: String(m.key), value: m.cgStore === "set" ? String(m.value) : null } })).then(undefined, () => pages.delete(other)); }
+          catch { pages.delete(other); } // (a closed page)
+        }
+      }
+      return;
+    }
     // (only the Agent panel and the chats sidebar cover the window for their big windows; a tab like Settings shows its
     // own windows inside the tab)
     if (m?.cgOverlay !== undefined) return webview === screens.chats ? coverWithStrip(webview, !!m.cgOverlay) : webview === screens.agent ? coverWindow(webview, !!m.cgOverlay) : undefined;
