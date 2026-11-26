@@ -11,6 +11,7 @@ import { PLAY_MANAGE_URL } from "./google-play-rules.js";
 
 const FROM = { fromName: "Classgrid Billing", fromEmail: "billing@classgrid.in" };
 const TEAM = "team@classgrid.in";
+// (a test purchase sends no team alert: Google renews a test subscription every 5 minutes; owner, 2026-11-26)
 
 const esc = (s) => String(s ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
 const fmtDate = (d) => new Date(d).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric", timeZone: "Asia/Kolkata" });
@@ -101,7 +102,7 @@ export async function sendPlayPlanEmails({ user, key, term, charged, paymentId, 
                 </table>`,
         });
         const teamSubject = `${test ? "[TEST] " : ""}${renewal ? "Google Play renewal" : "New Google Play plan purchase"}: ${name} (${termText})${paid ? `, ${paid}` : ""} from ${user?.name || "Unknown"}`;
-        await sendEmail({ to: TEAM, subject: teamSubject, html: teamHtml, ...FROM }).catch((e) => console.error("[Google Play] team plan email failed:", e.message));
+        if (!test) await sendEmail({ to: TEAM, subject: teamSubject, html: teamHtml, ...FROM }).catch((e) => console.error("[Google Play] team plan email failed:", e.message));
     } catch (err) {
         console.error("[Google Play] plan emails failed:", err.message);
     }
@@ -140,7 +141,7 @@ export async function sendPlayPackEmails({ user, productId, credits, charged, pa
             `Android app (Google Play, ${esc(productId)})${test ? " — TEST PURCHASE, not real money" : ""}`,
             regionCode ? `Google Play country: ${esc(regionCode)}` : "Unknown Location", "Not known (Google Play)", `${when} IST`,
         );
-        await sendEmail({ to: TEAM, subject: `${test ? "[TEST] " : ""}New AI Credit Purchase (Google Play): ${paid} from ${user?.name || "Unknown"}`, html: teamHtml, ...FROM })
+        if (!test) await sendEmail({ to: TEAM, subject: `${test ? "[TEST] " : ""}New AI Credit Purchase (Google Play): ${paid} from ${user?.name || "Unknown"}`, html: teamHtml, ...FROM })
             .catch((e) => console.error("[Google Play] team pack email failed:", e.message));
     } catch (err) {
         console.error("[Google Play] pack emails failed:", err.message);
@@ -231,7 +232,7 @@ export async function sendPlayNoticeEmails({ user, kind, key, productId = "", un
                     <tr><td style="color:#666">Time</td><td>${fmtTime(new Date())} IST</td></tr>
                 </table>`,
         });
-        await sendEmail({ to: TEAM, subject: `${test ? "[TEST] " : ""}${notice.team}: ${name} for ${user?.name || "Unknown"}`, html: teamHtml, ...FROM })
+        if (!test) await sendEmail({ to: TEAM, subject: `${test ? "[TEST] " : ""}${notice.team}: ${name} for ${user?.name || "Unknown"}`, html: teamHtml, ...FROM })
             .catch((e) => console.error(`[Google Play] team ${kind} email failed:`, e.message));
     } catch (err) {
         console.error("[Google Play] notice emails failed:", err.message);
@@ -280,7 +281,7 @@ export async function sendPlayRefundEmails({ user, type, key = "", amountText = 
                     <tr><td style="color:#666">Time</td><td>${fmtTime(new Date())} IST</td></tr>
                 </table>`,
         });
-        await sendEmail({ to: TEAM, subject: `${test ? "[TEST] " : ""}Google Play refund: ${what}${amountText ? `, ${amountText}` : ""} for ${user?.name || "Unknown"}`, html: teamHtml, ...FROM })
+        if (!test) await sendEmail({ to: TEAM, subject: `${test ? "[TEST] " : ""}Google Play refund: ${what}${amountText ? `, ${amountText}` : ""} for ${user?.name || "Unknown"}`, html: teamHtml, ...FROM })
             .catch((e) => console.error("[Google Play] team refund email failed:", e.message));
     } catch (err) {
         console.error("[Google Play] refund emails failed:", err.message);
