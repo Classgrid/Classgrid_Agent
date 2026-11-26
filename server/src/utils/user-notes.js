@@ -33,8 +33,8 @@ export function turnWithEarlier(earlier, question) {
     return [...(earlier || []), String(question ?? "")].filter((t) => String(t).trim()).join("\n\n");
 }
 
-/** The most files and pasted texts one such message carries */
-export const USER_NOTE_MAX_FILES = 10;
+/** The most pasted texts one such message carries (how many files: the plan's files_per_message, checked by the
+ * chat controller before a message is taken) */
 export const USER_NOTE_MAX_PASTED = 5;
 
 // A message with files or pasted text joins the running answer too (owner, 2026-11-27: "remove the queue for uploads
@@ -73,7 +73,6 @@ export function makeUserNotes() {
             const text = String(note?.text || "").trim().slice(0, USER_NOTE_MAX);
             const files = (Array.isArray(note?.files) ? note.files : [])
                 .filter((f) => f && typeof f.url === "string" && f.url.trim() && !/^\s*data:/i.test(f.url))
-                .slice(0, USER_NOTE_MAX_FILES)
                 .map((f) => ({ url: f.url.trim().slice(0, 2000), name: String(f.name || f.url.split("/").pop() || "file").slice(0, 200), ...(f.mimeType ? { mimeType: String(f.mimeType).slice(0, 100) } : {}) }));
             const pasted = (Array.isArray(note?.pasted) ? note.pasted : [])
                 .map((t) => (typeof t === "string" ? t.slice(0, USER_NOTE_MAX) : ""))
@@ -85,7 +84,6 @@ export function makeUserNotes() {
             // images: the pictures themselves ({ mimeType, dataUrl }), for a model that sees pictures; never saved
             const images = (Array.isArray(note?.images) ? note.images : [])
                 .filter((i) => i && typeof i.dataUrl === "string" && /^data:image\/[a-z0-9.+-]+;base64,/i.test(i.dataUrl))
-                .slice(0, USER_NOTE_MAX_FILES)
                 .map((i) => ({ mimeType: String(i.mimeType || i.dataUrl.slice(5, i.dataUrl.indexOf(";"))), dataUrl: i.dataUrl }));
             waiting.push({ id, text, ...(files.length ? { files } : {}), ...(pasted.length ? { pasted } : {}), ...(images.length ? { images } : {}) });
             return true;

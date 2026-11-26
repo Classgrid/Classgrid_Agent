@@ -129,7 +129,7 @@ import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 import { isWebsite } from "../utils/client-app.js";
 import { confirmedEmails, cleanEmail as cleanAccountEmail } from "../utils/account-email.js";
 import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
-import { takeInlineImages, findInlineImage, withInlineImages, isDataUrl, MAX_INLINE_IMAGES, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
+import { takeInlineImages, findInlineImage, withInlineImages, isDataUrl, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
 const dashboardList = uniqueDashboards.map(d => `- ${d}`).join('\n');
@@ -7547,6 +7547,8 @@ If a tool fails, never show the error message; say only: "Something went wrong o
         // app is handed the tool calls and says which run, in what order, or stops the answer
         if (durableTurn && body.localLoop === true) {
             const { makeLocalLoopDriver } = await import("../services/local-loop.service.js");
+            // (the plan's files in one message, for a message sent while this answer works, as for any message)
+            const sayFilesMost = await filesPerMessage(req.user).catch(() => null);
             localLoop = makeLocalLoopDriver({
                 turnId: durableTurn.id,
                 userId: String(userId),
@@ -7556,13 +7558,22 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 // analyze_image, like a picture sent with a question; it is never stored)
                 onSay: (note) => {
                     const files = Array.isArray(note?.files) ? note.files.filter((f) => f && typeof f.url === "string") : [];
+                    // More files than the plan allows in one message: not taken here; the app sends it when the
+                    // answer ends, and that request is told the plan's limit (files_per_message, above)
+                    if (sayFilesMost && files.length > sayFilesMost) return false;
                     if (!files.some((f) => isDataUrl(f.url))) return saidMeanwhile.add(note);
-                    const holder = { attachments: files.map((f) => ({ url: f.url, name: f.name, mimeType: f.mimeType })) };
-                    const room = Math.max(0, MAX_INLINE_IMAGES - inlineImages.length);
-                    const pics = takeInlineImages(holder, { allowed: !fromWebsite && room > 0 }).slice(0, room);
+                    // (one picture at a time, so the number is the plan's, not the inline helper's own cap)
+                    const kept = [];
+                    const pics = [];
+                    for (const f of files) {
+                        if (!isDataUrl(f.url)) { kept.push(f); continue; }
+                        const holder = { attachments: [{ url: f.url, name: f.name, mimeType: f.mimeType }] };
+                        const got = takeInlineImages(holder, { allowed: !fromWebsite });
+                        if (got.length) { pics.push(...got); kept.push(...holder.attachments); }
+                    }
                     inlineImages.push(...pics);
                     // (and the pictures themselves, for a model that sees pictures: it gets them with the message)
-                    return saidMeanwhile.add({ ...note, files: holder.attachments.filter((a) => !isDataUrl(a.url)), images: pics.map((p) => ({ mimeType: p.mimeType, dataUrl: p.dataUrl })) });
+                    return saidMeanwhile.add({ ...note, files: kept, images: pics.map((p) => ({ mimeType: p.mimeType, dataUrl: p.dataUrl })) });
                 },
                 // (every other stop aborts streamAbort too: the durable turn's grace running out, a newer message)
                 signal: streamAbort.signal,
