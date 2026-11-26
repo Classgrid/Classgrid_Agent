@@ -24,7 +24,7 @@ const loops = new Map(); // turnId -> { userId, rounds: Map<roundId, Round>, nex
  * ran the steps on the user's PC through the runner socket, after the answer had stopped).
  */
 export function makeLocalLoopDriver({ turnId, userId, emit, onStop, onSay = null, signal = null }) {
-    // (onSay({ id, text }): a message the person sends while this answer works, command "say"; utils/user-notes.js)
+    // (onSay({ id, text, files, pasted }): a message the person sends while this answer works, command "say"; utils/user-notes.js)
     const state = { userId: String(userId), rounds: new Map(), nextRound: 0, emit, onStop, onSay, stopped: false, disposed: false };
     state.signal = signal;
     loops.set(turnId, state);
@@ -130,7 +130,7 @@ export async function handleTurnCommand(turnId, userId, cmd) {
     if (type === "say") {
         if (state.stopped || state.disposed || signalGone(state) || typeof state.onSay !== "function") return { error: "not_taken" };
         let taken = false;
-        try { taken = state.onSay({ id: cmd?.id, text: cmd?.text }) === true; } catch { taken = false; }
+        try { taken = state.onSay({ id: cmd?.id, text: cmd?.text, files: cmd?.files, pasted: cmd?.pasted }) === true; } catch { taken = false; }
         return taken ? { ok: true } : { error: "not_taken" };
     }
     const roundId = Number(cmd?.roundId);

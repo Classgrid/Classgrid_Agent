@@ -304,3 +304,25 @@ for (const [name, L] of Object.entries(loops)) {
         assert.deepEqual(await handleTurnCommand(turnId, "u1", { type: "say", id: "m2", text: "late" }), { error: "unknown_turn" });
     });
 }
+
+// ── Files and pasted text with a message sent while the AI works (owner, 2026-11-27: "remove the queue for uploads too") ──
+
+test("a message with files and pasted text is taken, and the model reads them the way it reads a question", () => {
+    const notes = makeUserNotes();
+    assert.equal(notes.add({ id: "f1", text: "", files: [{ url: "https://cdn.example/a.pdf", name: "a.pdf", mimeType: "application/pdf" }] }), true, "a file alone is a message");
+    assert.equal(notes.add({ id: "f2", text: "look at this", pasted: ["line one\nline two"] }), true);
+    assert.equal(notes.add({ id: "f3", text: "", files: [{ url: "data:image/png;base64,AAAA", name: "x.png" }] }), false, "an inline picture never reaches the notes as base64");
+    const got = notes.take();
+    assert.deepEqual(got.notes[0].files, [{ url: "https://cdn.example/a.pdf", name: "a.pdf", mimeType: "application/pdf" }]);
+    assert.match(got.text, /Message 1:\nAttached Files:\nhttps:\/\/cdn\.example\/a\.pdf\n\(Open them with your file tools/);
+    assert.match(got.text, /Message 2:\nlook at this\n\n\[PASTED TEXT 1\]:\nline one\nline two/);
+});
+
+test("the say command passes files and pasted text on", async () => {
+    let said = null;
+    const loop = makeLocalLoopDriver({ turnId: "t-files", userId: "u1", emit: () => {}, onSay: (n) => { said = n; return true; } });
+    const r = await handleTurnCommand("t-files", "u1", { type: "say", id: "s1", text: "", files: [{ url: "https://cdn.example/b.png", name: "b.png" }], pasted: ["hello"] });
+    assert.deepEqual(r, { ok: true });
+    assert.deepEqual(said, { id: "s1", text: "", files: [{ url: "https://cdn.example/b.png", name: "b.png" }], pasted: ["hello"] });
+    loop.dispose?.();
+});

@@ -33,9 +33,26 @@ export function turnWithEarlier(earlier, question) {
     return [...(earlier || []), String(question ?? "")].filter((t) => String(t).trim()).join("\n\n");
 }
 
+/** The most files and pasted texts one such message carries */
+export const USER_NOTE_MAX_FILES = 10;
+export const USER_NOTE_MAX_PASTED = 5;
+
+// A message with files or pasted text joins the running answer too (owner, 2026-11-27: "remove the queue for uploads
+// too"; before, only plain words could, and a message with a file waited in the queue). The model reads it the way it
+// reads a question: pasted text as "[PASTED TEXT n]:" blocks, files as an "Attached Files:" list of links that it
+// opens with its tools (analyze_image, parse_document; a desktop picture is its desktop-image: link).
+export function noteBody(n) {
+    const parts = [String(n?.text || "").trim()];
+    const pasted = Array.isArray(n?.pasted) ? n.pasted : [];
+    if (pasted.length) parts.push(pasted.map((t, i) => `[PASTED TEXT ${i + 1}]:\n${t}`).join("\n\n"));
+    const files = Array.isArray(n?.files) ? n.files : [];
+    if (files.length) parts.push(`Attached Files:\n${files.map((f) => f.url).join("\n")}\n(Open them with your file tools: analyze_image for pictures, parse_document for documents.)`);
+    return parts.filter(Boolean).join("\n\n");
+}
+
 /** What the model reads with its tools' results */
 export function userNotesText(notes) {
-    const list = (notes || []).map((n) => String(n?.text || "").trim()).filter(Boolean);
+    const list = (notes || []).map(noteBody).filter(Boolean);
     if (!list.length) return "";
     const one = list.length === 1;
     const head = `[The user sent ${one ? "this message" : `these ${list.length} messages`} while you were working. ${one ? "It is" : "They are"} part of the same task: read ${one ? "it" : "them"} now and take ${one ? "it" : "them"} into account in what you do next. Go on with the work; do not start it again, and stop or change course only if the user says so here. Your reply at the end answers ${one ? "it" : "them"} too.]`;
@@ -54,10 +71,18 @@ export function makeUserNotes() {
         add(note) {
             const id = String(note?.id || "").trim().slice(0, 80);
             const text = String(note?.text || "").trim().slice(0, USER_NOTE_MAX);
-            if (!id || !text) return false;
+            const files = (Array.isArray(note?.files) ? note.files : [])
+                .filter((f) => f && typeof f.url === "string" && f.url.trim() && !/^\s*data:/i.test(f.url))
+                .slice(0, USER_NOTE_MAX_FILES)
+                .map((f) => ({ url: f.url.trim().slice(0, 2000), name: String(f.name || f.url.split("/").pop() || "file").slice(0, 200), ...(f.mimeType ? { mimeType: String(f.mimeType).slice(0, 100) } : {}) }));
+            const pasted = (Array.isArray(note?.pasted) ? note.pasted : [])
+                .map((t) => (typeof t === "string" ? t.slice(0, USER_NOTE_MAX) : ""))
+                .filter((t) => t.trim())
+                .slice(0, USER_NOTE_MAX_PASTED);
+            if (!id || (!text && !files.length && !pasted.length)) return false;
             if (seen.has(id)) return true; // (already here: said to be taken, never taken twice)
             seen.add(id);
-            waiting.push({ id, text });
+            waiting.push({ id, text, ...(files.length ? { files } : {}), ...(pasted.length ? { pasted } : {}) });
             return true;
         },
         take() {

@@ -129,7 +129,7 @@ import { isPublicChatAccount } from "../utils/chat-onboarding.js";
 import { isWebsite } from "../utils/client-app.js";
 import { confirmedEmails, cleanEmail as cleanAccountEmail } from "../utils/account-email.js";
 import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
-import { takeInlineImages, findInlineImage, withInlineImages, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
+import { takeInlineImages, findInlineImage, withInlineImages, isDataUrl, MAX_INLINE_IMAGES, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
 const dashboardList = uniqueDashboards.map(d => `- ${d}`).join('\n');
@@ -3905,8 +3905,11 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
             let thoughtAt;
             try { thoughtAt = String(accThought || "").length; } catch { thoughtAt = undefined; }
             for (const note of got.notes) {
-                accSteps.push({ id: `said-${note.id}`, type: "tool", tool: "user_message", args: { message: note.text, thoughtAt }, status: "success", result: "Read." });
-                try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "user_note_read", id: note.id, text: note.text, thoughtAt })}\n\n`); } catch { /* the stream is gone */ }
+                // (files: what came with it, name and link, so the chat shows them under the message; pasted: how many)
+                const files = (note.files || []).map((f) => ({ name: f.name, url: f.url }));
+                const extra = { ...(files.length ? { files } : {}), ...(note.pasted?.length ? { pasted: note.pasted.length } : {}) };
+                accSteps.push({ id: `said-${note.id}`, type: "tool", tool: "user_message", args: { message: note.text, thoughtAt, ...extra }, status: "success", result: "Read." });
+                try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "user_note_read", id: note.id, text: note.text, thoughtAt, ...extra })}\n\n`); } catch { /* the stream is gone */ }
             }
             console.log(`[AI-STREAM] ${got.notes.length} message(s) the person sent meanwhile went to the model with this round's results`);
             return got.text;
@@ -7548,7 +7551,17 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                 userId: String(userId),
                 emit: (ev) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(ev)}\n\n`); },
                 onStop: () => { requestAborted = true; streamAbort.abort(); },
-                onSay: (note) => saidMeanwhile.add(note),
+                // (a desktop picture sent with it, a data: URL, becomes a desktop-image: link the AI opens with
+                // analyze_image, like a picture sent with a question; it is never stored)
+                onSay: (note) => {
+                    const files = Array.isArray(note?.files) ? note.files.filter((f) => f && typeof f.url === "string") : [];
+                    if (!files.some((f) => isDataUrl(f.url))) return saidMeanwhile.add(note);
+                    const holder = { attachments: files.map((f) => ({ url: f.url, name: f.name, mimeType: f.mimeType })) };
+                    const room = Math.max(0, MAX_INLINE_IMAGES - inlineImages.length);
+                    const pics = takeInlineImages(holder, { allowed: !fromWebsite && room > 0 }).slice(0, room);
+                    inlineImages.push(...pics);
+                    return saidMeanwhile.add({ ...note, files: holder.attachments.filter((a) => !isDataUrl(a.url)) });
+                },
                 // (every other stop aborts streamAbort too: the durable turn's grace running out, a newer message)
                 signal: streamAbort.signal,
             });
