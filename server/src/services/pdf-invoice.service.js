@@ -340,3 +340,120 @@ export const generateAiReceiptPdfBuffer = async (paymentDetails) => {
     
     return pdfBuffer;
 };
+
+/**
+ * The PDF receipt of a plan (owner, 2026-11-26: the plan receipt had no PDF, only credit top-ups had one). Attached to
+ * the plan receipt email of the website (razorpay-webhook.routes.js AI_PLAN) and of Google Play (play-emails.js).
+ * { planName, termText "1 month"|"1 year", amountFormatted ("" when not known), paymentId, paidAt (text),
+ *   payerName, payerEmail, periodText ("26 November 2026 to 26 December 2026"), paidThrough ("Google Play" or ""),
+ *   renewal, test }
+ */
+export const generatePlanReceiptPdfBuffer = async (details) => {
+    let logoSrc = 'https://classgrid.in/logo.png';
+    try {
+        const localLogoPath = path.resolve(process.cwd(), '../client/public/logo.png');
+        if (fs.existsSync(localLogoPath)) {
+            logoSrc = 'data:image/png;base64,' + fs.readFileSync(localLogoPath).toString('base64');
+        }
+    } catch (e) {
+        console.error("Failed to load local logo for PDF", e);
+    }
+    const esc = (s) => String(s ?? "").replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]));
+    const { planName, termText, amountFormatted, paymentId, paidAt, payerName, payerEmail, periodText, paidThrough, renewal, test } = details;
+    const amount = amountFormatted ? esc(amountFormatted) : "As charged by Google Play";
+    const title = `${test ? "TEST · " : ""}Plan ${renewal ? "Renewal " : ""}Receipt`;
+
+    const htmlContent = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>${title}</title>
+            <style>
+                body { font-family: 'Helvetica Neue', 'Helvetica', Helvetica, Arial, sans-serif; color: #333; margin: 0; padding: 40px; }
+                .invoice-box { max-width: 800px; margin: auto; padding: 30px; border: 1px solid #eee; box-shadow: 0 0 10px rgba(0, 0, 0, .15); }
+                .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #eee; padding-bottom: 20px; margin-bottom: 20px; }
+                .title { font-size: 26px; font-weight: bold; color: #2563eb; }
+                .details { text-align: right; }
+                .bill-to { margin-bottom: 30px; }
+                table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
+                th, td { padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }
+                th { background-color: #f9fafb; font-weight: bold; }
+                .right { text-align: right; }
+                .total-row { font-weight: bold; font-size: 18px; }
+                .footer { text-align: center; color: #777; font-size: 12px; margin-top: 50px; border-top: 1px solid #eee; padding-top: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class="invoice-box">
+                <div class="header">
+                    <div>
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 15px;">
+                            <img src="${logoSrc}" alt="Classgrid Logo" style="height: 48px; width: auto; object-fit: contain;" onerror="this.onerror=null; this.src='https://billing.classgrid.in/logo.png';"/>
+                        </div>
+                        <div class="title" style="margin: 0;">${title}</div>
+                        <div style="margin-top: 8px; font-size: 14px; color: #666;">${paidThrough ? `${esc(paidThrough)} order` : "Payment ID"}: ${esc(paymentId)}</div>
+                    </div>
+                    <div class="details">
+                        <div><strong>Classgrid AI</strong></div>
+                        <div>support@classgrid.in</div>
+                        <div>Date: ${esc(paidAt)}</div>
+                    </div>
+                </div>
+
+                <div class="bill-to">
+                    <h3>Purchaser:</h3>
+                    <div><strong>${esc(payerName)}</strong></div>
+                    <div>${esc(payerEmail)}</div>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Description</th>
+                            <th>Period</th>
+                            <th class="right">Amount Paid</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Classgrid ${esc(planName)} plan (${esc(termText)})${renewal ? ", renewal" : ""}</td>
+                            <td>${esc(periodText)}</td>
+                            <td class="right">${amount}</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <table style="width: 50%; margin-left: auto;">
+                    <tr class="total-row">
+                        <td>Total Amount Paid:</td>
+                        <td class="right">${amount}</td>
+                    </tr>
+                    <tr>
+                        <td>Paid through:</td>
+                        <td class="right">${paidThrough ? esc(paidThrough) : "Razorpay"}</td>
+                    </tr>
+                </table>
+
+                <div class="footer">
+                    ${test ? "This is a test purchase: no money was taken.<br>" : ""}Thank you for your purchase. Your plan is active on your account.<br>
+                    For any billing inquiries, please contact support@classgrid.in.
+                </div>
+            </div>
+        </body>
+        </html>
+    `;
+
+    const browser = await puppeteer.launch({
+        headless: "new",
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
+    try {
+        const page = await browser.newPage();
+        await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+        return await page.pdf({ format: 'A4', printBackground: true, margin: { top: '1cm', right: '1cm', bottom: '1cm', left: '1cm' } });
+    } finally {
+        await browser.close();
+    }
+};

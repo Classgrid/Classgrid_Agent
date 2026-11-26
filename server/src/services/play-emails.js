@@ -71,7 +71,20 @@ export async function sendPlayPlanEmails({ user, key, term, charged, paymentId, 
                     <p><a href="https://chat.classgrid.in/c" style="display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Open Classgrid</a></p>`,
             });
             const subject = `${testMark}Receipt: Classgrid ${name} plan${renewal ? " renewed" : ""}${paid ? `, ${paid}` : ""}`;
-            await sendEmail({ to: user.email, subject, html, ...FROM, userId: user._id || null }).catch((e) => console.error("[Google Play] plan receipt email failed:", e.message));
+            const shownId = orderId || paymentId;
+            const attachments = [];
+            try {
+                const { generatePlanReceiptPdfBuffer } = await import("./pdf-invoice.service.js");
+                const pdf = await generatePlanReceiptPdfBuffer({
+                    planName: name, termText, amountFormatted: paid, paymentId: shownId, paidAt: `${fmtTime(new Date())} IST`,
+                    payerName: user.name || "Payer", payerEmail: user.email, periodText: `${fmtDate(from)} to ${fmtDate(to)}`,
+                    paidThrough: "Google Play", renewal, test,
+                });
+                attachments.push({ filename: `Classgrid_Plan_Receipt_${String(shownId).replace(/[^\w.-]/g, "_")}.pdf`, content: pdf, contentType: "application/pdf" });
+            } catch (e) {
+                console.error("[Google Play] plan receipt PDF failed (email sent without it):", e.message);
+            }
+            await sendEmail({ to: user.email, subject, html, ...FROM, attachments, userId: user._id || null }).catch((e) => console.error("[Google Play] plan receipt email failed:", e.message));
         }
 
         const teamHtml = baseTemplate({

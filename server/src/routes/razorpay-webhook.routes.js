@@ -720,7 +720,21 @@ router.post("/razorpay", express.raw({ type: "application/json" }), async (req, 
                                 <p>Nothing renews by itself: when the period ends, buy it again from the Upgrade page. Questions: reply to this email.</p>
                                 <p><a href="https://chat.classgrid.in/c" style="display:inline-block;background:#111;color:#fff;padding:10px 18px;border-radius:8px;text-decoration:none">Open Classgrid</a></p>`,
                         });
-                        if (to) await sendEmail({ to, subject: `Receipt: Classgrid ${planName} plan, ₹${Number(amountInr).toLocaleString("en-IN")}`, html, fromName: "Classgrid Billing", fromEmail: "billing@classgrid.in", userId });
+                        // The receipt's PDF (owner, 2026-11-26: credit top-ups had one, plans did not); never stops the email
+                        const attachments = [];
+                        try {
+                            const { generatePlanReceiptPdfBuffer } = await import("../services/pdf-invoice.service.js");
+                            const paidAtText = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });
+                            const pdf = await generatePlanReceiptPdfBuffer({
+                                planName, termText: term === "year" ? "1 year" : "1 month", amountFormatted: `₹${Number(amountInr).toLocaleString("en-IN")}`,
+                                paymentId: String(paymentId), paidAt: `${paidAtText} IST`, payerName: user.name || "Payer", payerEmail: to || "",
+                                periodText: `${fmt(from)} to ${fmt(expiresAt)}`, paidThrough: "", renewal: false, test: false,
+                            });
+                            attachments.push({ filename: `Classgrid_Plan_Receipt_${String(paymentId).replace(/[^\w.-]/g, "_")}.pdf`, content: pdf, contentType: "application/pdf" });
+                        } catch (pdfErr) {
+                            console.error("[Razorpay Webhook] plan receipt PDF failed (email sent without it):", pdfErr.message);
+                        }
+                        if (to) await sendEmail({ to, subject: `Receipt: Classgrid ${planName} plan, ₹${Number(amountInr).toLocaleString("en-IN")}`, html, fromName: "Classgrid Billing", fromEmail: "billing@classgrid.in", attachments, userId });
                     } catch (mailErr) {
                         console.error("[Razorpay Webhook] plan receipt email failed:", mailErr.message);
                     }
