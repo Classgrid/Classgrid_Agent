@@ -32,55 +32,65 @@ import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import connectDB from "../../config/db.js";
+import redis from "../config/redis.js";
+import {
+    isState, newState, revokeSlackToken, safeReturnTo, SLACK_CLEARED, SLACK_USER_SCOPES, slackProfile, STATE_TTL_SECONDS, stateKey,
+} from "../services/slack-auth.js";
 
 const router = express.Router();
 
-const SLACK_CLIENT_ID = "11597433427378.12100062712277";
-const SLACK_CLIENT_SECRET = "6d586b933a83e67f3256c02ab349b766";
+// The Slack app's keys are server settings (SLACK_CLIENT_ID / SLACK_CLIENT_SECRET), never in the code
+const slackKeys = () => ({ id: process.env.SLACK_CLIENT_ID, secret: process.env.SLACK_CLIENT_SECRET });
+const redirectUri = () => `${process.env.BACKEND_URL}/api/auth/slack/callback`;
 
-const getSlackAuthUrl = (statePayload) => {
-    const clientId = SLACK_CLIENT_ID;
-    const redirectUri = `${process.env.BACKEND_URL}/api/auth/slack/callback`;
-    // Must match the User Token Scopes in the Slack app settings (a scope missing there fails the whole connect).
-    // admin.*, auditlogs:read (Enterprise Grid admins only) and email/profile (Sign in with Slack) are not asked for.
-    const scopes = [
-        'bookmarks:read', 'canvases:write',
-        'channels:history', 'channels:read', 'channels:write', 'channels:write.invites',
-        'chat:write', 'files:read', 'files:write',
-        'groups:history', 'groups:read', 'groups:write', 'groups:write.topic',
-        'im:read', 'mpim:read', 'pins:read', 'pins:write', 'reactions:read',
-        'search:read', 'search:read.files', 'search:read.im', 'search:read.mpim', 'search:read.public', 'search:read.users',
-        'stars:read', 'stars:write', 'team:read', 'usergroups:read',
-        'users.profile:read', 'users.profile:write', 'users:read', 'users:read.email', 'users:write',
-        'workflows.templates:write'
-    ];
-    
+const getSlackAuthUrl = (state) => {
     const authUrl = new URL(`https://slack.com/oauth/v2/authorize`);
-    authUrl.searchParams.append('client_id', clientId);
-    authUrl.searchParams.append('user_scope', scopes.join(',')); // user_scope instead of scope to act on behalf of user
-    authUrl.searchParams.append('redirect_uri', redirectUri);
-    authUrl.searchParams.append('state', statePayload);
+    authUrl.searchParams.append('client_id', slackKeys().id);
+    // user_scope, not scope: Classgrid acts as the person, there is no bot user. The list is services/slack-auth.js;
+    // it must equal the User Token Scopes in the Slack app's settings.
+    authUrl.searchParams.append('user_scope', SLACK_USER_SCOPES.join(','));
+    authUrl.searchParams.append('redirect_uri', redirectUri());
+    authUrl.searchParams.append('state', state);
     authUrl.searchParams.append('prompt', 'consent');
-    
     return authUrl.toString();
 };
 
+const popupPage = (ok, heading) => `
+    <!DOCTYPE html>
+    <html><head><title>${ok ? "Success" : "Error"}</title></head>
+    <body style="background:#0a0a0a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif;">
+      <h2>${heading}</h2>
+      <script>
+        const payload = { type: '${ok ? "integration_success" : "integration_error"}', provider: 'slack' };
+        if (window.opener) { window.opener.postMessage(payload, '*'); }
+        localStorage.setItem('integration_callback', JSON.stringify({ ...payload, timestamp: Date.now() }));
+        window.close();
+      </script>
+    </body></html>
+`;
+
+const withParam = (url, key, value) => {
+    const u = new URL(url);
+    u.searchParams.set(key, value);
+    return u.toString();
+};
+
 // 1. GENERATE OAUTH URL
-router.get("/connect", isAuthenticated, (req, res) => {
-    if (!SLACK_CLIENT_ID || !SLACK_CLIENT_SECRET) {
+// The state is a random id kept in Redis for 10 minutes with the account and where to return; the callback takes it
+// once. A forged or replayed callback finds nothing and changes nothing.
+router.get("/connect", isAuthenticated, async (req, res) => {
+    const { id, secret } = slackKeys();
+    if (!id || !secret) {
         return res.status(500).json({ message: "Slack OAuth keys not configured in backend" });
     }
-
-    const returnTo = req.query.returnTo || req.headers.referer || req.headers.origin || process.env.FRONTEND_URL;
-    const isPopup = req.query.popup === 'true';
-    const statePayload = Buffer.from(JSON.stringify({ 
+    const returnTo = safeReturnTo(req.query.returnTo || req.headers.referer || req.headers.origin || process.env.FRONTEND_URL);
+    const state = newState();
+    await redis.set(stateKey(state), JSON.stringify({
         userId: req.user._id.toString(),
         returnTo,
-        isPopup
-    })).toString('base64');
-
-    const url = getSlackAuthUrl(statePayload);
-    res.json({ url });
+        isPopup: req.query.popup === 'true',
+    }), "EX", STATE_TTL_SECONDS);
+    res.json({ url: getSlackAuthUrl(state) });
 });
 
 // 2. HANDLE CALLBACK
@@ -91,38 +101,16 @@ router.get("/callback", async (req, res) => {
         await connectDB();
         const { code, state, error, error_description } = req.query;
 
-        let userId;
-        if (state) {
-            try {
-                const decodedState = JSON.parse(Buffer.from(state, 'base64').toString('utf8'));
-                userId = decodedState.userId;
-                if (decodedState.returnTo) returnTo = decodedState.returnTo;
-                if (decodedState.isPopup) isPopup = true;
-            } catch (e) {
-                userId = state;
-            }
-        }
-
-        if (!returnTo) returnTo = req.headers.referer || req.headers.origin;
+        const saved = isState(state) ? JSON.parse((await redis.get(stateKey(state))) || "null") : null;
+        if (saved) await redis.del(stateKey(state)).catch(() => {});
+        const userId = saved?.userId;
+        returnTo = saved?.returnTo || null;
+        isPopup = !!saved?.isPopup;
 
         if (error) {
             console.error("Slack OAuth Error:", error, error_description);
-            if (isPopup) {
-                return res.send(`
-                    <!DOCTYPE html>
-                    <html><head><title>Error</title></head>
-                    <body style="background:#0a0a0a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif;">
-                      <h2>Error authenticating.</h2>
-                      <script>
-                        const payload = { type: 'integration_error', provider: 'slack' };
-                        if (window.opener) { window.opener.postMessage(payload, '*'); }
-                        localStorage.setItem('integration_callback', JSON.stringify({ ...payload, timestamp: Date.now() }));
-                        window.close();
-                      </script>
-                    </body></html>
-                `);
-            }
-            return res.redirect(`${returnTo}?integration_error=slack`);
+            if (isPopup) return res.send(popupPage(false, "Error authenticating."));
+            return returnTo ? res.redirect(withParam(returnTo, "integration_error", "slack")) : res.status(400).send("Slack sign-in was cancelled.");
         }
 
         if (!code || !userId) {
@@ -130,90 +118,56 @@ router.get("/callback", async (req, res) => {
         }
 
         // Exchange code for token
+        const { id, secret } = slackKeys();
         const tokenResponse = await fetch(`https://slack.com/api/oauth.v2.access`, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/x-www-form-urlencoded',
-            },
-            body: new URLSearchParams({
-                client_id: SLACK_CLIENT_ID,
-                client_secret: SLACK_CLIENT_SECRET,
-                code,
-                redirect_uri: `${process.env.BACKEND_URL}/api/auth/slack/callback`
-            })
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ client_id: id, client_secret: secret, code, redirect_uri: redirectUri() }),
         });
-
         const tokenData = await tokenResponse.json();
-
         if (!tokenData.ok) {
-            console.error("Slack token error:", tokenData);
+            console.error("Slack token error:", tokenData.error);
             throw new Error(tokenData.error || "Failed to exchange token");
         }
 
         const accessToken = tokenData.authed_user.access_token;
-        const refreshToken = tokenData.authed_user.refresh_token || null; 
-        
-        // Fetch user info to get email
-        const userRes = await fetch("https://slack.com/api/users.identity", {
-            headers: { 
-                "Authorization": `Bearer ${accessToken}`,
-            }
-        });
-        const slackUser = await userRes.json();
-        const slackEmail = slackUser.user?.email || null;
+        const refreshToken = tokenData.authed_user.refresh_token || null;
 
         const user = await User.findById(userId);
         if (!user) throw new Error("User not found");
 
+        // A token this account had before is ended at Slack, so only one stays alive
+        if (user.slack_access_token && user.slack_access_token !== accessToken) await revokeSlackToken(user.slack_access_token);
+
         user.slack_access_token = accessToken;
         user.slack_refresh_token = refreshToken;
-        user.slack_email = slackEmail;
-        user.slack_name = slackUser.user?.name || null;
+        // The Slack ids find this account when Slack says the app was removed or the token revoked (webhook.routes.js)
+        Object.assign(user, {
+            slack_user_id: tokenData.authed_user.id || null,
+            slack_team_id: tokenData.team?.id || null,
+            slack_email: null,
+            slack_name: null,
+        }, await slackProfile(accessToken));
         await user.save();
 
-        if (isPopup) {
-            return res.send(`
-                <!DOCTYPE html>
-                <html><head><title>Success</title></head>
-                <body style="background:#0a0a0a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif;">
-                  <h2>Authentication successful!</h2>
-                  <script>
-                    const payload = { type: 'integration_success', provider: 'slack' };
-                    if (window.opener) { window.opener.postMessage(payload, '*'); }
-                    localStorage.setItem('integration_callback', JSON.stringify({ ...payload, timestamp: Date.now() }));
-                    window.close();
-                  </script>
-                </body></html>
-            `);
-        }
-
-        res.redirect(`${returnTo}?integration_success=slack`);
+        if (isPopup) return res.send(popupPage(true, "Authentication successful!"));
+        return returnTo ? res.redirect(withParam(returnTo, "integration_success", "slack")) : res.send("Slack is connected. You can close this window.");
     } catch (error) {
-        console.error("Slack Callback Error:", error);
-        if (isPopup) {
-            return res.send(`
-                <!DOCTYPE html>
-                <html><head><title>Error</title></head>
-                <body style="background:#0a0a0a; color:#fff; display:flex; justify-content:center; align-items:center; height:100vh; font-family:sans-serif;">
-                  <h2>Authentication failed.</h2>
-                  <script>window.close();</script>
-                </body></html>
-            `);
-        }
-        res.redirect(`${returnTo}?integration_error=slack`);
+        console.error("Slack Callback Error:", error?.message || error);
+        if (isPopup) return res.send(popupPage(false, "Authentication failed."));
+        return returnTo ? res.redirect(withParam(returnTo, "integration_error", "slack")) : res.status(500).send("Slack connection failed.");
     }
 });
 
-// 3. DISCONNECT
+// 3. DISCONNECT: the token is ended at Slack too (auth.revoke), and everything kept from the Slack account is deleted
 router.delete("/disconnect", isAuthenticated, async (req, res) => {
     try {
         await connectDB();
         const user = await User.findById(req.user._id);
         if (!user) return res.status(404).json({ message: "User not found" });
 
-        user.slack_access_token = null;
-        user.slack_refresh_token = null;
-        user.slack_email = null;
+        await revokeSlackToken(user.slack_access_token);
+        Object.assign(user, SLACK_CLEARED);
         await user.save();
 
         res.json({ message: "Slack disconnected" });

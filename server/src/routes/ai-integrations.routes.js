@@ -33,6 +33,7 @@ import { isAuthenticated } from "../middleware/auth.middleware.js";
 import User from "../models/User.js";
 import connectDB from "../../config/db.js";
 import { builtinPluginTools } from "../services/builtin-plugin-tools.js";
+import { revokeSlackToken, SLACK_CLEARED } from "../services/slack-auth.js";
 
 const router = express.Router();
 
@@ -186,9 +187,9 @@ router.post("/disconnect/:id", isAuthenticated, async (req, res) => {
         }
 
         if (id === 'slack') {
-            user.slack_access_token = undefined;
-            user.slack_refresh_token = undefined;
-            user.slack_email = undefined;
+            // ended at Slack too, and everything kept from the Slack account deleted (services/slack-auth.js)
+            await revokeSlackToken(user.slack_access_token);
+            Object.assign(user, SLACK_CLEARED);
         } else if (id === 'canva') {
             user.canva_access_token = undefined;
             user.canva_refresh_token = undefined;

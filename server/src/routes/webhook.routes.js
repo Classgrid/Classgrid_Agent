@@ -81,6 +81,7 @@ import AttendanceRecord from "../models/AttendanceRecord.js";
 import { primarySupabaseClient as supabase, getChatSb } from "../config/supabaseClient.js";
 import CustomMcpServer from "../models/CustomMcpServer.js";
 import { deauthTarget, forgetZoomAccount, isSignedByZoom, urlValidationAnswer } from "../services/zoom-deauth.js";
+import { forgetSlackAccounts, isSignedBySlack, slackEventTarget } from "../services/slack-auth.js";
 
 const router = express.Router();
 
@@ -105,6 +106,38 @@ function verifyZoomWebhook(req) {
 
     return signature === expectedSig;
 }
+
+// Slack's events (the Slack app's Event Subscriptions Request URL: https://api.classgrid.in/api/webhooks/slack/events).
+// Classgrid is removed from a workspace (app_uninstalled) or a person's token is revoked (tokens_revoked): everything
+// kept from those Slack accounts is deleted (services/slack-auth.js). The body arrives raw (api/index.js skips the
+// JSON parser for this path) because Slack signs the exact bytes it sent.
+router.post("/slack/events", express.raw({ type: "*/*", limit: "1mb" }), async (req, res) => {
+    const raw = Buffer.isBuffer(req.body) ? req.body.toString("utf8") : "";
+    const signed = isSignedBySlack({
+        signature: req.headers["x-slack-signature"],
+        timestamp: req.headers["x-slack-request-timestamp"],
+        body: raw,
+        secret: process.env.SLACK_SIGNING_SECRET,
+    });
+    if (!signed) {
+        console.warn("[Slack events] unsigned, wrongly signed or old request refused");
+        return res.status(401).json({ message: "Invalid signature" });
+    }
+    let body;
+    try { body = JSON.parse(raw); } catch { return res.status(400).json({ message: "Bad body" }); }
+    if (body.type === "url_verification") return res.json({ challenge: body.challenge });
+    const target = slackEventTarget(body);
+    if (!target) return res.status(200).json({ received: true });
+    try {
+        await connectDB();
+        const cleared = await forgetSlackAccounts(target, { User });
+        console.log(`[Slack events] ${body.event?.type}: ${cleared} account(s) cleared`);
+    } catch (err) {
+        console.error("[Slack events] could not clear the account:", err?.message || err);
+        return res.status(500).json({ message: "Could not process" });
+    }
+    res.status(200).json({ received: true });
+});
 
 // Someone removed Classgrid from their Zoom account: everything kept from that Zoom account is deleted
 // (services/zoom-deauth.js). Zoom sends this to the app's event endpoint, and Zoom's review form can also name its

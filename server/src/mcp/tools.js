@@ -95,6 +95,7 @@ import { Readable } from 'stream';
 import { cfAiFetch } from "../services/cf-neuron-cap.service.js";
 import * as eleven from "../services/elevenlabs.service.js";
 import { applyZoomTokens, refreshZoomToken } from "../services/zoom-oauth.js";
+import { isDeadTokenError, SLACK_CLEARED, slackProfile } from "../services/slack-auth.js";
 
 const execPromise = util.promisify(exec);
 
@@ -999,7 +1000,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'slack_workspace_connector',
-    description: 'Interact with Slack API to list and search channels, read/send messages, read threads, create channels, search messages, list and search users, read a user profile, invite users to channels, archive/delete channels, and create, read and update canvases using the connected user token.',
+    description: 'Interact with Slack API to list and search channels, read/send messages, read threads, create channels, search messages, list and search users, read a user profile, invite users to channels, archive channels, and create, read and update canvases using the connected user token.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -6308,6 +6309,18 @@ ${lines}` }] };
 
       const accessToken = user.slack_access_token;
 
+      // An account connected before Slack's ids were kept: read them once, so Slack's removal events can find it
+      // (services/slack-auth.js)
+      if (!user.slack_team_id) {
+        try {
+          const ids = await slackProfile(accessToken);
+          if (ids.slack_team_id) {
+            Object.assign(user, ids);
+            await user.save();
+          }
+        } catch { /* the request still goes on */ }
+      }
+
       try {
         if (operation === 'list_channels') {
           const res = await fetch(`https://slack.com/api/conversations.list?types=public_channel,private_channel&limit=50`, {
@@ -6469,6 +6482,11 @@ ${lines}` }] };
           throw new Error(`Unsupported operation: ${operation}`);
         }
       } catch (e) {
+        // A token Slack no longer accepts (revoked, the app removed, the account deactivated): the connection is
+        // over, so what was kept from it is deleted and Plugins shows Slack as not connected
+        if (isDeadTokenError(e.message)) {
+          try { await mongoose.models.User.updateOne({ _id: user._id }, { $set: { ...SLACK_CLEARED } }); } catch { /* still answered */ }
+        }
         return { content: [{ type: 'text', text: `Failed to execute Slack API call: ${e.message}` }] };
       }
     }

@@ -263,6 +263,7 @@ app.use((req, res, next) => {
     req.originalUrl.startsWith('/api/payments/webhook') ||
     req.originalUrl.startsWith('/api/webhooks/razorpay') ||
     req.originalUrl.startsWith('/api/github-app/webhook') ||
+    req.originalUrl.startsWith('/api/webhooks/slack/events') ||
     isRemoteMcpPath(req.path)
   ) {
     return next();

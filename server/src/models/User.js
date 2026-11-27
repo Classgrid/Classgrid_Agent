@@ -717,6 +717,18 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // The connected Slack account's user and workspace ids: Slack's "tokens_revoked" and "app_uninstalled" events
+    // name the account by them, and everything kept from it is then deleted (services/slack-auth.js; 2026-11-27)
+    slack_user_id: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    slack_team_id: {
+      type: String,
+      default: null,
+      index: true,
+    },
     canva_access_token: {
       type: String,
       default: null,
