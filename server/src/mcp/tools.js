@@ -1012,7 +1012,7 @@ export const getMcpTools = () => [
         markdown: { type: 'string', description: 'Canvas content in markdown (for create_canvas, update_canvas).' },
         canvasChange: { type: 'string', enum: ['insert_at_end', 'insert_at_start', 'replace', 'rename'], description: 'How update_canvas changes the canvas (default insert_at_end; replace without sectionId replaces the whole canvas).' },
         sectionId: { type: 'string', description: 'Optional: the canvas section to replace (for update_canvas with replace).' },
-        channelId: { type: 'string', description: 'The ID of the channel (required for read_channel_messages, send_message, invite_to_channel, archive_channel).' },
+        channelId: { type: 'string', description: 'The ID of the channel (required for read_channel_messages, send_message, invite_to_channel, archive_channel). With create_canvas it makes that channel\'s own canvas, which works on every Slack plan; without it the canvas is standalone, which Slack\'s free plan does not allow.' },
         text: { type: 'string', description: 'The text content to send (required for send_message).' },
         limit: { type: 'number', description: 'Max results to return (for read_channel_messages).' },
         channelName: { type: 'string', description: 'The name of the new channel (for create_channel).' },
@@ -6465,14 +6465,26 @@ ${lines}` }] };
           const u = data.user, p = u.profile || {};
           return { content: [{ type: 'text', text: JSON.stringify({ id: u.id, name: u.name, real_name: u.real_name, display_name: p.display_name, title: p.title, email: p.email, phone: p.phone, status: [p.status_emoji, p.status_text].filter(Boolean).join(' '), timezone: u.tz, is_admin: u.is_admin, is_bot: u.is_bot }, null, 2) }] };
         } else if (operation === 'create_canvas') {
-          const res = await fetch(`https://slack.com/api/canvases.create`, {
+          // With a channelId: that channel's own canvas (conversations.canvases.create), which every Slack plan has, one per
+          // channel. Without: a standalone canvas (canvases.create), which Slack's free plan does not allow (owner,
+          // 2026-11-27: free_teams_cannot_create_standalone_canvases on his workspace).
+          const content = markdown ? { document_content: { type: 'markdown', markdown } } : {};
+          const res = await fetch(`https://slack.com/api/${channelId ? 'conversations.canvases.create' : 'canvases.create'}`, {
             method: 'POST',
             headers: { "Authorization": `Bearer ${accessToken}`, "Content-Type": "application/json" },
-            body: JSON.stringify({ ...(title ? { title } : {}), ...(markdown ? { document_content: { type: 'markdown', markdown } } : {}), ...(channelId ? { channel_id: channelId } : {}) })
+            body: JSON.stringify({ ...(title ? { title } : {}), ...content, ...(channelId ? { channel_id: channelId } : {}) })
           });
           const data = await res.json();
+          if (!data.ok && data.error === 'free_teams_cannot_create_standalone_canvases') {
+            throw new Error("This Slack workspace is on Slack's free plan, which has canvases only inside channels. Call create_canvas again with the channelId of the channel the canvas belongs in (each channel has one canvas).");
+          }
+          if (!data.ok && data.error === 'channel_canvas_already_exists') {
+            const info = await fetch(`https://slack.com/api/conversations.info?channel=${encodeURIComponent(channelId)}`, { headers: { "Authorization": `Bearer ${accessToken}` } }).then(r => r.json()).catch(() => null);
+            const existing = info?.channel?.properties?.canvas?.file_id;
+            throw new Error(`This channel already has its canvas${existing ? ` (canvasId ${existing})` : ''}. Use read_canvas or update_canvas with that canvasId to add to it.`);
+          }
           if (!data.ok) throw new Error(data.error || "Failed to create canvas");
-          return { content: [{ type: 'text', text: JSON.stringify({ success: true, canvas_id: data.canvas_id }, null, 2) }] };
+          return { content: [{ type: 'text', text: JSON.stringify({ success: true, canvas_id: data.canvas_id, ...(channelId ? { channel_id: channelId } : {}) }, null, 2) }] };
         } else if (operation === 'read_canvas') {
           if (!canvasId) throw new Error("canvasId is required for read_canvas");
           const res = await fetch(`https://slack.com/api/canvases.getContent`, {

@@ -32,6 +32,8 @@ test("only the scopes the Slack tool uses, and they cover every method it calls"
         "users.info": ["users:read", "users:read.email"],
         "search.messages": ["search:read"],
         "canvases.create": ["canvases:write"],
+        "conversations.canvases.create": ["canvases:write"],
+        "conversations.info": ["channels:read", "groups:read"],
         "canvases.edit": ["canvases:write"],
         "canvases.getContent": ["canvases:read"],
     };
