@@ -79,6 +79,8 @@ import Classroom from "../models/Classroom.js";
 import AttendanceSession from "../models/AttendanceSession.js";
 import AttendanceRecord from "../models/AttendanceRecord.js";
 import { primarySupabaseClient as supabase, getChatSb } from "../config/supabaseClient.js";
+import CustomMcpServer from "../models/CustomMcpServer.js";
+import { deauthTarget, forgetZoomAccount, isSignedByZoom, urlValidationAnswer } from "../services/zoom-deauth.js";
 
 const router = express.Router();
 
@@ -104,6 +106,39 @@ function verifyZoomWebhook(req) {
     return signature === expectedSig;
 }
 
+// Someone removed Classgrid from their Zoom account: everything kept from that Zoom account is deleted
+// (services/zoom-deauth.js). Zoom sends this to the app's event endpoint, and Zoom's review form can also name its
+// own address, /api/webhooks/zoom/deauthorize; both come here.
+async function handleZoomDeauth(req, res) {
+    const body = req.body || {};
+    const secret = process.env.ZOOM_WEBHOOK_SECRET_TOKEN;
+    const answer = urlValidationAnswer(body, secret);
+    if (answer) return res.json(answer);
+    const signed = isSignedByZoom({
+        signature: req.headers["x-zm-signature"],
+        timestamp: req.headers["x-zm-request-timestamp"],
+        body: req.rawBody ? String(req.rawBody) : JSON.stringify(body),
+        secret,
+    });
+    if (!signed) {
+        console.warn("[Zoom deauthorize] unsigned or wrongly signed request refused");
+        return res.status(401).json({ message: "Invalid signature" });
+    }
+    const target = deauthTarget(body);
+    if (!target) return res.status(200).json({ received: true });
+    try {
+        await connectDB();
+        const cleared = await forgetZoomAccount(target, { User, CustomMcpServer });
+        console.log(`[Zoom deauthorize] Zoom user removed Classgrid; ${cleared} account(s) cleared`);
+    } catch (err) {
+        console.error("[Zoom deauthorize] could not clear the account:", err?.message || err);
+        return res.status(500).json({ message: "Could not process" });
+    }
+    return res.status(200).json({ received: true });
+}
+
+router.post("/zoom/deauthorize", express.json(), handleZoomDeauth);
+
 // In-memory store for participant join times (per meeting)
 // Key: `${zoomMeetingId}:${participantEmail}` → { joinedAt, totalMinutes }
 const participantTracker = new Map();
@@ -128,6 +163,9 @@ router.post("/zoom", express.json(), async (req, res) => {
             console.warn("[Webhook] Invalid Zoom signature");
             return res.status(401).json({ message: "Invalid signature" });
         }
+
+        // Someone removed Classgrid from their Zoom account (its payload has no "object", so before the meeting events)
+        if (body.event === "app_deauthorized") return handleZoomDeauth(req, res);
 
         const event = body.event;
         const payload = body.payload?.object;

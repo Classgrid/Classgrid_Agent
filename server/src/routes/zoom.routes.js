@@ -239,6 +239,7 @@ router.get("/callback", async (req, res) => {
             });
             const zUser = await userRes.json();
             if (zUser) {
+                user.zoom_user_id = zUser.id ? String(zUser.id) : null;
                 user.zoom_email = zUser.email || null;
                 user.zoom_name = (zUser.first_name || '') + ' ' + (zUser.last_name || '');
                 user.zoom_name = user.zoom_name.trim();
@@ -593,6 +594,9 @@ router.post("/disconnect", isAuthenticated, async (req, res) => {
         user.zoom_access_token = null;
         user.zoom_refresh_token = null;
         user.zoom_token_expiry = null;
+        user.zoom_user_id = null;
+        user.zoom_email = null;
+        user.zoom_name = null;
         await user.save();
 
         res.json({ message: "Zoom disconnected" });

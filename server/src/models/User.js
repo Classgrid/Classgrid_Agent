@@ -648,6 +648,21 @@ const userSchema = new mongoose.Schema(
       type: Date,
       default: null,
     },
+    // The connected Zoom account's user id: Zoom's "app_deauthorized" event names the account by it, and everything
+    // kept from that Zoom account is then deleted (services/zoom-deauth.js; owner, 2026-11-27)
+    zoom_user_id: {
+      type: String,
+      default: null,
+      index: true,
+    },
+    zoom_email: {
+      type: String,
+      default: null,
+    },
+    zoom_name: {
+      type: String,
+      default: null,
+    },
     microsoft_access_token: {
       type: String,
       default: null,

@@ -5905,6 +5905,18 @@ export const handleToolCall = async (name, args, context = {}) => {
           accessToken = user.zoom_access_token;
         }
 
+        // An account connected before Zoom's user id was kept: read it once, so Zoom's removal event can find it
+        // (services/zoom-deauth.js)
+        if (!user.zoom_user_id) {
+          try {
+            const me = await fetch("https://api.zoom.us/v2/users/me", { headers: { "Authorization": `Bearer ${accessToken}` } }).then((r) => r.json());
+            if (me?.id) {
+              user.zoom_user_id = String(me.id);
+              await user.save();
+            }
+          } catch { /* the request still goes on */ }
+        }
+
         if (operation === 'list_meetings') {
           const res = await fetch("https://api.zoom.us/v2/users/me/meetings", {
             headers: { "Authorization": `Bearer ${accessToken}` }
