@@ -4,16 +4,20 @@
 //   - to a person the owner shared the doc with ("Open the doc")
 //   - to the person who asked, when the owner let them in
 // A published page (chat.classgrid.in/p/<id>) is shared the same way: with kind "page" the same three emails say
-// "page" and link to the page (owner, 2026-11-16).
+// "page" and link to the page (owner, 2026-11-16). A video the AI made (a page of kind "video", 2026-11-27): kind
+// "video", the same emails as a page's, saying "video".
 // The words are made here with nothing else in them (so they are tested on their own: tests/live-doc.test.mjs);
 // sending is at the bottom. Our standard Classgrid email design (baseTemplate), sent from hello@classgrid.in like
 // the chat invites.
 import { docLink, roleWords } from "./live-doc.helpers.js";
 
-/** Where a doc or a page opens. */
-export const sharedLink = (kind, id) => (kind === "page" ? `https://chat.classgrid.in/p/${id}` : docLink(id));
-// (what a role lets a person do with a page: it is opened, not read)
-const can = (kind, role) => (kind === "page" ? (role === "editor" ? "open it, comment on it and share it" : role === "commenter" ? "open it and comment on it" : "open it") : `${roleWords(role)} it`);
+// (a page and a video both open at chat.classgrid.in/p/<id>, and both are opened, not read)
+const opened = (kind) => kind === "page" || kind === "video";
+
+/** Where a doc, a page or a video opens. */
+export const sharedLink = (kind, id) => (opened(kind) ? `https://chat.classgrid.in/p/${id}` : docLink(id));
+// (what a role lets a person do with a page or a video: it is opened, not read)
+const can = (kind, role) => (opened(kind) ? (role === "editor" ? "open it, comment on it and share it" : role === "commenter" ? "open it and comment on it" : "open it") : `${roleWords(role)} it`);
 
 const escapeHtml = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 // (a subject is one line)
@@ -27,7 +31,7 @@ export function accessRequestEmail({ docId, title, requesterName, requesterEmail
     const link = reviewLink(docId, kind);
     const name = oneLine(requesterName) || requesterEmail;
     // (someone who can already read it asks for more: to comment, or to edit)
-    const more = wants === "editor" ? (kind === "page" ? "share" : "edit") : wants === "commenter" ? "comment on" : "";
+    const more = wants === "editor" ? (opened(kind) ? "share" : "edit") : wants === "commenter" ? "comment on" : "";
     const asks = more ? `asked to ${more}` : "asked to open";
     return {
         subject: oneLine(more ? `${name} asked to ${more} "${title}"` : `${name} asked for access to "${title}"`),

@@ -25,6 +25,8 @@ const commentSchema = new mongoose.Schema({
     time: { type: Number },
     timeEnd: { type: Number },
     area: { type: new mongoose.Schema({ x: Number, y: Number, w: Number, h: Number }, { _id: false }) },
+    // Only on a video: the version of the video the comment was written on (a comment from before 2026-11-27 has none)
+    version: { type: Number },
 }, { _id: false });
 
 // A video the AI made with make_video (kind "video"): the MP4 and its pictures on cdn.classgrid.in, and its scenes

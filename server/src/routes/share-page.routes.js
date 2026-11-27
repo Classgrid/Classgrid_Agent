@@ -11,7 +11,7 @@ import SharePage from "../models/SharePage.js";
 import User from "../models/User.js";
 import {
     pageLink, isOwner, canView, canWriteData, canComment, canShare, canRename, canResolveComment, canDeleteComment, cleanTitle, checkVisibility,
-    checkCommentText, checkCommentPlace, pageRow, kindOf, DATA_KEY_RE,
+    checkCommentText, checkCommentPlace, pageRow, kindOf, videoSecondsOf, DATA_KEY_RE,
 } from "../services/share-page.helpers.js";
 import {
     findPage, commentView, summaryView, addComment, setCommentResolved, removeComment, writeData, dataObject, pageFor, duplicatePage, pagesOf,
@@ -97,7 +97,7 @@ router.get("/:id", isAuthenticated, wrap(async (req, res) => {
         page: { ...full, owner: { name: owner?.name || "", email: owner?.email || "" } },
         isOwner: full.isOwner,
         link: pageLink(page._id),
-        comments: (page.comments || []).map(commentView),
+        comments: (page.comments || []).map((c) => commentView(c, videoSecondsOf(page))),
         reading,
     });
 }));
@@ -221,7 +221,7 @@ router.post("/:id/report", isAuthenticated, wrap(async (req, res) => {
 // { text, replyTo, quote }: `quote` is the words of the page the comment is on. On a video also { time, timeEnd,
 // area }: the moment (seconds), the end of a stretch of time, and a box on the frame (x, y, w, h, each 0-1)
 router.post("/:id/comments", isAuthenticated, wrap(async (req, res) => {
-    const page = await load(req, res, { check: canComment, refused: CANT_COMMENT, select: "owner kind video.seconds visibility linkRole members requests comments.id" });
+    const page = await load(req, res, { check: canComment, refused: CANT_COMMENT, select: "owner kind versions video.seconds visibility linkRole members requests comments.id" });
     if (!page) return;
     const text = checkCommentText(req.body?.text);
     if (!text.ok) return fail(res, 400, text.error);
@@ -229,7 +229,7 @@ router.post("/:id/comments", isAuthenticated, wrap(async (req, res) => {
     if (replyTo && !(page.comments || []).some((c) => c.id === replyTo)) return fail(res, 400, "That comment was not found.");
     const place = checkCommentPlace(req.body, page);
     if (!place.ok) return fail(res, 400, place.error);
-    const comment = await addComment(page._id, { user: req.user, text: text.value, replyTo, quote: req.body?.quote, place: place.value });
+    const comment = await addComment(page._id, { user: req.user, text: text.value, replyTo, quote: req.body?.quote, place: place.value, version: kindOf(page) === "video" ? page.versions || 1 : null });
     if (!comment) return fail(res, 400, "This page has too many comments.");
     res.status(201).json({ comment: commentView(comment), page: await fresh(req) });
 }));
@@ -242,7 +242,7 @@ router.patch("/:id/comments/:cid", isAuthenticated, wrap(async (req, res) => {
     if (!canResolveComment(page, comment, req.user)) return fail(res, 403, "Only the page's owner, its editors or the person who wrote it can do this.");
     const resolved = req.body?.resolved === undefined ? true : !!req.body.resolved;
     await setCommentResolved(page._id, comment.id, resolved);
-    res.json({ comment: { ...commentView(comment), resolved }, page: await fresh(req) });
+    res.json({ comment: { ...commentView(comment, videoSecondsOf(page)), resolved }, page: await fresh(req) });
 }));
 
 // Removes a comment with its replies (its writer, or an editor of the page)

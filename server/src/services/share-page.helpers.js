@@ -98,16 +98,26 @@ export function checkCommentPlace(body = {}, page = {}) {
     return { ok: true, value: { time: round(time, 3), timeEnd, area } };
 }
 
-/** The place on the video a comment is on, as it is sent ({} for a comment with no time). */
-export function commentPlace(c) {
+/**
+ * The place on the video a comment is on, as it is sent ({} for a comment with no time). `seconds`: the video's
+ * length now. A comment written on a longer version of the video is kept, and its time is sent inside the video as
+ * it is now (the end, at most); a stretch that no longer fits becomes that moment.
+ */
+export function commentPlace(c, seconds) {
     if (!isNum(c?.time)) return {};
     const a = c.area;
+    const end = isNum(seconds) && seconds >= 0 ? seconds : Infinity;
+    const time = Math.min(c.time, end);
+    const timeEnd = isNum(c.timeEnd) ? Math.min(c.timeEnd, end) : null;
     return {
-        time: c.time,
-        timeEnd: isNum(c.timeEnd) ? c.timeEnd : null,
+        time,
+        timeEnd: timeEnd != null && timeEnd > time ? timeEnd : null,
         area: a && isNum(a.x) ? { x: a.x, y: a.y, w: a.w, h: a.h } : null,
     };
 }
+
+/** A video's length now (seconds), for commentPlace; undefined for a page. */
+export const videoSecondsOf = (page) => (kindOf(page) === "video" && isNum(Number(page.video?.seconds)) ? Number(page.video.seconds) : undefined);
 
 /** 21 -> "0:21", 129.4 -> "2:09" */
 export function clockTime(seconds) {
@@ -179,7 +189,7 @@ export const cleanQuote = (quote) => String(quote ?? "").replace(/\s+/g, " ").tr
  * The page's comments as threads, the way a live doc's are sent: each comment with its replies under it (a reply
  * to a reply goes under the same comment). `photoOf(userId)` gives a person's photo.
  */
-export function commentThreads(comments, photoOf = () => "") {
+export function commentThreads(comments, photoOf = () => "", seconds) {
     const list = comments || [];
     const top = new Map();
     const parent = new Map(list.map((c) => [c.id, c.replyTo || null]));
@@ -188,7 +198,7 @@ export function commentThreads(comments, photoOf = () => "") {
         if (c.replyTo && parent.has(c.replyTo)) continue;
         const thread = {
             id: c.id, userId: idOf(c.userId), name: c.byAi ? "Classgrid AI" : c.name || "", photo: c.byAi ? "" : photoOf(c.userId), text: c.text,
-            quote: c.quote || "", ...commentPlace(c), at: c.at, resolved: !!c.resolved, byAI: !!c.byAi, replies: [],
+            quote: c.quote || "", ...commentPlace(c, seconds), at: c.at, resolved: !!c.resolved, byAI: !!c.byAi, replies: [],
         };
         top.set(c.id, thread);
         threads.push(thread);
@@ -225,7 +235,7 @@ export function pageForClient(page, who, profiles = {}) {
         versions: page.versions || 1,
         link: pageLink(page._id),
         // (a page has no text to edit by hand: "edit" is renaming it, and it comes with sharing)
-        comments: commentThreads(page.comments, (userId) => byId[idOf(userId)]?.photo || ""),
+        comments: commentThreads(page.comments, (userId) => byId[idOf(userId)]?.photo || "", videoSecondsOf(page)),
     };
 }
 

@@ -3,7 +3,8 @@
 // Who may do what is in live-doc.helpers.js; the emails are in live-doc-emails.js.
 // A published page (models/SharePage.js, /api/pages) is shared the same way, with the same fields (members,
 // requests, linkRole, views, pinnedBy), so the functions here take a doc or a page: what is saved goes to the
-// model the thing came from, and the words say "doc" or "page" (owner, 2026-11-16).
+// model the thing came from, and the words say "doc" or "page" (owner, 2026-11-16), or "video" for a page of kind
+// "video" (a video the AI made, 2026-11-27).
 import crypto from "crypto";
 import LiveDoc from "../models/LiveDoc.js";
 import User from "../models/User.js";
@@ -21,7 +22,7 @@ const quiet = { timestamps: false }; // (a change the readers need not be told a
 // The model a doc or a page is saved in, and the word for it
 const isPage = (doc) => doc?.constructor?.modelName === "SharePage";
 const modelOf = (doc) => (typeof doc?.constructor?.updateOne === "function" ? doc.constructor : LiveDoc);
-const kindOf = (doc) => (isPage(doc) ? "page" : "doc");
+const kindOf = (doc) => (isPage(doc) ? (doc.kind === "video" ? "video" : "page") : "doc");
 
 // ── People's names and photos ──
 
@@ -311,7 +312,7 @@ export async function reportDoc(doc, user, { reason, description }) {
         contentType: "other",
         contentId: String(doc._id),
         contentPreview: isPage(doc)
-            ? `Published page "${doc.title}": https://chat.classgrid.in/p/${doc._id}`
+            ? `Published ${kindOf(doc)} "${doc.title}": https://chat.classgrid.in/p/${doc._id}`
             : `Live doc "${doc.title}": ${String(doc.markdown || "").replace(/\s+/g, " ").slice(0, 240)}`,
         reportedUser: idOf(doc.owner) || null,
         reportedUserName: doc.ownerName || "",
@@ -331,7 +332,7 @@ export async function reportComment(doc, comment, user, { reason, description })
         reportedByName: userName(user),
         contentType: "other",
         contentId,
-        contentPreview: `Comment on the ${isPage(doc) ? "published page" : "live doc"} "${doc.title}": ${String(comment.text || "").replace(/\s+/g, " ").slice(0, 240)}`,
+        contentPreview: `Comment on the ${isPage(doc) ? `published ${kindOf(doc)}` : "live doc"} "${doc.title}": ${String(comment.text || "").replace(/\s+/g, " ").slice(0, 240)}`,
         reportedUser: comment.userId || null,
         reportedUserName: comment.name || "",
         reason,

@@ -18,7 +18,13 @@ const query = (rows) => {
     return q;
 };
 mock.module("../src/models/User.js", {
-    defaultExport: { find: () => query([]), findOne: () => query(null), findById: () => query(null) },
+    defaultExport: { find: () => query([]), findOne: () => query(null), findById: (id) => query([OWNER, ASHA].find((u) => u._id === String(id)) || null) },
+});
+// (the sharing emails are made for real and kept here instead of being sent)
+const sent = [];
+const realEmails = await import("../src/services/live-doc-emails.js");
+mock.module("../src/services/live-doc-emails.js", {
+    namedExports: { ...realEmails, sendDocEmail: async (to, email) => { sent.push({ to, ...email }); } },
 });
 mock.module("../src/config/redis.js", { defaultExport: { set: async () => "OK", hdel: async () => 1, multi: () => { throw new Error("no redis here"); } } });
 // (the routes, with the signed-in person given by the test: req.user is `signedIn`)
@@ -29,6 +35,7 @@ const { default: SharePage } = await import("../src/models/SharePage.js");
 const helpers = await import("../src/services/share-page.helpers.js");
 const service = await import("../src/services/share-page.service.js");
 const { default: router } = await import("../src/routes/share-page.routes.js");
+const share = await import("../src/services/live-doc-share.service.js");
 
 const VIDEO = {
     url: "https://cdn.classgrid.in/ai-generated/1-studio.mp4",
@@ -141,16 +148,24 @@ test("a video is sent with its kind and video, never the HTML it was made from; 
     assert.equal(helpers.pageRow({ _id: "p1", title: "old", owner: OWNER._id }, OWNER).kind, "page");
 });
 
-test("a copy of a video is the person's own video, with the same video and the HTML it was made from", async () => {
+test("a copy of a video is the person's own video; the HTML it was made from goes with it only for the owner or an editor", async () => {
     const realCreate = SharePage.create;
     let made;
     SharePage.create = async (doc) => { made = doc; return doc; };
     try {
+        // (Asha opens it by its link: her copy has the video, not the HTML)
         await service.duplicatePage(videoPage({ visibility: "link" }), ASHA);
         assert.deepEqual([made.owner, made.title, made.visibility, made.kind, made.html], [ASHA._id, "Copy of Classgrid Studio Mode", "private", "video", undefined]);
         assert.equal(made.video.url, VIDEO.url);
-        assert.equal(made.video.sourceHtml, VIDEO.sourceHtml);
+        assert.equal(made.video.sourceHtml, "");
         assert.equal(made.video.scenes.length, 2);
+        await service.duplicatePage(videoPage({ visibility: "link", linkRole: "commenter", members: [{ id: "m1", userId: ASHA._id, email: ASHA.email, role: "commenter" }] }), ASHA);
+        assert.equal(made.video.sourceHtml, "");
+        // (an editor's copy and the owner's own copy keep it)
+        await service.duplicatePage(videoPage({ members: [{ id: "m1", userId: ASHA._id, email: ASHA.email, role: "editor" }] }), ASHA);
+        assert.equal(made.video.sourceHtml, VIDEO.sourceHtml);
+        await service.duplicatePage(videoPage(), OWNER);
+        assert.equal(made.video.sourceHtml, VIDEO.sourceHtml);
         await service.duplicatePage(new SharePage({ owner: OWNER._id, title: "Tip", html: "<h1>Tip</h1>" }), ASHA);
         assert.deepEqual(made, { owner: ASHA._id, title: "Copy of Tip", visibility: "private", html: "<h1>Tip</h1>" });
     } finally {
@@ -323,6 +338,126 @@ test("POST /:id/comments on a video takes its time and area, and refuses a wrong
         assert.equal(pushed.length, 1);
     } finally {
         db.restore();
+        SharePage.updateOne = realUpdate;
+    }
+});
+
+// ── 7. after the review (2026-11-27) ─────────────────────────────────────────────────────────────────────────
+
+test("read_page gives a video's HTML to its owner and editors only; others get what the video is, without it", async () => {
+    const asEditor = videoPage({ members: [{ id: "m1", userId: ASHA._id, email: ASHA.email, role: "editor" }] });
+    const asViewer = videoPage({ visibility: "link", linkRole: "commenter" });
+    const db = standIn({ [asEditor._id]: asEditor, [asViewer._id]: asViewer });
+    try {
+        const editor = await service.runReadPage(ASHA, { page_id: String(asEditor._id) });
+        assert.match(editor, /shared with the user: only its owner can make a new version/);
+        assert.ok(editor.endsWith(`HTML it was made from (${VIDEO.sourceHtml.length} characters):\n${VIDEO.sourceHtml}`));
+        const viewer = await service.runReadPage(ASHA, { page_id: String(asViewer._id) });
+        assert.equal(viewer.includes("studio</body>"), false);
+        assert.match(viewer, /^Video "Classgrid Studio Mode" \(version 1, artifactId: [0-9a-f]{24}, 1920x1080, 32s, 30 fps, shared with the user: only its owner can make a new version\)/);
+        assert.match(viewer, /\nScenes: 0:00 Intro \| 0:10 AI Hub\n/);
+        assert.ok(viewer.endsWith("\nThe HTML it was made from is given only to its owner and editors. Only its owner's AI can change this video."));
+        // (asking for a later part changes nothing)
+        assert.equal((await service.runReadPage(ASHA, { page_id: String(asViewer._id), start: 10 })).includes("studio</body>"), false);
+        // (the owner, as before)
+        assert.match(await service.runReadPage(OWNER, { page_id: String(asViewer._id) }), /call make_video with the whole page and artifactId[\s\S]*studio<\/body>/);
+    } finally {
+        db.restore();
+    }
+});
+
+test("the sharing emails and notices of a video say video; a page's and a doc's say what they said", async () => {
+    const realUpdate = SharePage.updateOne;
+    SharePage.updateOne = async () => ({ modifiedCount: 1, matchedCount: 1 });
+    const realSave = SharePage.prototype.save;
+    SharePage.prototype.save = async function () { return this; };
+    try {
+        const v = videoPage();
+        sent.length = 0;
+        const results = await share.inviteMembers(v, { by: OWNER, emails: "ravi@x.in, nikhil@x.in", role: "commenter" });
+        assert.deepEqual(results.map((r) => r.ok || r.error), [true, "This is the video's owner."]);
+        assert.equal(sent[0].subject, 'Nikhil shared a video with you: "Classgrid Studio Mode"');
+        assert.equal(sent[0].heading, "A video was shared with you");
+        assert.match(sent[0].text, /shared the video "Classgrid Studio Mode" with you on Classgrid\. You can open it and comment on it\. Sign in with this email address to open it: https:\/\/chat\.classgrid\.in\/p\/[0-9a-f]{24}$/);
+        assert.match(sent[0].content, /Open the video<\/a>/);
+
+        sent.length = 0;
+        assert.equal(await share.requestAccess(videoPage(), ASHA, "editor"), "pending");
+        assert.equal(sent[0].to, OWNER.email);
+        assert.equal(sent[0].subject, 'Asha asked to share "Classgrid Studio Mode"');
+        assert.equal(sent[0].heading, "Someone asked to share your video");
+        assert.match(sent[0].text, /https:\/\/chat\.classgrid\.in\/p\/[0-9a-f]{24}\?share=requests$/);
+
+        const asked = videoPage({ requests: [{ id: "r1", userId: ASHA._id, email: ASHA.email, name: "Asha", wants: "viewer" }] });
+        sent.length = 0;
+        await share.answerRequest(asked, "r1", { approve: true, by: OWNER });
+        assert.equal(sent[0].heading, "You have access to the video");
+        assert.match(sent[0].text, /^Nikhil let you into the video "Classgrid Studio Mode" on Classgrid\. You can open it\. Open it: https:\/\/chat\.classgrid\.in\/p\//);
+        await assert.rejects(share.setMemberRole(videoPage(), "nobody", "viewer"), /not found on this video/);
+
+        // (a page and a doc are as they were)
+        const page = new SharePage({ owner: OWNER._id, title: "Tip calculator", html: "<h1>Tip</h1>" });
+        sent.length = 0;
+        await share.inviteMembers(page, { by: OWNER, emails: "ravi@x.in", role: "editor" });
+        assert.equal(sent[0].subject, 'Nikhil shared a page with you: "Tip calculator"');
+        assert.match(sent[0].text, /You can open it, comment on it and share it\./);
+        assert.equal(realEmails.docInviteEmail({ docId: "d1", title: "Plan", inviterName: "Nikhil", inviterEmail: OWNER.email, role: "editor" }).heading, "A doc was shared with you");
+        assert.equal(realEmails.sharedLink("doc", "d1"), realEmails.sharedLink(undefined, "d1"));
+        assert.equal(realEmails.sharedLink("video", "v1"), "https://chat.classgrid.in/p/v1");
+    } finally {
+        SharePage.updateOne = realUpdate;
+        SharePage.prototype.save = realSave;
+    }
+});
+
+test("a shorter new version keeps the comments; their times are sent inside the video, and the AI is told which version each was on", async () => {
+    // (written on version 1, 32 s long; the video is now version 2, 20 s long)
+    const v = videoPage({
+        versions: 2,
+        video: { ...VIDEO, seconds: 20 },
+        comments: [
+            { id: "c1", userId: ASHA._id, name: "Asha", email: ASHA.email, text: "Old end", time: 28, timeEnd: 31, version: 1 },
+            { id: "c2", userId: ASHA._id, name: "Asha", email: ASHA.email, text: "Stretch over the end", time: 15, timeEnd: 25, version: 1 },
+            { id: "c3", userId: ASHA._id, name: "Asha", email: ASHA.email, text: "From before versions", time: 5 },
+            { id: "c4", userId: ASHA._id, name: "Asha", email: ASHA.email, text: "On this one", time: 3, version: 2 },
+        ],
+    });
+    const threads = helpers.pageForClient(v, OWNER).comments;
+    assert.deepEqual(threads.map((t) => [t.id, t.time, t.timeEnd]), [["c1", 20, null], ["c2", 15, 20], ["c3", 5, null], ["c4", 3, null]]);
+    assert.deepEqual(service.commentView(v.comments[0], 20).time, 20);
+    assert.deepEqual(helpers.commentPlace({ time: 28, timeEnd: 31 }), { time: 28, timeEnd: 31, area: null }, "(no length given: as written)");
+
+    const db = standIn({ [v._id]: v });
+    const pushed = [];
+    const realUpdate = SharePage.updateOne;
+    SharePage.updateOne = async (filter, update) => { if (update.$push) pushed.push(update.$push.comments); return { modifiedCount: 1, matchedCount: 1 }; };
+    try {
+        const list = await service.runPageComments(OWNER, { page_id: String(v._id), action: "list" });
+        const line = (id) => list.split("\n").find((l) => l.startsWith(`- [${id}]`));
+        assert.match(line("c1"), / at 0:28 \(28s-31s\), written on version 1 \(the video is now version 2\), past the end of the video now \(it is 20s\): Old end$/);
+        assert.match(line("c2"), / at 0:15 \(15s-25s\), written on version 1 \(the video is now version 2\): Stretch over the end$/);
+        assert.match(line("c3"), / at 0:05 \(5s\), written on a version that is not known \(the video is now version 2\): From before versions$/);
+        assert.match(line("c4"), / at 0:03 \(3s\): On this one$/);
+        // (on version 1 every comment is on version 1: nothing is said)
+        const first = videoPage({ comments: [{ id: "c9", userId: ASHA._id, name: "Asha", email: ASHA.email, text: "Hi", time: 2 }] });
+        db.restore();
+        const db2 = standIn({ [first._id]: first });
+        assert.match(await service.runPageComments(OWNER, { page_id: String(first._id), action: "list" }), / at 0:02 \(2s\): Hi$/);
+        db2.restore();
+
+        // a new comment on a video is noted with the version it was written on (from the screens and from the AI)
+        const again = standIn({ [v._id]: v });
+        await call("POST", `/${v._id}/comments`, { body: { text: "Better", time: 4 } });
+        assert.deepEqual([pushed.at(-1).time, pushed.at(-1).version], [4, 2]);
+        await service.runPageComments(OWNER, { page_id: String(v._id), action: "reply", comment_id: "c4", text: "Done" });
+        assert.deepEqual([pushed.at(-1).byAi, pushed.at(-1).version], [true, 2]);
+        again.restore();
+        const page = new SharePage({ owner: OWNER._id, title: "Tip", html: "<h1>Tip</h1>" });
+        const third = standIn({ [page._id]: page });
+        await call("POST", `/${page._id}/comments`, { body: { text: "On a page" } });
+        assert.equal("version" in pushed.at(-1), false, "a page's comments are as before");
+        third.restore();
+    } finally {
         SharePage.updateOne = realUpdate;
     }
 });
