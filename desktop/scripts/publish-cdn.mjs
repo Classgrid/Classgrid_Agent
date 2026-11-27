@@ -5,7 +5,7 @@
 // getting cut off).
 // It takes the installer npm run release put on R2 and checks it against R2's latest.yml (version, size and sha512)
 // before uploading, then checks the CDN link, and only then removes older installers from the CDN (it holds only the
-// current version). R2 keeps its own copies (installed apps update from there).
+// current version, plus the versions in KEEP). R2 keeps its own copies (installed apps update from there).
 // Run on the server: node publish-cdn.mjs <version>                 (keys are read from the server's .env)
 //                    node publish-cdn.mjs <version> --dry-run       (only downloads and checks, uploads nothing)
 import crypto from "node:crypto";
@@ -24,6 +24,11 @@ const { S3Client, PutObjectCommand, HeadObjectCommand, ListObjectsV2Command, Del
 const version = process.argv[2];
 const dryRun = process.argv.includes("--dry-run");
 if (!/^\d+\.\d+\.\d+$/.test(version || "")) { console.error("Usage: node publish-cdn.mjs <version> [--dry-run]"); process.exit(1); }
+
+// Installers whose CDN link was handed to an app store's reviewers: they stay on the CDN after newer releases, so the
+// link the reviewer has keeps working (owner, 2026-11-27: "don't delete, keep old url alive so they can download it").
+// 1.0.63 went into the Zoom Marketplace submission; 1.0.62 was given out earlier the same day.
+const KEEP = new Set(["1.0.62", "1.0.63"]);
 
 const fail = (why) => { console.error(`Not published: ${why}`); process.exit(1); };
 const r2 = process.env.R2_PUBLIC_URL;
@@ -94,10 +99,12 @@ const viaCdn = await fetch(link, { method: "HEAD" });
 if (!viaCdn.ok || Number(viaCdn.headers.get("content-length")) !== size) fail(`the CDN link answered ${viaCdn.status} (${viaCdn.headers.get("content-length")} bytes): ${link}`);
 console.log(`On the CDN: ${link}`);
 
-// The CDN holds only the current version
+// The CDN holds only the current version (and the versions in KEEP)
 const listed = await s3.send(new ListObjectsV2Command({ Bucket, Prefix: "desktop/" }));
 for (const o of listed.Contents || []) {
-  if (o.Key !== Key && /^desktop\/Classgrid-Setup-[\d.]+\.exe$/.test(o.Key)) {
+  const old = /^desktop\/Classgrid-Setup-([\d.]+)\.exe$/.exec(o.Key || "");
+  if (old && KEEP.has(old[1])) { console.log(`Kept ${o.Key} (its link was given to reviewers)`); continue; }
+  if (o.Key !== Key && old) {
     await s3.send(new DeleteObjectCommand({ Bucket, Key: o.Key }));
     console.log(`Removed the older ${o.Key}`);
   }
