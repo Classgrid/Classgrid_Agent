@@ -456,20 +456,18 @@ export function VideoArtifactView({
         </button>
         <h1 className="min-w-0 flex-1 truncate px-1.5 text-[15px] font-semibold" title={page.title}>{page.title}</h1>
         <div className="hidden sm:block"><ReadersRow readers={readers} max={inStudio ? 3 : 4} /></div>
-        {/* Comment: the same as the Comment button under the video (one who can only read opens the list) */}
+        {/* The comments, to read and reply: it opens and closes the list, as Claude's header does. Adding a comment on
+            the video is the Comment button under it (owner, 2026-11-27: the header did the same as the bottom one) */}
         <button
           type="button"
-          onClick={() => {
-            if (canComment) { if (commentMode) stopCommenting(); else setCommentMode(true); }
-            else { setPanelOpen((on) => !on); setActiveId(null); }
-          }}
-          aria-pressed={canComment ? commentMode : panelOpen}
-          title={canComment ? "Comment" : panelOpen ? "Hide comments" : "Show comments"}
-          aria-label={canComment ? "Comment" : panelOpen ? "Hide comments" : "Show comments"}
-          className={cn(barIcon, "relative", (canComment ? commentMode : panelOpen) && COMMENTS_ON)}
+          onClick={() => { setPanelOpen((on) => !on); setActiveId(null); }}
+          aria-pressed={panelOpen}
+          title={panelOpen ? "Hide comments" : "Show comments"}
+          aria-label={panelOpen ? "Hide comments" : "Show comments"}
+          className={cn(barIcon, "relative", panelOpen && COMMENTS_ON)}
         >
-          <MessageCircle className="h-[18px] w-[18px]" fill={(canComment ? commentMode : panelOpen) ? "currentColor" : "none"} />
-          {openCount > 0 && !(canComment ? commentMode : panelOpen) && <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold text-background">{openCount}</span>}
+          <MessageCircle className="h-[18px] w-[18px]" fill={panelOpen ? "currentColor" : "none"} />
+          {openCount > 0 && !panelOpen && <span className="absolute -right-0.5 -top-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-foreground px-1 text-[10px] font-semibold text-background">{openCount}</span>}
         </button>
         <button type="button" onClick={() => onShare("share")} className={cn(barIcon, "relative")} aria-label="Share" title="Share">
           <Share className="h-[18px] w-[18px]" />
