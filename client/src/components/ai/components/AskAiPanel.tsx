@@ -250,6 +250,7 @@ import { usePlanOverview } from "@/features/shared/queries/usePlanOverview";
 const DEFAULT_FILES_PER_MESSAGE = 6;
 import { fetchWithRescue } from "@/lib/rescue";
 import { commandStarted, commandEnded } from "@/lib/runningCommands";
+import { touchChat } from "@/lib/chatOrder";
 import { waitedMessages, partsAtUserNotes, plainFollowUp, sayToAnswer, useFollowUpMode, USER_NOTE_TOOL, type NoteFile, type SentNote } from "@/lib/followUps";
 import { ANSWER_FEEDBACK_ASK, ANSWER_FEEDBACK_SET, closeReading, getReading, startReading, useReadingOf, useReadingOn } from "../reading";
 import { ReadingBar } from "./ReadingBar";
@@ -5098,6 +5099,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       const old = runningRepliesRef.current.get(replySession);
       if (old && old.gen !== myGen) old.controller.abort(); // a reply the app let go of, still running for this chat
       runningRepliesRef.current.set(replySession, { controller, gen: myGen });
+      // (the chat goes to the top of the list at once; a new chat is added there by session_info)
+      if (!isIncognito) touchChat(replySession);
     }
 
     // --- INTERCEPT @Create image ---
@@ -5927,6 +5930,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       if (replySession && runningRepliesRef.current.get(replySession)?.controller === controller) runningRepliesRef.current.delete(replySession);
       // Desktop app: keep the finished chat on this computer (a moment later, so the server has saved the answer)
       const finishedChat = keepChatId;
+      touchChat(finishedChat); // (its answer landed: the chat is the newest in the list)
       if (finishedChat && keepsChatCopies()) window.setTimeout(() => { void syncChatCopy(finishedChat); }, 1500);
       if (keepsChatCopies()) window.setTimeout(() => { void syncComputerMemory(session?.user); }, 2500);
       if (!isStale() && !superseded()) setSubmitting(false);

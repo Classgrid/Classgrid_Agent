@@ -77,6 +77,7 @@ import {
     triggerMemoryAgent
 } from "../services/ai-chat.service.js";
 import { getHistory, getHistoryCount, appendToHistory, invalidateHistoryCache, getChatTranscript } from "../services/ai-chat-history.service.js";
+import { byLastActivity } from "../utils/chat-order.js";
 import { canAccessSession, gridLabelMap, gridProfilesText, getSharedSessionsFor, leaveSharedChat, sharedChatIdsFor } from "../services/ai-chat-grid.service.js";
 import { editorContextFor, rememberProjectSnapshot, sandboxDataDir, startCheckpoint, finishCheckpoint, linkChatToProject, forgetChatScreenProject, touchStudio, pcChatIds, masteroAutoPush, pullMastero, CLOUD_COPY_PROJECT_TOOLS } from "../services/ide-project.service.js";
 // Cloudflare Workers AI daily Neuron cap and meter (Global AI Config): every Cloudflare request goes through cfAiFetch
@@ -8599,15 +8600,14 @@ export const getChatSessions = async (req, res) => {
         }
         if (!project) {
             const shared = await getSharedSessionsFor(email).catch(() => []);
-            if (shared.length) sessions = [...shared, ...(sessions || [])].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+            if (shared.length) sessions = [...shared, ...(sessions || [])]; // (ordered below with the rest)
         }
         // Archived chats are left out of the list; ?archived=1 lists only them
         const archivedIds = new Set(me?.archived_chat_ids || []);
-        // Studio: when each chat last had a message (for "Last updated" and unread chats)
-        if (req.query?.studio === "1") {
-            const touched = await redis.hgetall(CHAT_TOUCHED(email)).catch(() => null) || {};
-            sessions = (sessions || []).map((s) => ({ ...s, updated_at: touched[s.id] ? new Date(Number(touched[s.id])).toISOString() : s.created_at }));
-        }
+        // Every list: when each chat last had a message (updated_at, for Studio's "Last updated" and unread chats too),
+        // newest activity first, so an old chat that gets a message goes to the top (owner, 2026-11-27)
+        const touched = await redis.hgetall(CHAT_TOUCHED(email)).catch(() => null) || {};
+        sessions = byLastActivity(sessions, touched);
         sessions = (sessions || []).filter((s) => (req.query?.archived === "1" ? archivedIds.has(s.id) : !archivedIds.has(s.id)));
         // Share Grid: mark chats shared with 2+ people (a star in the chat list)
         const gridIds = await sharedChatIdsFor(email).catch(() => new Set());

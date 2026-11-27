@@ -42,6 +42,7 @@ import { fetchWithRescue } from "@/lib/rescue";
 import { desktopUserId } from "@/lib/desktopPageCache";
 import { OFFLINE_CHAT_NOTE, isUnreachable, keepsChatCopies, listChatCopies, listOtherChatCopies, removeChatCopy, type OtherAccountChats } from "@/lib/desktopChats";
 import { getSocket } from "@/lib/socketClient";
+import { CHAT_TOUCHED_EVENT, byActivity, chatActivity, touchInList } from "@/lib/chatOrder";
 import { cn } from "@/lib/utils";
 import { GroupDialog, groupIcon, groupsApi, openProjectId, useChatGroups, type ChatGroup } from "./chat-groups/chatGroups";
 import { NewProjectDialog, openStudioProject, openLocalFolder } from "@/features/superadmin/components/StudioProjectPicker";
@@ -74,7 +75,7 @@ interface ChatSession {
   pinned?: boolean;
   ended?: boolean;
   project_id?: string; // Studio: the project this chat belongs to
-  updated_at?: string; // Studio: when the chat last had a message
+  updated_at?: string; // when the chat last had a message (the list is ordered by it)
 }
 
 // Studio's list options (the Display Options menu next to "Projects"), kept on this device
@@ -258,6 +259,17 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     const socket = getSocket();
     socket?.on("ai:session_title", handleTitle);
 
+    // A message sent or an answer landing in a chat moves it to the top of the list at once (owner, 2026-11-27): this
+    // window's chat (lib/chatOrder.ts touchChat), a woken or scheduled answer in any chat (chat:woke), and a shared
+    // chat's new message while it is open (aigrid:update)
+    const touch = (id?: string) => { if (id) setSessions((prev) => touchInList(prev, String(id))); };
+    const handleTouched = (e: Event) => touch((e as CustomEvent<{ sessionId?: string }>).detail?.sessionId);
+    const handleWoke = (d: { sessionId?: string; phase?: string }) => { if (d?.phase === "start" || d?.phase === "end") touch(d.sessionId); };
+    const handleGrid = (d: { sessionId?: string; kind?: string }) => { if (d?.kind === "messages" || d?.kind === "reply_start") touch(d.sessionId); };
+    socket?.on("chat:woke", handleWoke);
+    socket?.on("aigrid:update", handleGrid);
+    window.addEventListener(CHAT_TOUCHED_EVENT, handleTouched);
+
     // Another screen changed a chat (Studio's chat menu: rename, archive, bring back): shown here at once, before the
     // server answers ({ id, updates } changes it, { id, remove } takes it out, { session } adds it back)
     const handlePatch = (e: any) => {
@@ -273,6 +285,9 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     if (keepsChatCopies()) window.addEventListener("online", handleRefresh);
     return () => {
       socket?.off("ai:session_title", handleTitle);
+      socket?.off("chat:woke", handleWoke);
+      socket?.off("aigrid:update", handleGrid);
+      window.removeEventListener(CHAT_TOUCHED_EVENT, handleTouched);
       window.removeEventListener("agent:session-patch", handlePatch);
       window.removeEventListener("agent:refresh-sessions", handleRefresh);
       window.removeEventListener("agent:session-created", handleCreated);
@@ -556,7 +571,8 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     if ((projects || []).some((p) => p.id === s.project_id)) return false;
     return savedProject(s.project_id)?.location === "local";
   };
-  const filteredSessions = sessions.filter(s => !hiddenChat(s) && s.title.toLowerCase().includes(searchQuery.toLowerCase()));
+  // (newest activity first: a chat that just had a message is at the top; pinned ones stay in their own list above)
+  const filteredSessions = byActivity(sessions.filter(s => !hiddenChat(s) && s.title.toLowerCase().includes(searchQuery.toLowerCase())));
   const pinnedSessions = filteredSessions.filter(s => s.pinned);
   const unpinnedSessions = filteredSessions.filter(s => !s.pinned && !groupedIds.has(s.id));
 
@@ -578,8 +594,10 @@ export function AgentNestedMenu({ searchQuery = "", pages }: { searchQuery?: str
     });
   }, [unpinnedSessions, dateFilter]);
 
-  const todaySessions = filteredUnpinnedSessions.filter(s => isToday(s.created_at));
-  const previousSessions = filteredUnpinnedSessions.filter(s => !isToday(s.created_at));
+  // (by last activity: an old chat that had a message today is with today's chats, at the top)
+  const activeToday = (s: ChatSession) => isToday(new Date(chatActivity(s)).toISOString());
+  const todaySessions = filteredUnpinnedSessions.filter(activeToday);
+  const previousSessions = filteredUnpinnedSessions.filter(s => !activeToday(s));
   // Long histories: render the latest chats first and the rest on request, so opening the sidebar stays fast.
   const PREVIOUS_PAGE = 30;
   const [showAllPrevious, setShowAllPrevious] = React.useState(false);
