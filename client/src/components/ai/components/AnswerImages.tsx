@@ -13,15 +13,7 @@
 import { useMemo, useState } from "react";
 import { DocsImageViewer, type DocsViewerImage } from "./DocsImageViewer";
 import { SourceChip, takeCitations, type ChatSource } from "./SourceChip";
-
-function hostOf(url: string) {
-  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; }
-}
-
-function viewerImage(id: string, src: string, alt: string): DocsViewerImage {
-  const host = hostOf(src);
-  return { id, src, alt, ...(host ? { sourceUrl: `https://${host}`, sourceLabel: host } : {}) };
-}
+import { viewerImage } from "./viewerImage";
 
 /** An image the AI put in its answer (markdown ![alt](url)): rounded thumbnail, opens the full-screen viewer. */
 export function AnswerImage({ src, alt }: { src?: string; alt?: string }) {

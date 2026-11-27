@@ -11,6 +11,9 @@
  * ─────────────────────────────────────────────────────────
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent as ReactMouseEvent } from "react";
+import { DocsImageViewer, type DocsViewerImage } from "./DocsImageViewer";
+import { viewerImage } from "./viewerImage";
 
 // ```widget: a small interactive card the AI writes itself (HTML + CSS + JS), for anything no built-in block covers
 // (polls, sliders, matching, ordering, reveal cards, mini quizzes, calculators...).
@@ -19,10 +22,16 @@ import { useEffect, useMemo, useRef, useState } from "react";
 // The frame loads once and draws LIVE while the AI is still writing (like ChatGPT): every new piece of code is
 // posted in, styles and HTML show at once, and the scripts run when the block is complete. Messages back:
 //   classgrid.ask("text")  → sends that text as the user's next message (only from a click inside the card)
+//   classgrid.openImage(url, title) → opens that picture in the chat's own image viewer (the one an answer's
+//     pictures open in). A click on a plain <img> in the card does the same by itself, unless the picture is part
+//     of a link, a button or anything else the card made clickable.
 //   automatic height updates so the card fits its content.
 
 const MIN_HEIGHT = 40;
 const MAX_HEIGHT = 2400;
+// A picture the card hands to the viewer: its address at most this long (an inline data: picture can be big)
+const MAX_PICTURE_URL = 8_000_000;
+const NO_PICTURES: DocsViewerImage[] = [];
 
 // Watchable drawing: fast models (e.g. Claude) send a whole card at once, so its code is fed into the frame at a
 // steady pace (a card takes ~2-3 s to draw). Slower models are never held back: when the AI writes slower than
@@ -46,7 +55,16 @@ function themeVars(dark: boolean) {
 // Runs inside the iframe (serialized with toString, so it must not use anything from this module)
 function frameMain(ID: string) {
   const post = (m: Record<string, unknown>) => parent.postMessage(Object.assign({ cgWidget: ID }, m), "*");
-  (window as any).classgrid = { ask: (t: unknown) => post({ type: "ask", text: String(t || "") }) };
+  // A picture address the app's viewer shows: https, or a picture written into the card itself
+  const pictureUrl = (u: unknown) => {
+    const s = String(u || "");
+    return /^https:\/\//i.test(s) || /^data:image\//i.test(s) ? s : "";
+  };
+  const openImage = (u: unknown, t?: unknown) => {
+    const url = pictureUrl(u);
+    if (url) post({ type: "image", url: url, alt: String(t || "").slice(0, 300) });
+  };
+  (window as any).classgrid = { ask: (t: unknown) => post({ type: "ask", text: String(t || "") }), openImage: openImage };
 
   const size = () => {
     const b = document.body;
@@ -97,6 +115,40 @@ function frameMain(ID: string) {
     size();
   };
 
+  // ── A picture in the card opens in the app's image viewer ──
+  // Elements the card's own script made clickable are remembered, so a picture inside one keeps the card's behaviour
+  type Marked = Element & { __cgClick?: boolean; onclick?: unknown };
+  const elAdd = Element.prototype.addEventListener;
+  Element.prototype.addEventListener = function (this: Element, type: string, fn: Parameters<typeof elAdd>[1], opts?: Parameters<typeof elAdd>[2]) {
+    if (ran && /^(click|mousedown|mouseup|pointerdown|pointerup|touchstart|touchend)$/.test(type)) (this as Marked).__cgClick = true;
+    return elAdd.call(this, type, fn, opts);
+  };
+  // The picture a click would open: a real picture (not a small icon, not a broken one) that is not part of a link,
+  // a button, a form control or anything the card gave a click of its own
+  const zoomable = (el: Element | null): HTMLImageElement | null => {
+    if (!el || el.tagName !== "IMG") return null;
+    const img = el as HTMLImageElement;
+    if (!pictureUrl(img.currentSrc || img.src)) return null;
+    if (img.naturalWidth < 64 && img.naturalHeight < 64) return null;
+    for (let at: Element | null = img; at && at !== root && at !== document.body; at = at.parentElement) {
+      if (/^(A|BUTTON|LABEL|SUMMARY|SELECT|INPUT|TEXTAREA)$/.test(at.tagName)) return null;
+      if ((at as Marked).onclick || at.hasAttribute("onclick") || (at as Marked).__cgClick || at.getAttribute("role") === "button") return null;
+    }
+    return img;
+  };
+  docAdd("click", (e: Event) => {
+    if (e.defaultPrevented) return;
+    const img = zoomable(e.target as Element | null);
+    if (img) openImage(img.currentSrc || img.src, img.alt || img.title);
+  });
+  // The zoom cursor only on a picture a click really opens (the shell's CSS draws it for img[data-cg-zoom])
+  docAdd("mouseover", (e: Event) => {
+    const el = e.target as Element | null;
+    if (!el || el.tagName !== "IMG") return;
+    if (zoomable(el)) el.setAttribute("data-cg-zoom", "");
+    else el.removeAttribute("data-cg-zoom");
+  });
+
   winAdd("message", (e: MessageEvent) => {
     const m = e.data;
     if (e.source !== parent || !m || m.cgWidget !== ID || m.type !== "code") return;
@@ -117,6 +169,7 @@ function buildShell(id: string, dark: boolean) {
 html,body{margin:0;padding:0;}body{display:flow-root;background:transparent;color:var(--cg-text);font:16px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overflow:hidden}
 button{font:inherit;color:inherit;cursor:pointer}
 img{max-width:100%}
+img[data-cg-zoom]{cursor:zoom-in}
 </style></head><body><div id="cg-root"></div>
 <script>(${frameMain.toString()})(${JSON.stringify(id)});</script></body></html>`;
 }
@@ -192,6 +245,9 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
   latest.current = { code, done };
   const ready = useRef(false);
   const lastAsk = useRef(0);
+  // The image viewer's "open" (DocsImageViewer hands it to its thumbnails), for a picture clicked inside the card
+  const openPicture = useRef<((img: DocsViewerImage, event?: ReactMouseEvent) => void) | null>(null);
+  const lastPicture = useRef(0);
 
   const send = () => {
     const win = frameRef.current?.contentWindow;
@@ -233,6 +289,17 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
         if (document.activeElement !== frame || now - lastAsk.current < 1500) return;
         lastAsk.current = now;
         onAskRef.current?.(msg.text.trim().slice(0, 1000));
+      } else if (msg.type === "image" && typeof msg.url === "string") {
+        // A picture clicked in the card opens in the chat's image viewer. As with ask, only from a real click inside
+        // the card (the iframe has focus), and only an https picture or one written into the card.
+        const now = Date.now();
+        const url: string = msg.url;
+        if (document.activeElement !== frame || now - lastPicture.current < 500) return;
+        if (url.length > MAX_PICTURE_URL || !(/^https:\/\//i.test(url) || /^data:image\//i.test(url))) return;
+        lastPicture.current = now;
+        const alt = typeof msg.alt === "string" ? msg.alt.slice(0, 300) : "";
+        // The viewer grows out of the card (it takes its starting point from the element it is given)
+        openPicture.current?.(viewerImage(`card-image-${now}`, url, alt), { currentTarget: frame } as unknown as ReactMouseEvent);
       }
     };
     window.addEventListener("message", onMessage);
@@ -241,6 +308,11 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
   }, [id]);
 
   return (
+    <DocsImageViewer
+      images={NO_PICTURES}
+      renderThumbnails={(_images, open) => {
+        openPicture.current = open;
+        return (
     <div className="my-4">
       <iframe
         ref={frameRef}
@@ -267,5 +339,8 @@ export function WidgetBlock({ code: fullCode, done: fullDone, onAsk }: { code: s
         </div>
       )}
     </div>
+        );
+      }}
+    />
   );
 }
