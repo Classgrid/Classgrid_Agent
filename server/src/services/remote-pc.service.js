@@ -36,7 +36,7 @@ const PERMISSION_MODES = new Set(["review", "default", "auto", "turbo"]);
 // step with what it read, wrote and ran, helpers, the plan, the web pages it cited, questions, pictures, the end).
 // Only what drives the computer's own loop (turn_info, round_end, tool_done, pc_tool_call, local_loop) stays there.
 const LIVE_TYPES = new Set([
-    "token", "thought", "status", "tool_start", "tool_result", "generated_image", "answer", "error",
+    "token", "thought", "status", "tool_start", "tool_result", "tool_stage", "generated_image", "answer", "error",
     "permission_request", "permission_resolved", "helper_progress", "plan_step_update", "chat_ended", "limit_ended",
     "sources", "checkpoint", "file_update", "title_updated",
 ]);
@@ -315,7 +315,7 @@ async function runFromPhone(user, row, question, { permissionMode, selectedModel
             localCheckpoint: String(Date.now()),
         }, stop.signal, (data) => {
             mirrorRemoteEvent(userId, sessionId, data);
-            if (["token", "thought", "tool_start", "tool_result", "status"].includes(data?.type)) {
+            if (["token", "thought", "tool_start", "tool_result", "tool_stage", "status"].includes(data?.type)) {
                 const event = data.type === "tool_result" ? { ...data, result: String(data.result ?? "").slice(0, 4000) } : data;
                 emit(userId, "chat:woke-live", { sessionId, event });
             }

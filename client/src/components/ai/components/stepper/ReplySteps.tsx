@@ -40,6 +40,7 @@ import { DocumentGenerationView } from "./DocumentGenerationView";
 import { KnowledgeBaseSearchView } from "./KnowledgeBaseSearchView";
 import { CdnUploadView } from "./CdnUploadView";
 import { PublishedPageStep } from "./PublishedPageStep";
+import { MakeVideoStep } from "./MakeVideoStep";
 import { PeerMessageLine, HelperMessageLine, AgentMessageLine, stepMessagesOf, PROJECT_EXPLORE_TOOLS, PROJECT_EDIT_TOOLS, PROJECT_BACKGROUND_TOOLS, ProjectExploreGroup, ProjectEditStep, ProjectPushStep, ProjectHelpersStep, CheckHelpersStep, checkHelpersReports, ComputerStep, TerminalStep, ProjectRunChanges } from "./ProjectToolSteps";
 import type { AgentStep } from "../AskAiPanel";
 
@@ -210,6 +211,11 @@ export function ReplySteps({ thought, steps, live, thinking, workedMs, shineStep
         }
         if (step.tool === 'publish_page') {
           elements.push(<PublishedPageStep key={step.id} step={step} />);
+          return;
+        }
+        // A video being made: its row opens to every stage of the work, listed as it happens
+        if (step.tool === 'make_video') {
+          elements.push(<MakeVideoStep key={step.id} step={step} />);
           return;
         }
         if (step.tool === 'run_project_helpers') {

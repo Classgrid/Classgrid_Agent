@@ -99,6 +99,7 @@ import { PLAY_SONG_TOOL, songTools, runPlaySong, runDownloadSong } from "../serv
 import { localProjectFor, callLocal, callRunner, readLocalFile, runOnComputer, useComputer, COMPUTER_TERMINAL_TOOLS, COMPUTER_FILE_TOOLS, LOCAL_TOOLS, chatWorktree, setChatWorktree, inChatWorktree } from "../services/local-runner.service.js";
 import { projectForChat } from "../services/ide-project.service.js";
 import { helperScope } from "../utils/step-scope.js";
+import { withStages, putStage, stageRun, stepIds } from "../utils/tool-stages.js";
 import { sharedHelperTools, loadHelperGroups, groupsWithRules } from "../services/helper-tools.js";
 import { speakerGenderNote } from "../services/voice-choices.js";
 import { takeNotes } from "../utils/helper-notes.js";
@@ -3918,27 +3919,40 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
         // Shows a tool's step in the chat (the terminal box, file steps...) while it runs and with its result. A helper
         // calling the same handler passes { fromHelper: true }: its steps show under the helper, not as the main AI's.
         const stepWrapped = new WeakMap(); // a shown handler -> the handler it wraps
+        const newStepId = stepIds(); // (each step its own id: a tool's stages name their step by it)
         const showStep = (toolName, handler) => {
             const shown = async (args, ...rest) => {
                 // Thought and plan-progress calls are not shown as tool steps in the chat, and neither are the online memory
                 // notes (owner, 2026-11-18: "saving a note happens silently in the background, no step, so it looks
                 // professional")
                 const silentTool = toolName === 'internal_thought_process' || toolName === 'update_plan_step' || SILENT_NOTE_TOOLS.has(toolName) || rest[0]?.fromHelper === true;
+                let ownStep = null;
                 if (!silentTool) {
-                    accSteps.push({
-                        id: Date.now().toString(),
+                    ownStep = {
+                        id: newStepId(),
                         type: 'tool',
                         tool: toolName,
                         title: args?.title || 'Thinking',
                         details: args?.details || '',
                         args: args,
                         status: 'loading'
-                    });
-                    try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_start", tool: toolName, args })}\n\n`); } catch (e) { }
+                    };
+                    accSteps.push(ownStep);
+                    // (id: the step's own id, which the stages of a long tool name it by; an app from before ignores it)
+                    try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_start", tool: toolName, args, id: ownStep.id })}\n\n`); } catch (e) { }
                     playground("tool", { who: "Agent", tool: toolName, detail: JSON.stringify(args ?? {}).slice(0, 200) });
                 }
+                // A long tool's stages (utils/tool-stages.js; make_video: preparing, recording, joining, uploading...):
+                // each one is kept on this step, so it is saved with the answer, and goes to the chat as it happens.
+                // A helper's step keeps the place its helper gave it (its stages go to the helper's own step).
+                const stageOfStep = (stage) => {
+                    if (!Array.isArray(ownStep.stages)) ownStep.stages = [];
+                    const kept = putStage(ownStep.stages, stage);
+                    if (!kept) return;
+                    try { if (!res.writableEnded) res.write(`data: ${JSON.stringify({ type: "tool_stage", tool: toolName, call: ownStep.id, stage: kept })}\n\n`); } catch (e) { }
+                };
                 let resultStr;
-                try { resultStr = await handler(args, ...rest); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
+                try { resultStr = ownStep ? await withStages(stageOfStep, () => handler(args, ...rest)) : await handler(args, ...rest); } catch (err) { resultStr = "Error: " + (err.message || String(err)); }
                 // What this chat's helpers wrote to the main AI meanwhile comes with the step's result, at once
                 // (utils/helper-notes.js). Not with a helper's own step, and not where the result is more than text.
                 if (rest[0]?.fromHelper !== true && typeof resultStr === "string") {
@@ -4895,7 +4909,10 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                     const step = helperStep(h, id, n, a);
                                     playground("tool", { who: `Helper ${h.no}`, tool: n, detail: JSON.stringify(a ?? {}).slice(0, 200) });
                                     let out;
-                                    try { out = await llmConfig.toolHandlers[n](a, { fromHelper: true }); } catch (e) { out = `Error: ${e?.message || e}`; }
+                                    // (a long tool's stages are kept on this step of the helper, which the Agent map
+                                    // shows: utils/tool-stages.js)
+                                    const stageOfStep = (stage) => { if (!Array.isArray(step.stages)) step.stages = []; putStage(step.stages, stage); };
+                                    try { out = await withStages(stageOfStep, () => llmConfig.toolHandlers[n](a, { fromHelper: true })); } catch (e) { out = `Error: ${e?.message || e}`; }
                                     emitHelper({ helper: i, id, result: shownStepResult(out, 6000) });
                                     helperStepDone(step, out);
                                     return withInbox(out);
@@ -5071,7 +5088,9 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             // (started again: the same record on the board goes on, with a new model or edit right only when given)
                             const h = s.old ? Object.assign(reviveHelper(s.old, { said: s.said }), { restartedBy: liveMeter, ...(s.model ? { model: pickModel(s.model, i), askedModel: s.model } : {}), ...(s.canEditGiven ? { canEdit: s.canEdit } : {}) }) : { startedAt: Date.now(), steps: [], thought: "", live: "", no: board.nextNo++, quiet: args?._quiet === true, task: s.task, title: s.title || "", canEdit: s.canEdit, type: s.type, role: s.role, worktree: s.worktree && s.canEdit && !s.browser, withChat: s.withChat, model: pickModel(s.model, i), askedModel: s.model, state: "running", report: "", reportTaken: false, inbox: [], jobsDone: [], notes: [], notesRead: 0, changes: new Map(), abort: new AbortController() };
                             // (everything the helper does is marked as a helper's: utils/step-scope.js)
-                            h.promise = helperScope.run({ helper: h.no }, () => runHelper(h, i)).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
+                            // (withStages(null): a helper's tools never report their stages into the main AI's
+                            // run_project_helpers step, inside which the helper was started)
+                            h.promise = withStages(null, () => helperScope.run({ helper: h.no }, () => runHelper(h, i))).catch((e) => ({ state: "failed", text: String(e?.message || e) })).then((out) => {
                                 h.state = out.state;
                                 h.endedAt = Date.now();
                                 // (only the main AI is told how to start it again; not when the user stopped the helpers)
@@ -5590,35 +5609,49 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                         }
                     },
                     make_video: async (args) => {
+                        // Every stage of the work is a row of this step in the chat, as it happens (utils/tool-stages.js;
+                        // the words are VIDEO_STAGES in video-render.service.js). A stage that fails shows the reason; what
+                        // the model is told below is the same as before.
+                        let stages = null;
                         try {
-                            const { renderVideo, uploadToCdn } = await import('../services/video-render.service.js');
+                            const { renderVideo, uploadToCdn, VIDEO_STAGES } = await import('../services/video-render.service.js');
+                            stages = stageRun(VIDEO_STAGES);
                             const name = `${String(args?.fileName || "video").replace(/\.mp4$/i, "").replace(/[^\w-]+/g, "-").slice(0, 60) || "video"}.mp4`;
-                            const video = await renderVideo(args || {});
+                            const video = await renderVideo(args || {}, stages);
+                            stages.start("upload");
                             const { key, url } = await uploadToCdn(video.mp4, name, "video/mp4");
+                            stages.done();
                             // (whose they are, so Delete Account can find them: the video, also when no Library
                             // record is made, and each still frame, which never has one)
                             rememberStoredFile({ userId: req.user?._id, store: "s3", key, kind: "video" });
                             const stills = [];
-                            for (const c of video.checks) {
+                            for (const [i, c] of video.checks.entries()) {
+                                // (each still frame is its own row, with its picture once it is uploaded)
+                                stages.start(`still-${i}`, { note: `at ${c.at}s` });
                                 const frame = await uploadToCdn(c.jpg, `frame-${c.at}s.jpg`, "image/jpeg");
                                 rememberStoredFile({ userId: req.user?._id, store: "s3", key: frame.key, kind: "video-frame" });
                                 stills.push(`${c.at}s: ${frame.url}`);
+                                stages.done({ note: `at ${c.at}s`, image: frame.url });
                             }
                             const libraryRoom = await libraryRoomFor(req.user, video.mp4.length).catch(() => ({ ok: true }));
                             if (libraryRoom.ok) try {
+                                stages.start("library");
                                 const AiLibraryFile = (await import('../models/AiLibraryFile.js')).default;
                                 await AiLibraryFile.create({
                                     user_email: req.user?.email || '', user_id: req.user?._id || null, organization_id: req.user?.organization_id || null,
                                     original_name: name, file_key: key, cdn_url: url, mime_type: "video/mp4", file_type: "video",
                                     size_bytes: video.mp4.length, source: "generated",
                                 });
+                                stages.done();
                                 if (req.user?._id) (await import('../services/socket.service.js')).getIO().to(req.user._id.toString()).emit("ai_library_updated");
                             } catch (libErr) {
+                                stages.fail(libErr.message);
                                 console.error("[make_video] Couldn't add the video to the AI Library:", libErr.message);
                             }
                             const { width, height, seconds, fps } = video.cfg;
                             return `SUCCESS: ${name} is ready (${width}x${height}, ${seconds}s, ${fps} fps, ${(video.mp4.length / 1048576).toFixed(1)} MB). Video link: ${url}\nPut this link in your reply; it plays in the chat.\nStill frames: ${stills.join("  ")}${video.errors.length ? `\nProblems on the page: ${video.errors.join(" | ")}` : ""}\nIf you can see the frames, check them: if text overlaps, is cut off, or something is missing, fix the HTML and call make_video again.`;
                         } catch (e) {
+                            stages?.fail(e.message);
                             return `FAILED to make the video: ${e.message}`;
                         }
                     },

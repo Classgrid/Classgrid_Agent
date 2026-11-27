@@ -48,23 +48,56 @@ function appAction(tool: string, args: any): string | null {
   return `${APP_NAMES[tool]}${args?.operation ? ` · ${humanizeKey(String(args.operation))}` : ''}`;
 }
 
+/** True when a step has something to open: what was asked, or what came back */
+export function hasToolDetail(args: any, result: unknown) {
+  return (result !== undefined && result !== null && result !== '') || !!requestFields(args);
+}
+
+/**
+ * The grey box a step opens to: what was asked (Request) and what came back (Response), as plain label / value rows.
+ * Its own component so a step with its own view (MakeVideoStep) opens to the same box.
+ */
+export function ToolDetailBox({ tool, args, result }: { tool: string; args?: any; result?: unknown }) {
+  const fromApp = appAction(tool, args);
+  const body = useMemo(() => {
+    // The screenshot is shown as a picture above, not as its data
+    const shown = result && typeof result === 'object' && (result as any).images ? { ...(result as any), images: undefined } : result;
+    return { request: requestFields(args), parsed: parseResult(shown) };
+  }, [args, result]);
+  return (
+    <div className="flex flex-col gap-3 rounded-lg bg-[#f1f1ef] dark:bg-[#222222] px-3 py-2.5 max-h-[460px] overflow-y-auto [scrollbar-width:thin]">
+      {fromApp && <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">{fromApp}</span>}
+      {body.request && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">Request</span>
+          <PlainData data={body.request} />
+        </div>
+      )}
+      {(body.parsed.data !== undefined || body.parsed.text) && (
+        <div className="flex flex-col gap-1">
+          <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">Response</span>
+          <ResponseBoundary fallback={<PlainText text={maskSecretsInText(typeof result === 'string' ? result : JSON.stringify(result ?? ''))} />}>
+            {body.parsed.data !== undefined ? (
+              <>
+                {body.parsed.text && <PlainText text={body.parsed.text} />}
+                <PlainData data={body.parsed.data} />
+              </>
+            ) : <PlainText text={body.parsed.text} />}
+          </ResponseBoundary>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function ToolResultStep({ tool, args, result, status, text, defaultOpen = false }: ToolResultStepProps) {
   const [cardOpen, setCardOpen] = useState(defaultOpen);
-  const detailOpen = cardOpen;
   const hasResult = result !== undefined && result !== null && result !== '';
-  const canOpen = status !== 'loading' && (hasResult || !!requestFields(args));
-  const fromApp = appAction(tool, args);
+  const canOpen = status !== 'loading' && hasToolDetail(args, result);
   // The JavaScript the agent runs in the page, shown under its step like a command (browser_run_js)
   const code = tool === 'browser_run_js' && typeof args?.code === 'string' && args.code.trim() ? args.code.trim() : null;
   // The message this AI sent to another Classgrid session, shown whole under its step (the person reads what was sent)
   const sentMessage = tool === 'message_classgrid_session' && typeof args?.text === 'string' && args.text.trim() ? args.text.trim() : null;
-
-  const body = useMemo(() => {
-    if (!detailOpen) return null;
-    // The screenshot is shown as a picture above, not as its data
-    const shown = result && typeof result === 'object' && (result as any).images ? { ...(result as any), images: undefined } : result;
-    return { request: requestFields(args), parsed: parseResult(shown) };
-  }, [detailOpen, args, result]);
 
   return (
     <div className="relative z-10 flex flex-col">
@@ -103,30 +136,7 @@ export function ToolResultStep({ tool, args, result, status, text, defaultOpen =
 
       {cardOpen && canOpen && (
         <div className="ml-10 mr-2 mb-2 mt-0.5">
-          {detailOpen && body && (
-            <div className="flex flex-col gap-3 rounded-lg bg-[#f1f1ef] dark:bg-[#222222] px-3 py-2.5 max-h-[460px] overflow-y-auto [scrollbar-width:thin]">
-              {fromApp && <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">{fromApp}</span>}
-              {body.request && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">Request</span>
-                  <PlainData data={body.request} />
-                </div>
-              )}
-              {(body.parsed.data !== undefined || body.parsed.text) && (
-                <div className="flex flex-col gap-1">
-                  <span className="text-[13px] text-slate-600 dark:text-[#a9a9a9]">Response</span>
-                  <ResponseBoundary fallback={<PlainText text={maskSecretsInText(typeof result === 'string' ? result : JSON.stringify(result ?? ''))} />}>
-                    {body.parsed.data !== undefined ? (
-                      <>
-                        {body.parsed.text && <PlainText text={body.parsed.text} />}
-                        <PlainData data={body.parsed.data} />
-                      </>
-                    ) : <PlainText text={body.parsed.text} />}
-                  </ResponseBoundary>
-                </div>
-              )}
-            </div>
-          )}
+          <ToolDetailBox tool={tool} args={args} result={result} />
         </div>
       )}
     </div>

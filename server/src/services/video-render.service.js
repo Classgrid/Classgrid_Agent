@@ -14,6 +14,66 @@ import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 
 export const VIDEO_LIMITS = { maxSeconds: 120, maxFps: 60, maxSide: 1920 };
 
+// The stages of making a video, in the order they happen, with the words the chat's step list shows for each
+// (utils/tool-stages.js: the same words on the website, in the desktop app and on the phone). Each is a real part of
+// the work below and in the make_video handler (ai-chat.controller.js); a stage is reported when it starts and when
+// it ends, and "record" also while it runs (the frame it is at).
+//   prepare  the page and the recorder are written to their own folder on the sandbox host and the sandbox starts
+//   open     Chromium starts in the sandbox and loads the page (its fonts too)
+//   record   every frame is drawn and photographed
+//   join     ffmpeg finishes joining the frames into the MP4
+//   fetch    the MP4 and the still frames are brought from the sandbox to this server
+//   upload   the MP4 goes to the CDN
+//   still    one still frame goes to the CDN (still-0, still-1, still-2: each its own row, with its picture)
+//   library  the video is added to the person's Library
+export const VIDEO_STAGES = {
+    prepare: { running: "Preparing the page", done: "Prepared the page", failed: "Couldn't prepare the page" },
+    open: { running: "Opening the page", done: "Opened the page", failed: "Couldn't open the page" },
+    record: { running: "Recording the frames", done: "Recorded the frames", failed: "Couldn't record the frames" },
+    join: { running: "Joining the frames", done: "Joined the frames into a video", failed: "Couldn't join the frames" },
+    fetch: { running: "Getting the video", done: "Got the video", failed: "Couldn't get the video" },
+    upload: { running: "Uploading the video", done: "Uploaded the video", failed: "Couldn't upload the video" },
+    still: { running: "Saving a still frame", done: "Saved a still frame", failed: "Couldn't save a still frame" },
+    library: { running: "Adding the video to the Library", done: "Added the video to the Library", failed: "Couldn't add the video to the Library" },
+};
+
+// The recorder (RENDER_JS, inside the sandbox) says where it is with one line of its output per mark:
+// "@cg-stage {"at":"record","frame":300,"total":1350}". at: "open" | "record" | "join".
+const MARK = "@cg-stage ";
+
+/**
+ * The marks in the recorder's output so far. `text`: what was left from the piece before plus the new piece.
+ * Returns { marks, rest }: the marks of every whole line, and the unfinished last line to keep for the next piece.
+ */
+export function readMarks(text) {
+    const lines = String(text || "").split("\n");
+    const rest = lines.pop() || "";
+    const marks = [];
+    for (const line of lines) {
+        if (!line.startsWith(MARK)) continue;
+        try { const m = JSON.parse(line.slice(MARK.length)); if (m && typeof m.at === "string") marks.push(m); } catch { /* a cut line */ }
+    }
+    return { marks, rest };
+}
+
+/** The recorder's output without its marks (what is left is what it or Docker printed by itself). */
+export const withoutMarks = (text) => String(text || "").split("\n").filter((l) => !l.startsWith(MARK)).join("\n").trim();
+
+/** One mark of the recorder becomes the stage it stands for (`stages`: a stageRun over VIDEO_STAGES). */
+export function followMark(stages, mark) {
+    if (!stages || !mark) return;
+    const total = Math.max(0, Math.round(Number(mark.total) || 0));
+    if (mark.at === "open") stages.start("open");
+    else if (mark.at === "record") {
+        const note = `frame ${Math.max(0, Math.min(total, Math.round(Number(mark.frame) || 0)))} of ${total}`;
+        if (stages.running === "record") stages.update({ note });
+        else stages.start("record", { note });
+    } else if (mark.at === "join") {
+        if (stages.running === "record") stages.done({ note: `${total} frames` });
+        stages.start("join");
+    }
+}
+
 // Injected before the page's own scripts. Replaces the clock (performance.now, Date.now, requestAnimationFrame,
 // timers) and pauses CSS / Web Animations so window.__cgSeek(ms) can put the page at any moment.
 const CLOCK_JS = String.raw`(() => {
@@ -52,11 +112,14 @@ const CLOCK_JS = String.raw`(() => {
 })();`;
 
 // Runs inside the sandbox container (Node + Playwright + ffmpeg are installed there).
-const RENDER_JS = String.raw`const fs = require("fs");
+export const RENDER_JS = String.raw`const fs = require("fs");
 const { spawn } = require("child_process");
 const { chromium } = require("playwright");
 const cfg = JSON.parse(fs.readFileSync("/work/config.json", "utf8"));
+// Where the work is, for the chat's step list: one line per mark (the server reads them as they come)
+const mark = (o) => { try { process.stdout.write("@cg-stage " + JSON.stringify(o) + "\n"); } catch (e) {} };
 (async () => {
+  mark({ at: "open" });
   const args = ["--no-sandbox", "--disable-dev-shm-usage", "--hide-scrollbars", "--force-color-profile=srgb"];
   let browser;
   try { browser = await chromium.launch({ args }); }
@@ -80,12 +143,17 @@ const cfg = JSON.parse(fs.readFileSync("/work/config.json", "utf8"));
   let ffErr = "";
   ff.stderr.on("data", (d) => { ffErr += d; });
   const ffDone = new Promise((r) => ff.on("close", r));
+  mark({ at: "record", frame: 0, total });
+  let marked = Date.now();
   for (let i = 0; i < total; i++) {
     await page.evaluate((t) => window.__cgSeek(t), (i * 1000) / cfg.fps);
     const shot = await page.screenshot({ type: "jpeg", quality: 92 });
     if (checkFrames.has(i)) fs.writeFileSync("/work/check_" + checkFrames.get(i) + ".jpg", shot);
     if (!ff.stdin.write(shot)) await new Promise((r) => ff.stdin.once("drain", r));
+    // (the frame it is at, every two seconds: often enough to see it move, few enough lines for a long video)
+    if (Date.now() - marked >= 2000) { marked = Date.now(); mark({ at: "record", frame: i + 1, total }); }
   }
+  mark({ at: "join", total });
   ff.stdin.end();
   const code = await ffDone;
   await browser.close();
@@ -111,8 +179,12 @@ const even = (n, fallback) => {
     return Math.max(64, Math.min(VIDEO_LIMITS.maxSide, v - (v % 2)));
 };
 
-/** Renders the page. Returns { mp4: Buffer, checks: [{ at, jpg: Buffer }], frames, errors } or throws. */
-export async function renderVideo({ html, seconds, fps, width, height }) {
+/**
+ * Renders the page. Returns { mp4: Buffer, checks: [{ at, jpg: Buffer }], frames, errors } or throws.
+ * `stages` (a stageRun over VIDEO_STAGES, utils/tool-stages.js): each stage of the work is reported to it as it
+ * happens. When this throws, the stage that was running is left running: the caller knows the reason and fails it.
+ */
+export async function renderVideo({ html, seconds, fps, width, height }, stages = null) {
     if (!String(html || "").trim()) throw new Error("html is empty: give the full animated HTML page.");
     const cfg = {
         seconds: Math.max(1, Math.min(VIDEO_LIMITS.maxSeconds, Number(seconds) || 10)),
@@ -124,6 +196,7 @@ export async function renderVideo({ html, seconds, fps, width, height }) {
     cfg.checks = [0.2, 0.5, 0.85].map((p) => +(cfg.seconds * p).toFixed(2));
     const dir = `/home/ubuntu/sandbox_data/_video_${crypto.randomUUID()}`;
     const local = fs.mkdtempSync(path.join(os.tmpdir(), "cg-video-"));
+    stages?.start("prepare");
     const ssh = await sandboxSsh();
     try {
         await ssh.execCommand(`mkdir -p ${dir}`);
@@ -131,18 +204,29 @@ export async function renderVideo({ html, seconds, fps, width, height }) {
         await ssh.execCommand(`cat > ${dir}/clock.js`, { stdin: CLOCK_JS });
         await ssh.execCommand(`cat > ${dir}/render.js`, { stdin: RENDER_JS });
         await ssh.execCommand(`cat > ${dir}/config.json`, { stdin: JSON.stringify(cfg) });
-        const run = await ssh.execCommand(`docker run --rm --shm-size=1g -v ${dir}:/work -w /work classgrid-ai-sandbox node /work/render.js`);
+        // (the recorder's marks are read as they come: Chromium opening the page, the frame it is at, the joining)
+        let unread = "";
+        const run = await ssh.execCommand(`docker run --rm --shm-size=1g -v ${dir}:/work -w /work classgrid-ai-sandbox node /work/render.js`, {
+            onStdout: (chunk) => {
+                const got = readMarks(unread + chunk.toString("utf8"));
+                unread = got.rest;
+                for (const m of got.marks) { try { followMark(stages, m); } catch { /* showing a stage never stops the recording */ } }
+            },
+        });
         const resultText = (await ssh.execCommand(`cat ${dir}/result.json 2>/dev/null`)).stdout;
         let result;
-        try { result = JSON.parse(resultText); } catch { throw new Error(`The renderer stopped: ${(run.stderr || run.stdout || "no output").slice(-1500)}`); }
+        try { result = JSON.parse(resultText); } catch { throw new Error(`The renderer stopped: ${(run.stderr || withoutMarks(run.stdout) || "no output").slice(-1500)}`); }
         if (!result.ok) throw new Error(result.error || `ffmpeg failed: ${result.ffmpeg || "unknown"}${result.errors?.length ? `\nPage errors: ${result.errors.join(" | ")}` : ""}`);
+        stages?.start("fetch");
         await ssh.getFile(path.join(local, "out.mp4"), `${dir}/out.mp4`);
         const checks = [];
         for (let i = 0; i < cfg.checks.length; i++) {
             const p = path.join(local, `check_${i}.jpg`);
             try { await ssh.getFile(p, `${dir}/check_${i}.jpg`); checks.push({ at: cfg.checks[i], jpg: fs.readFileSync(p) }); } catch { /* frame not written */ }
         }
-        return { mp4: fs.readFileSync(path.join(local, "out.mp4")), checks, frames: result.frames, errors: result.errors || [], cfg };
+        const mp4 = fs.readFileSync(path.join(local, "out.mp4"));
+        stages?.done({ note: `${(mp4.length / 1048576).toFixed(1)} MB` });
+        return { mp4, checks, frames: result.frames, errors: result.errors || [], cfg };
     } finally {
         await ssh.execCommand(`rm -rf ${dir}`).catch(() => {});
         ssh.dispose();

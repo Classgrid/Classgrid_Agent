@@ -216,6 +216,7 @@ import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProj
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
 
 import { ReplySteps } from "./stepper/ReplySteps";
+import { applyToolStage, type ToolStage } from "./stepper/toolStages";
 
 import { CodeNoteChips, StudioCodeNotesBar } from "@/features/superadmin/components/StudioCodeNotesBar";
 
@@ -527,7 +528,11 @@ type UIFileAttachment = {
 
 export type AgentStep =
   | { id: string, type: "thought", title: string, details: string, status: "loading" | "success" }
-  | { id: string, type: "tool", tool: string, args: any, result?: string, status: "loading" | "success" | "error", helpers?: { state: string, actions: { id: string, tool: string, args: any, result?: string, status: string }[], text: string }[] };
+  | { id: string, type: "tool", tool: string, args: any, result?: string, status: "loading" | "success" | "error", helpers?: { state: string, actions: { id: string, tool: string, args: any, result?: string, status: string }[], text: string }[],
+      /** The step's id on the server (its tool_start carries it): a long tool's stages name their step by it */
+      call?: string,
+      /** The stages of a long tool, as the server reports them while it runs (stepper/toolStages.ts) */
+      stages?: ToolStage[] };
 
 export type ChatMessage = {
   id: string;
@@ -4086,7 +4091,10 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
       else if (e.type === "tool_start") {
         updateLive((m) => ({ ...m, steps: [...(m.steps || []), (e.tool === "internal_thought" || e.tool === "internal_thought_process")
           ? { id: crypto.randomUUID(), type: "thought", title: e.args?.title || "Thought", details: e.args?.details || "", status: "loading" }
-          : { id: crypto.randomUUID(), type: "tool", tool: e.tool, args: e.args, status: "loading" }] as AgentStep[] }));
+          : { id: crypto.randomUUID(), type: "tool", tool: e.tool, args: e.args, status: "loading", ...(typeof e.id === "string" ? { call: e.id } : {}) }] as AgentStep[] }));
+      } else if (e.type === "tool_stage") {
+        // A long tool says where it is (a video: preparing, recording, joining...): a row under its step
+        updateLive((m) => { const steps = applyToolStage(m.steps, e); return steps ? { ...m, steps } : m; });
       } else if (e.type === "tool_result") {
         updateLive((m) => {
           const steps = [...(m.steps || [])];
@@ -5640,12 +5648,21 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
                   const newStep: AgentStep = (event.tool === 'internal_thought' || event.tool === 'internal_thought_process')
                     ? { id: crypto.randomUUID(), type: 'thought', title: event.args?.title || 'Thought', details: event.args?.details || '', status: 'loading' }
-                    : { id: crypto.randomUUID(), type: 'tool', tool: event.tool, args: event.args, status: 'loading' };
+                    : { id: crypto.randomUUID(), type: 'tool', tool: event.tool, args: event.args, status: 'loading', ...(typeof event.id === 'string' ? { call: event.id } : {}) };
 
                   return [
                     ...targetPrev.slice(0, -1),
                     { ...lastMsg, steps: [...(lastMsg.steps || []), newStep] }
                   ];
+                });
+              } else if (event.type === "tool_stage") {
+                // A long tool says where it is (a video: preparing, recording, joining, uploading...): each stage is
+                // a row under its step, with the server's own words (stepper/toolStages.ts)
+                setMessages((prev) => {
+                  const lastMsg = prev[prev.length - 1];
+                  if (!lastMsg || lastMsg.role !== "assistant") return prev;
+                  const steps = applyToolStage(lastMsg.steps, event);
+                  return steps ? [...prev.slice(0, -1), { ...lastMsg, steps }] : prev;
                 });
               } else if (event.type === "sources") {
                 // Numbered web pages for [n] citations (the full list so far for this answer)

@@ -41,7 +41,8 @@ export async function chatModelChoice(sessionId) {
 
 const tell = (userId, data) => { try { getIO().to(String(userId)).emit("chat:woke", data); } catch { /* no socket server */ } };
 // The events of a woken answer the open chat shows live
-const LIVE_EVENTS = new Set(["token", "thought", "tool_start", "tool_result", "status"]);
+// (tool_stage: a long tool's stages, e.g. a video being made: utils/tool-stages.js)
+const LIVE_EVENTS = new Set(["token", "thought", "tool_start", "tool_result", "tool_stage", "status"]);
 
 /**
  * What the person's open app is told while a chat is being woken by something other than runWake below: the same
