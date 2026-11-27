@@ -1,6 +1,6 @@
 // A link in the AI's answer to a published page (chat.classgrid.in/p/<id>) whose page is a video the AI made
 // (kind "video") shows as the artifact card: a square tile with the video's first picture on the left, "Title · 45s"
-// and the word "Artifact" under it. Clicking it opens the video's viewer inside the app (the /p/<id> page over the
+// and the word "Docs" under it. Clicking it opens the video's viewer inside the app (the /p/<id> page over the
 // chat; its X goes back to the chat). A page of kind "page", one not read yet that is not known to be a video, and
 // one that can't be read stay the link they are today, so ordinary page links look as before. Built only from <span>s and an <img>, because
 // a link sits inside a paragraph or list item.
@@ -61,7 +61,7 @@ function VideoArtifactCard({ id, href, title, poster, seconds }: { id: string; h
           <span className="truncate">{title}</span>
           {length && <span className="shrink-0 whitespace-pre">{` · ${length}`}</span>}
         </span>
-        <span className="mt-0.5 text-[13px] leading-[18px] text-slate-500 dark:text-[#9a9a9a]">Artifact</span>
+        <span className="mt-0.5 text-[13px] leading-[18px] text-slate-500 dark:text-[#9a9a9a]">Docs</span>
       </span>
     </a>
   );
