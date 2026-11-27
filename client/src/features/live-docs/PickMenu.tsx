@@ -14,7 +14,7 @@ export type PickChoice<T extends string> = {
   danger?: boolean;
 };
 
-export function PickMenu<T extends string>({ label, value, shown, choices, onPick, disabled, align = "end", quiet }: {
+export function PickMenu<T extends string>({ label, value, shown, choices, onPick, disabled, align = "end", quiet, className }: {
   /** For screen readers: what is being picked. */
   label: string;
   value: T | null;
@@ -26,6 +26,8 @@ export function PickMenu<T extends string>({ label, value, shown, choices, onPic
   align?: "start" | "end";
   /** The button has no background until hovered (inside a line of text). */
   quiet?: boolean;
+  /** More classes for the button (the Docs list's kind filter matches its search box). */
+  className?: string;
 }) {
   const picked = choices.find((c) => c.value === value);
   return (
@@ -36,6 +38,7 @@ export function PickMenu<T extends string>({ label, value, shown, choices, onPic
         className={cn(
           "inline-flex h-8 max-w-full shrink-0 cursor-pointer items-center gap-1 rounded-md text-[13px] font-medium text-foreground outline-none transition-colors hover:bg-black/[0.04] focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-default disabled:opacity-60 data-[popup-open]:bg-black/[0.04] dark:hover:bg-white/[0.05] dark:data-[popup-open]:bg-white/[0.05]",
           quiet ? "-ml-2 px-2" : cn("border pl-2.5 pr-2", boxLine),
+          className,
         )}
       >
         <span className="[overflow-wrap:anywhere]">{shown ?? picked?.name ?? ""}</span>

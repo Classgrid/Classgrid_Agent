@@ -214,6 +214,8 @@ import { SongsDisplay } from "./answer-cards/songs";
 
 import { FILE_DRAG_TYPE, FileBadge, FileMentionChip, parseFileMention, parseProjectLink, FilesChangedSummary, markCheckpoint, helperReportsOf, HelperReportLines, PeerMessageLine, planFileOf, markdownFilePath, openLocalFile, OPEN_PROJECT_FILE_EVENT } from "./stepper/ProjectToolSteps";
 import { CombinedReasoningBlock } from "./stepper/CombinedReasoningBlock";
+import { ArtifactLinkCard } from "./ArtifactLinkCard";
+import { pageIdOf, videoStepsKey, videoStepsOf } from "@/features/live-docs/pageArtifacts";
 
 import { ReplySteps } from "./stepper/ReplySteps";
 import { applyToolStage, type ToolStage } from "./stepper/toolStages";
@@ -1786,7 +1788,7 @@ function openPlanFile(file: string, planTitle: string | undefined, auto: boolean
   return true;
 }
 
-const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, onApprovalAction, isHistorical, onRetry, currentStepIndex, setActiveBuildSessionId, planFile }: { content: string, sources?: ChatSource[], createdAt?: number, isTyping?: boolean, onApprovalAction?: (text: string) => void, isHistorical?: boolean, onRetry?: (error: string) => void, currentStepIndex?: number, setActiveBuildSessionId?: (id: string) => void, planFile?: string }) => {
+const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, onApprovalAction, isHistorical, onRetry, currentStepIndex, setActiveBuildSessionId, planFile, steps }: { content: string, sources?: ChatSource[], createdAt?: number, isTyping?: boolean, onApprovalAction?: (text: string) => void, isHistorical?: boolean, onRetry?: (error: string) => void, currentStepIndex?: number, setActiveBuildSessionId?: (id: string) => void, planFile?: string, steps?: AgentStep[] }) => {
   // `components` below must keep a stable identity: a new object makes ReactMarkdown remount
   // every code block and Mermaid diagram. So it reads changing props from refs, which are
   // assigned during render so the markdown rendered in this same pass sees current values.
@@ -1801,6 +1803,10 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
   planFileRef.current = planFile;
   const sourcesRef = React.useRef(sources);
   sourcesRef.current = sources;
+  // The videos this answer's own make_video steps made (page id -> step id): their /p/<id> links are drawn as the
+  // video card from the first frame (ArtifactLinkCard)
+  const videoStepsRef = React.useRef<Map<string, string>>(new Map());
+  videoStepsRef.current = React.useMemo(() => videoStepsOf(steps), [steps]);
   // When this answer was written: timers ("duration" countdowns) count from here, to the second
   const createdAtRef = React.useRef(createdAt);
   createdAtRef.current = createdAt;
@@ -2130,7 +2136,7 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
         const projectLink = parseProjectLink(href);
         if (projectLink) return <FileMentionChip {...projectLink} label={children} />;
         const external = href && /^https?:\/\//i.test(href);
-        return (
+        const link = (
           <a
             href={href}
             target={external ? "_blank" : undefined}
@@ -2141,6 +2147,11 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
             {children}
           </a>
         );
+        // A published page (chat.classgrid.in/p/<id>) that is a video the AI made: the artifact card; any other page
+        // stays this link
+        const pageId = pageIdOf(href);
+        if (pageId && href) return <ArtifactLinkCard id={pageId} href={href} label={children} fallback={link} videoStep={videoStepsRef.current.get(pageId)} />;
+        return link;
       },
       p({ children, ...props }) {
         return <p className="text-[#2C2C2B] dark:text-[#F0EFED] whitespace-normal mb-3 last:mb-0" {...props}>{children}</p>;
@@ -2218,7 +2229,8 @@ const AssistantMessageContent = memo(({ content, sources, createdAt, isTyping, o
     prevProps.sources === nextProps.sources &&
     prevProps.isTyping === nextProps.isTyping &&
     prevProps.isHistorical === nextProps.isHistorical &&
-    prevProps.planFile === nextProps.planFile
+    prevProps.planFile === nextProps.planFile &&
+    (prevProps.steps === nextProps.steps || videoStepsKey(prevProps.steps) === videoStepsKey(nextProps.steps))
   );
 });
 
@@ -6675,6 +6687,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                         onRetry={undefined}
                                         onApprovalAction={handleApprovalAction}
                                         planFile={planFiles[index] || undefined}
+                                        steps={message.steps}
                                       />
                                     ) : null)}
                                   </>
@@ -6720,6 +6733,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   onRetry={undefined}
                                   onApprovalAction={handleApprovalAction}
                                   planFile={planFiles[index] || undefined}
+                                  steps={message.steps}
                                 />
                               )}
                             </div>

@@ -8,10 +8,12 @@
 // Comments: the comment button turns comments on; then a click on any part of the page, or picked words, opens the
 // comment box right there. Each open comment is pinned on the page with its writer's photo. The app can't look
 // inside the frame, so a small script in the page tells it where things are (bridge.ts).
+// A video the AI made is a page too (kind "video"): it is loaded, shared, pinned, reported and deleted here the same
+// way, and shown full screen with its scenes and time-pinned comments (VideoArtifactView.tsx).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { Check, ChevronDown, Copy, Download, Flag, Globe2, Home, Maximize2, MessageCircle, Pencil, Pin, Printer, RefreshCw, Share, Trash2 } from "lucide-react";
+import { Check, ChevronDown, Copy, Download, Film, Flag, Globe2, Home, Maximize2, MessageCircle, Pencil, Pin, Printer, RefreshCw, Share, Trash2 } from "lucide-react";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/marketing_ui/dropdown-menu";
@@ -32,6 +34,8 @@ import { barButton, barIcon, boxBtnPlain, menuCard, menuDanger, menuIcon, menuIt
 import * as api from "./pagesApi";
 import type { PageDoc } from "./pagesApi";
 import { readBridgeRequest, readPageNote, withPageScripts, type PageMark } from "./bridge";
+import { VideoArtifactView } from "./VideoArtifactView";
+import { downloadVideo } from "./videoTools";
 
 const POLL_MS = 10000;
 const MAX_PENDING = 20;
@@ -55,6 +59,7 @@ export function SharePageView({ id, inStudio = false, front = true, onGone, onTi
   onTitle?: (title: string) => void;
 }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { data: me } = useCurrentUser();
   const [page, setPage] = useState<PageDoc | null>(null);
   const [readers, setReaders] = useState<DocReader[]>([]);
@@ -273,7 +278,8 @@ export function SharePageView({ id, inStudio = false, front = true, onGone, onTi
     const before = page.title;
     setPage((p) => (p ? { ...p, title } : p));
     if (!inStudio) document.title = `${title} · Classgrid`;
-    api.renamePage(page.id, title).catch((e) => { setPage((p) => (p ? { ...p, title: before } : p)); say(errorText(e, "The page could not be renamed."), true); });
+    const noun = page.kind === "video" ? "video" : "page";
+    api.renamePage(page.id, title).catch((e) => { setPage((p) => (p ? { ...p, title: before } : p)); say(errorText(e, `The ${noun} could not be renamed.`), true); });
   };
 
   const togglePin = () => {
@@ -299,7 +305,7 @@ export function SharePageView({ id, inStudio = false, front = true, onGone, onTi
       await api.deletePage(page.id);
       setDeleting(false);
       if (inStudio) onGone?.(); else navigate("/agent");
-    } catch (e) { say(errorText(e, "The page could not be deleted. Please try again."), true); }
+    } catch (e) { say(errorText(e, `The ${page.kind === "video" ? "video" : "page"} could not be deleted. Please try again.`), true); }
   };
 
   // "Ask to comment": a person who can open the page but not comment asks the owner
@@ -348,6 +354,99 @@ export function SharePageView({ id, inStudio = false, front = true, onGone, onTi
       run: async () => { setShare((s) => ({ ...s, open: false })); setTimeout(() => frameRef.current?.contentWindow?.postMessage({ __cg: "print" }, "*"), 250); },
     },
   ];
+  const isVideo = page.kind === "video";
+  // (the word the boxes use: a video's own words, a page's as they always were)
+  const noun = isVideo ? "video" : "page";
+  const videoUrl = page.video?.url;
+  const videoExports: ExportChoice[] = videoUrl
+    ? [{ id: "mp4", name: "Download MP4", about: "The video as one .mp4 file that plays anywhere", icon: Film, run: () => downloadVideo(videoUrl, page.title) }]
+    : [];
+  // (the video's X and Esc: back to the screen of the app it was opened from, like the chat card; a fresh tab or a
+  // link opened from outside has nothing of the app's to go back to, so the chat opens; in Studio its tab closes)
+  const closeVideo = () => {
+    if (inStudio) { onGone?.(); return; }
+    // (the router's own place in this tab's history: 0 is the first screen of the app in this tab)
+    const idx = (window.history.state as { idx?: unknown } | null)?.idx;
+    const inApp = location.key !== "default" && (typeof idx !== "number" || idx > 0);
+    if (inApp) navigate(-1);
+    else navigate("/agent");
+  };
+  // A comment on the video sent to Classgrid AI: in Studio to the chat beside it; else Studio opens with the message
+  const askAboutVideo = (ask: string) => {
+    if (inStudio) { window.dispatchEvent(new CustomEvent("agent:ask", { detail: { text: ask } })); say("Sent to Classgrid AI. Its answer will show under your comment."); }
+    else navigate(studioDocPath(page.id, ask, "page"));
+  };
+
+  // The message bar and the boxes that open over the page (and over a video)
+  const boxes = (
+    <>
+      <NoticeBar notice={notice} />
+
+      <ShareDialog
+        item={page}
+        calls={api.PAGE_SHARE}
+        noun={noun}
+        exports={isVideo ? videoExports : exports}
+        meName={me?.name || ""}
+        meEmail={me?.email || ""}
+        mePhoto={me?.profilePicture || ""}
+        open={share.open}
+        tab={share.tab}
+        onTab={(tab) => setShare({ open: true, tab })}
+        onClose={() => setShare((s) => ({ ...s, open: false }))}
+        onItem={keep}
+        onLeft={() => { if (inStudio) onGone?.(); else navigate("/agent"); }}
+        say={say}
+      />
+      <DeleteDocDialog kind={noun} title={page.title} open={deleting} onClose={() => setDeleting(false)} onDelete={remove} />
+      <RenameDocDialog kind={noun} title={page.title} open={renaming} onClose={() => setRenaming(false)} onSave={saveTitle} />
+      <ReportDocDialog
+        kind={noun}
+        comment={reporting?.comment}
+        open={!!reporting}
+        onClose={() => setReporting(null)}
+        send={(reason, more) => (reporting?.comment ? api.PAGE_SHARE.reportComment(page.id, reporting.comment.id, reason, more) : api.PAGE_SHARE.report(page.id, reason, more))}
+        say={say}
+      />
+    </>
+  );
+
+  if (isVideo) {
+    if (!page.video) {
+      return (
+        <div className={cn("relative flex flex-col items-center justify-center gap-4 bg-background px-4 text-center text-foreground", inStudio ? "h-full" : "min-h-dvh")}>
+          <p className="max-w-sm text-[14px] text-muted-foreground">{"This video can't be opened. Please try again later."}</p>
+          <button type="button" className={boxBtnPlain} onClick={closeVideo}>Close</button>
+          {boxes}
+        </div>
+      );
+    }
+    return (
+      <VideoArtifactView
+        page={page}
+        readers={readers}
+        me={me ? { id: String(me._id), name: me.name || "You", photo: me.profilePicture || "" } : null}
+        inStudio={inStudio}
+        blocked={share.open || deleting || renaming || !!reporting}
+        onClose={closeVideo}
+        onShare={(tab) => setShare({ open: true, tab })}
+        onPin={togglePin}
+        onRename={() => setRenaming(true)}
+        onDuplicate={duplicate}
+        onRefresh={async () => { if (await load()) say("Up to date."); }}
+        onReport={() => setReporting({ comment: null })}
+        onDelete={() => setDeleting(true)}
+        onAskToComment={askToComment}
+        onReportComment={(c) => setReporting({ comment: { id: c.id, name: c.name, text: c.text } })}
+        onAsk={askAboutVideo}
+        change={withComments}
+        keep={keep}
+        say={say}
+      >
+        {boxes}
+      </VideoArtifactView>
+    );
+  }
 
   return (
     <div ref={rootRef} className={cn("relative flex flex-col overflow-hidden bg-background text-foreground", inStudio ? "h-full min-h-0" : "h-dvh")}>
@@ -548,33 +647,7 @@ export function SharePageView({ id, inStudio = false, front = true, onGone, onTi
         <CommentBox key={`${composer.top}:${composer.left}`} boxRef={composerRef} composer={composer} onChange={setComposer} onSend={sendComment} onClose={() => setComposer(null)} />
       )}
 
-      <NoticeBar notice={notice} />
-
-      <ShareDialog
-        item={page}
-        calls={api.PAGE_SHARE}
-        exports={exports}
-        meName={me?.name || ""}
-        meEmail={me?.email || ""}
-        mePhoto={me?.profilePicture || ""}
-        open={share.open}
-        tab={share.tab}
-        onTab={(tab) => setShare({ open: true, tab })}
-        onClose={() => setShare((s) => ({ ...s, open: false }))}
-        onItem={keep}
-        onLeft={() => { if (inStudio) onGone?.(); else navigate("/agent"); }}
-        say={say}
-      />
-      <DeleteDocDialog kind="page" title={page.title} open={deleting} onClose={() => setDeleting(false)} onDelete={remove} />
-      <RenameDocDialog kind="page" title={page.title} open={renaming} onClose={() => setRenaming(false)} onSave={saveTitle} />
-      <ReportDocDialog
-        kind="page"
-        comment={reporting?.comment}
-        open={!!reporting}
-        onClose={() => setReporting(null)}
-        send={(reason, more) => (reporting?.comment ? api.PAGE_SHARE.reportComment(page.id, reporting.comment.id, reason, more) : api.PAGE_SHARE.report(page.id, reason, more))}
-        say={say}
-      />
+      {boxes}
     </div>
   );
 }

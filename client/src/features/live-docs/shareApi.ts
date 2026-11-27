@@ -8,6 +8,8 @@ import type { DocPerson, DocRequest, DocRole, InviteResult } from "./liveDocsApi
 
 /** What is shared: "doc" or "page" (the word shown to people). */
 export type SharedKind = "doc" | "page";
+/** The word a box uses for what it is about: a doc, a page, or a video (a page of kind "video"). */
+export type ItemNoun = SharedKind | "video";
 
 /** The fields of a live doc or a published page that sharing works with. */
 export type Shared = {

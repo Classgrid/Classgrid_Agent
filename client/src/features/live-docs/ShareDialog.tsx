@@ -14,7 +14,7 @@ import { PersonPhoto } from "./DocPeople";
 import { PickMenu, type PickChoice } from "./PickMenu";
 import { errorText } from "./liveDocsApi";
 import type { DocRole } from "./liveDocsApi";
-import type { ExportChoice, ShareCalls, Shared } from "./shareApi";
+import type { ExportChoice, ItemNoun, ShareCalls, Shared } from "./shareApi";
 import { barIcon, boxAbout, boxBtnMain, boxBtnPlain, boxCls, boxFoot, boxHead, boxLine, boxOverlay, boxTitle } from "./docLook";
 
 export type ShareTab = "share" | "export";
@@ -36,6 +36,13 @@ const WORDS = {
     link: { viewer: "can open it", commenter: "can open it and comment", editor: "can open it, comment and share it" } as Record<DocRole, string>,
     about: "Share this page with people, or download it as a file.",
   },
+  video: {
+    editor: "Renames the video, and can share it with others up to Editor.",
+    commenter: "Watches the video and can comment.",
+    viewer: "Watches the video.",
+    link: { viewer: "can watch it", commenter: "can watch it and comment", editor: "can watch it, comment and share it" } as Record<DocRole, string>,
+    about: "Share this video with people, or download it as a file.",
+  },
 };
 const REMOVE_CHOICE: PickChoice<"remove"> = { value: "remove", name: "Remove", danger: true };
 const ACCESS_CHOICES: PickChoice<Shared["visibility"]>[] = [
@@ -46,10 +53,12 @@ const heading = "text-[12px] font-medium text-muted-foreground";
 const name = "[overflow-wrap:anywhere] text-[13px] font-medium";
 const under = "[overflow-wrap:anywhere] text-[12px] text-muted-foreground";
 
-export function ShareDialog<T extends Shared>({ item, calls, exports, meName, meEmail, mePhoto, open, tab, onTab, onClose, onItem, onLeft, say }: {
+export function ShareDialog<T extends Shared>({ item, calls, noun: nounIn, exports, meName, meEmail, mePhoto, open, tab, onTab, onClose, onItem, onLeft, say }: {
   /** The doc or the page. */
   item: T;
   calls: ShareCalls<T>;
+  /** The word for it when not the calls' own ("video": a page of kind "video"). */
+  noun?: ItemNoun;
   /** The files it can be downloaded as (the Export tab). */
   exports: ExportChoice[];
   meName: string;
@@ -71,7 +80,7 @@ export function ShareDialog<T extends Shared>({ item, calls, exports, meName, me
   const [making, setMaking] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [handOver, setHandOver] = useState<{ id: string; name: string } | null>(null);
-  const noun = calls.kind;
+  const noun: ItemNoun = nounIn ?? calls.kind;
   const words = WORDS[noun];
   const sharer = item.can.share;
   const link = calls.link(item.id);

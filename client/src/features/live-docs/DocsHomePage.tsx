@@ -1,32 +1,85 @@
 // A person's live docs (chat.classgrid.in/docs): the ones they own and the ones shared with them by name, pinned
 // ones first. A doc opens on its own page; "Open beside the chat" opens it in Studio.
+// The pages the AI published and the videos it made (chat.classgrid.in/p/<id>) are listed with the docs, marked
+// "Page" or "Video", and open on their own page; a video shows its first picture as its icon.
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { formatDistanceToNow } from "date-fns";
-import { ArrowLeft, FileText, Globe2, Lock, Pin, Search, Users } from "lucide-react";
+import { AppWindow, ArrowLeft, FileText, Film, Globe2, Lock, Pin, Search, Users } from "lucide-react";
 import { ClassgridLogoIcon } from "@/components/layout/ClassgridLogoIcon";
 import { Spinner } from "@/components/marketing_ui/spinner";
 import { cn } from "@/lib/utils";
 import * as api from "./liveDocsApi";
 import type { DocRow } from "./liveDocsApi";
+import { listPages, type PageRow } from "./pageArtifacts";
 import { PersonPhoto } from "./DocPeople";
+import { PickMenu, type PickChoice } from "./PickMenu";
 import { studioDocPath } from "./docContext";
 
 const ago = (d: string) => { try { return formatDistanceToNow(new Date(d), { addSuffix: true }); } catch { return ""; } };
 type Tab = "mine" | "shared";
 const ROLE_WORDS = { owner: "Owner", editor: "Can edit", commenter: "Can comment", viewer: "Can read" } as const;
 
+/** A row of the list: a live doc, or a published page or video. */
+type Item = DocRow & { kind: "doc" | "page" | "video"; poster: string };
+const docItem = (d: DocRow): Item => ({ ...d, kind: "doc", poster: "" });
+// (a page is not edited by the AI the way a doc is, so its row never says "by the AI")
+const pageItem = (p: PageRow): Item => ({
+  id: p.id, title: p.title, visibility: p.visibility, role: p.role, shared: p.shared, ownerName: p.ownerName, ownerPhoto: p.ownerPhoto,
+  pinned: p.pinned, lastBy: "user", createdAt: p.createdAt, updatedAt: p.updatedAt, kind: p.kind, poster: p.video?.poster || "",
+});
+const itemLink = (d: Item) => (d.kind === "doc" ? `/docs/${d.id}` : `/p/${d.id}`);
+
+// Which kinds the list shows, remembered on this device
+type Show = "all" | Item["kind"];
+const SHOW_CHOICES: PickChoice<Show>[] = [
+  { value: "all", name: "All" },
+  { value: "doc", name: "Docs" },
+  { value: "page", name: "Pages" },
+  { value: "video", name: "Videos" },
+];
+const SHOW_KEY = "classgrid:docs-list-kind";
+function savedShow(): Show {
+  try {
+    const saved = localStorage.getItem(SHOW_KEY);
+    return SHOW_CHOICES.some((c) => c.value === saved) ? (saved as Show) : "all";
+  } catch {
+    return "all";
+  }
+}
+
+/** The row's icon: a video's first picture, or the icon of its kind. */
+function ItemIcon({ item }: { item: Item }) {
+  const [noPoster, setNoPoster] = useState(false);
+  if (item.kind === "video" && item.poster && !noPoster) {
+    return <img src={item.poster} alt="" loading="lazy" onError={() => setNoPoster(true)} className="size-full rounded-[11px] object-cover" />;
+  }
+  const Icon = item.kind === "video" ? Film : item.kind === "page" ? AppWindow : FileText;
+  return <Icon className="size-[18px]" />;
+}
+
 export function DocsHomePage() {
   const navigate = useNavigate();
-  const [docs, setDocs] = useState<{ mine: DocRow[]; shared: DocRow[] } | null>(null);
+  const [docs, setDocs] = useState<{ mine: Item[]; shared: Item[] } | null>(null);
   const [error, setError] = useState("");
   const [tab, setTab] = useState<Tab>("mine");
   const [find, setFind] = useState("");
+  const [show, setShow] = useState<Show>(savedShow);
+  const pickShow = (next: Show) => {
+    setShow(next);
+    try { localStorage.setItem(SHOW_KEY, next); } catch { /* the choice is then kept only until the page is left */ }
+  };
 
   useEffect(() => {
     document.title = "Docs · Classgrid";
-    api.listDocs()
-      .then((r) => { setDocs({ mine: r.docs || [], shared: r.shared || [] }); if (!(r.docs || []).length && (r.shared || []).length) setTab("shared"); })
+    // (the docs are the list; pages that can't be loaded leave the docs shown on their own)
+    Promise.all([api.listDocs(), listPages().catch(() => ({ mine: [] as PageRow[], shared: [] as PageRow[] }))])
+      .then(([r, pages]) => {
+        const mine = [...(r.docs || []).map(docItem), ...pages.mine.map(pageItem)];
+        const shared = [...(r.shared || []).map(docItem), ...pages.shared.map(pageItem)];
+        setDocs({ mine, shared });
+        if (!mine.length && shared.length) setTab("shared");
+      })
       .catch((e) => setError(api.errorText(e, "Your docs could not be loaded. Please try again.")));
   }, []);
 
@@ -34,9 +87,10 @@ export function DocsHomePage() {
     const list = (tab === "mine" ? docs?.mine : docs?.shared) || [];
     const words = find.trim().toLowerCase();
     return list
+      .filter((d) => show === "all" || d.kind === show)
       .filter((d) => !words || d.title.toLowerCase().includes(words) || d.ownerName.toLowerCase().includes(words))
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-  }, [docs, tab, find]);
+  }, [docs, tab, find, show]);
 
   return (
     <div className="min-h-dvh bg-background text-foreground">
@@ -69,6 +123,13 @@ export function DocsHomePage() {
             <Search className="size-4 shrink-0 text-muted-foreground" />
             <input value={find} onChange={(e) => setFind(e.target.value)} placeholder="Find a doc" aria-label="Find a doc" data-no-ring className="min-w-0 flex-1 bg-transparent text-[14px] outline-none placeholder:text-muted-foreground" />
           </label>
+          <PickMenu
+            label={SHOW_CHOICES.find((c) => c.value === show)?.name || "All"}
+            value={show}
+            choices={SHOW_CHOICES}
+            onPick={pickShow}
+            className="h-10 rounded-xl border-0 bg-black/[0.05] pl-3 pr-2.5 text-[14px] hover:bg-black/[0.08] dark:bg-white/[0.08] dark:hover:bg-white/[0.12]"
+          />
         </div>
 
         {error ? (
@@ -86,14 +147,21 @@ export function DocsHomePage() {
         ) : (
           <ul className="mt-4 divide-y divide-border">
             {rows.map((d) => (
-              <li key={d.id} className="group flex items-center gap-3 py-1">
-                <Link to={`/docs/${d.id}`} className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-accent">
+              <li key={`${d.kind}-${d.id}`} className="group flex items-center gap-3 py-1">
+                <Link to={itemLink(d)} className="flex min-w-0 flex-1 items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-accent">
                   <span className="relative inline-flex size-10 shrink-0 items-center justify-center rounded-xl border border-border bg-background">
-                    <FileText className="size-[18px]" />
+                    <ItemIcon item={d} />
                     {d.pinned && <span className="absolute -right-1.5 -top-1.5 inline-flex size-[18px] items-center justify-center rounded-full bg-foreground text-background"><Pin className="size-2.5" fill="currentColor" /></span>}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block [overflow-wrap:anywhere] text-[14.5px] font-medium">{d.title}</span>
+                    <span className="flex items-baseline gap-2">
+                      <span className="min-w-0 [overflow-wrap:anywhere] text-[14.5px] font-medium">{d.title}</span>
+                      {d.kind !== "doc" && (
+                        <span className="shrink-0 rounded-md bg-black/[0.05] px-1.5 py-px text-[11.5px] font-medium text-muted-foreground dark:bg-white/[0.08]">
+                          {d.kind === "video" ? "Video" : "Page"}
+                        </span>
+                      )}
+                    </span>
                     <span className="mt-0.5 flex items-center gap-1.5 text-[12.5px] text-muted-foreground">
                       {tab === "shared" ? (
                         <>
@@ -109,15 +177,16 @@ export function DocsHomePage() {
                     </span>
                   </span>
                 </Link>
-                <button
+                {/* (a video opens on its own page only) */}
+                {d.kind !== "video" && <button
                   type="button"
-                  onClick={() => navigate(studioDocPath(d.id))}
+                  onClick={() => navigate(d.kind === "page" ? studioDocPath(d.id, undefined, "page") : studioDocPath(d.id))}
                   title="Open beside the chat"
                   aria-label={`Open ${d.title} beside the chat`}
                   className="inline-flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground hover:bg-accent hover:text-foreground sm:opacity-0 sm:focus-visible:opacity-100 sm:group-hover:opacity-100"
                 >
                   <ClassgridLogoIcon size={22} />
-                </button>
+                </button>}
               </li>
             ))}
           </ul>

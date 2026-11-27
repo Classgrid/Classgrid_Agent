@@ -8,17 +8,17 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { DangerConfirmDialog } from "@/components/marketing_ui/danger-confirm-dialog";
 import { cn } from "@/lib/utils";
 import { errorText } from "./liveDocsApi";
-import type { SharedKind } from "./shareApi";
+import type { ItemNoun, SharedKind } from "./shareApi";
 import { boxAbout, boxBtnMain, boxBtnPlain, boxCls, boxFoot, boxHead, boxInput, boxOverlay, boxTitle } from "./docLook";
 
-export function DeleteDocDialog({ kind = "doc", title, open, onClose, onDelete }: { kind?: SharedKind; title: string; open: boolean; onClose: () => void; onDelete: () => Promise<void> }) {
+export function DeleteDocDialog({ kind = "doc", title, open, onClose, onDelete }: { kind?: ItemNoun; title: string; open: boolean; onClose: () => void; onDelete: () => Promise<void> }) {
   const [busy, setBusy] = useState(false);
   return (
     <DangerConfirmDialog
       open={open}
       onOpenChange={(next) => { if (!next && !busy) onClose(); }}
       title={`Delete ${kind}`}
-      description={<><span className="font-medium text-foreground [overflow-wrap:anywhere]">{title}</span> will be deleted with its comments{kind === "doc" ? " and its older versions" : " and its saved data"}. Everyone it is shared with loses it too. This cannot be undone.</>}
+      description={<><span className="font-medium text-foreground [overflow-wrap:anywhere]">{title}</span> will be deleted with its comments{kind === "doc" ? " and its older versions" : kind === "page" ? " and its saved data" : ""}. Everyone it is shared with loses it too. This cannot be undone.</>}
       warningMessage={`This ${kind} will be permanently deleted.`}
       actionLabel={`Delete ${kind}`}
       isLoading={busy}
@@ -28,7 +28,7 @@ export function DeleteDocDialog({ kind = "doc", title, open, onClose, onDelete }
 }
 
 /** A new name for the doc or page (the chat's own Rename box). The name shows at once; `onSave` saves it behind. */
-export function RenameDocDialog(props: { kind?: SharedKind; title: string; open: boolean; onClose: () => void; onSave: (title: string) => void }) {
+export function RenameDocDialog(props: { kind?: ItemNoun; title: string; open: boolean; onClose: () => void; onSave: (title: string) => void }) {
   return (
     <Dialog open={props.open} onOpenChange={(next) => { if (!next) props.onClose(); }}>
       <DialogContent showCloseButton={false} overlayClassName={boxOverlay} className={cn("sm:max-w-[22rem]", boxCls)}>
@@ -38,7 +38,7 @@ export function RenameDocDialog(props: { kind?: SharedKind; title: string; open:
   );
 }
 // (inside the box, so each time it opens it starts from the name as it is now)
-function RenameBox({ kind = "doc", title, onClose, onSave }: { kind?: SharedKind; title: string; onClose: () => void; onSave: (title: string) => void }) {
+function RenameBox({ kind = "doc", title, onClose, onSave }: { kind?: ItemNoun; title: string; onClose: () => void; onSave: (title: string) => void }) {
   const [text, setText] = useState(title);
   const save = () => {
     const t = text.trim();
@@ -84,7 +84,7 @@ const REASONS: { value: string; name: string }[] = [
 
 /** Reports the doc or page, or (with `comment`) one comment on it, to the Classgrid team. `send` makes the report. */
 export function ReportDocDialog({ kind = "doc", comment, open, onClose, send, say }: {
-  kind?: SharedKind;
+  kind?: ItemNoun;
   comment?: { id: string; name: string; text: string } | null;
   open: boolean;
   onClose: () => void;

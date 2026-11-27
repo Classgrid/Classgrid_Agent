@@ -8,14 +8,18 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import RichChatInput from "@/components/ai/components/RichChatInput";
 import { ClassgridLogoIcon } from "@/components/layout/ClassgridLogoIcon";
 import { cn } from "@/lib/utils";
+import { formatSpan } from "@/features/share-pages/videoMath";
 import { errorText } from "./liveDocsApi";
 import type { LiveDocComment } from "./liveDocsApi";
 import { PersonPhoto } from "./DocPeople";
 import { NoteText } from "./DocText";
 import { barIcon, menuCard, menuDanger, menuIcon, menuItem } from "./docLook";
 
-/** A comment with its replies (`byAI`: Classgrid AI wrote it). */
-export type Thread = LiveDocComment & { byAI?: boolean };
+/**
+ * A comment with its replies (`byAI`: Classgrid AI wrote it). A comment on a video also has the time it is on
+ * (`time`, and `timeEnd` for a stretch of time), in seconds.
+ */
+export type Thread = LiveDocComment & { byAI?: boolean; time?: number | null; timeEnd?: number | null };
 export type CommentFilter = "open" | "resolved" | "all";
 export type Me = { id: string; name: string; photo: string } | null;
 type Say = (text: string, bad?: boolean) => void;
@@ -47,7 +51,7 @@ const AiMark = ({ small }: { small?: boolean }) => (
 );
 
 /** The comments at the side. `floating`: always a card over the page (Studio, a published page); else a column on a wide screen. */
-export function CommentsPanel({ comments, filter, onFilter, canComment, canEdit, me, active, onActive, floating, onClose, calls, change, onReport, say, hint }: {
+export function CommentsPanel({ comments, filter, onFilter, canComment, canEdit, me, active, onActive, floating, onClose, calls, change, onReport, say, hint, onPick }: {
   comments: Thread[];
   filter: CommentFilter;
   onFilter: (filter: CommentFilter) => void;
@@ -65,6 +69,8 @@ export function CommentsPanel({ comments, filter, onFilter, canComment, canEdit,
   say: Say;
   /** How a comment is added, for the empty panel. */
   hint: string;
+  /** A video: a click on a comment (or on its time) goes to the time it is on. */
+  onPick?: (comment: Thread) => void;
 }) {
   const open = comments.filter((c) => !c.resolved);
   const resolved = comments.filter((c) => c.resolved);
@@ -122,6 +128,7 @@ export function CommentsPanel({ comments, filter, onFilter, canComment, canEdit,
             change={change}
             onReport={() => onReport(c)}
             say={say}
+            onPick={onPick ? () => onPick(c) : undefined}
           />
         ))}
       </div>
@@ -129,7 +136,7 @@ export function CommentsPanel({ comments, filter, onFilter, canComment, canEdit,
   );
 }
 
-function CommentCard({ c, canComment, canEdit, me, active, onActive, calls, change, onReport, say }: {
+function CommentCard({ c, canComment, canEdit, me, active, onActive, calls, change, onReport, say, onPick }: {
   c: Thread;
   canComment: boolean;
   canEdit: boolean;
@@ -140,6 +147,7 @@ function CommentCard({ c, canComment, canEdit, me, active, onActive, calls, chan
   change: (next: (comments: Thread[]) => Thread[]) => void;
   onReport: () => void;
   say: Say;
+  onPick?: () => void;
 }) {
   const [reply, setReply] = useState("");
   const saved = !isNew(c.id);
@@ -167,6 +175,14 @@ function CommentCard({ c, canComment, canEdit, me, active, onActive, calls, chan
     change((all) => { taken = all; return all.filter((x) => x.id !== c.id); });
     calls.remove(c.id).catch((e) => { change(() => taken); say(errorText(e, "The comment could not be deleted."), true); });
   };
+  // (a comment on a video: the time it is on, "0:21" or "0:12 to 0:20")
+  const at = typeof c.time === "number" && Number.isFinite(c.time) ? formatSpan(c.time, c.timeEnd) : "";
+  // (a click on the comment itself, not on one of its buttons, menus or the reply box)
+  const pick = (e: { target: EventTarget }) => {
+    const el = e.target as HTMLElement;
+    if (!onPick || el.closest("button, a, input, textarea, [contenteditable=true], [role=menu], [role=menuitem]")) return;
+    onPick();
+  };
   const small = "inline-flex size-7 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted-foreground opacity-0 transition-colors hover:bg-black/5 hover:text-foreground focus-visible:opacity-100 group-hover/comment:opacity-100 dark:hover:bg-white/10";
 
   return (
@@ -174,12 +190,16 @@ function CommentCard({ c, canComment, canEdit, me, active, onActive, calls, chan
       id={`doc-comment-${c.id}`}
       onMouseEnter={() => onActive(true)}
       onMouseLeave={() => onActive(false)}
-      className={cn("group/comment space-y-1.5 rounded-xl px-2.5 py-2.5 transition-colors", active ? "bg-slate-100 dark:bg-white/[0.07]" : "hover:bg-slate-100/70 dark:hover:bg-white/[0.04]", c.resolved && "opacity-70")}
+      onClick={onPick ? pick : undefined}
+      className={cn("group/comment space-y-1.5 rounded-xl px-2.5 py-2.5 transition-colors", active ? "bg-slate-100 dark:bg-white/[0.07]" : "hover:bg-slate-100/70 dark:hover:bg-white/[0.04]", c.resolved && "opacity-70", onPick && "cursor-pointer")}
     >
       <div className="flex items-center gap-2">
         {c.byAI ? <AiMark /> : <PersonPhoto name={c.name || "Someone"} photo={c.photo} size="sm" />}
         <span className="min-w-0 break-words text-[13.5px] font-semibold leading-4">{c.name || "Someone"}</span>
         <span className="shrink-0 text-[12px] text-muted-foreground">{shortAgo(c.at)}</span>
+        {at && (onPick
+          ? <button type="button" onClick={onPick} title={`Go to ${at}`} aria-label={`Go to ${at}`} className="shrink-0 cursor-pointer whitespace-pre text-[12px] text-muted-foreground hover:text-foreground">· {at}</button>
+          : <span className="shrink-0 whitespace-pre text-[12px] text-muted-foreground">· {at}</span>)}
         <span className="flex-1" />
         {c.resolved && <span className="inline-flex size-5 shrink-0 items-center justify-center rounded-full bg-sky-500 text-white" title="Resolved"><Check className="size-3" strokeWidth={3} /></span>}
         {canResolve && !c.resolved && (
