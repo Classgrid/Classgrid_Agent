@@ -81,14 +81,34 @@ export const slackEventTarget = (body) => {
     return null;
 };
 
-/** Deletes what Classgrid keeps from the Slack accounts in the event. `User` is the model (a stand-in in tests). */
-export async function forgetSlackAccounts({ teamId, userIds }, { User }) {
+/**
+ * Deletes what Classgrid keeps from the Slack accounts in the event. `User` is the model (a stand-in in tests).
+ * An account whose stored token still works is kept: tokens_revoked names the person, not the token, and Slack sends it
+ * when an OLD token ends, also when the person has just connected again and holds a new one (owner, 2026-11-27: his
+ * fresh connection was wiped minutes after he made it). `stillWorks(token)` asks Slack; without it nothing is checked.
+ */
+export async function forgetSlackAccounts({ teamId, userIds }, { User, stillWorks = null }) {
     if (!teamId) return 0;
     const query = userIds ? { slack_team_id: teamId, slack_user_id: { $in: userIds } } : { slack_team_id: teamId };
-    const users = await User.find(query).select("_id").lean();
-    if (!users.length) return 0;
-    await User.updateMany({ _id: { $in: users.map((u) => u._id) } }, { $set: { ...SLACK_CLEARED } });
-    return users.length;
+    const users = await User.find(query).select("_id slack_access_token").lean();
+    const gone = [];
+    for (const u of users) {
+        if (stillWorks && u.slack_access_token && (await stillWorks(u.slack_access_token))) continue;
+        gone.push(u._id);
+    }
+    if (!gone.length) return 0;
+    await User.updateMany({ _id: { $in: gone } }, { $set: { ...SLACK_CLEARED } });
+    return gone.length;
+}
+
+/** True unless Slack says the token is over (auth.test). A network failure counts as working: nothing is deleted on a guess. */
+export async function slackTokenWorks(token, { fetchImpl = fetch } = {}) {
+    try {
+        const data = await fetchImpl("https://slack.com/api/auth.test", { method: "POST", headers: { Authorization: `Bearer ${token}` } }).then((r) => r.json());
+        return data?.ok === true || !isDeadTokenError(data?.error);
+    } catch {
+        return true;
+    }
 }
 
 /** Slack's answer for a token that no longer works: the connection is over and is cleared. */

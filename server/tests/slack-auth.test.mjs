@@ -12,7 +12,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import {
     forgetSlackAccounts, isDeadTokenError, isSignedBySlack, isState, newState, revokeSlackToken, safeReturnTo, SLACK_CLEARED,
-    SLACK_USER_SCOPES, slackEventTarget, slackProfile,
+    SLACK_USER_SCOPES, slackEventTarget, slackProfile, slackTokenWorks,
 } from "../src/services/slack-auth.js";
 
 test("only the scopes the Slack tool uses, and they cover every method it calls", () => {
@@ -105,6 +105,25 @@ test("app_uninstalled clears everyone in that workspace, and nobody else", async
     assert.equal(s.users[1].slack_access_token, null);
     assert.equal(s.users[2].slack_access_token, "x3");
     assert.equal(await forgetSlackAccounts({ teamId: "", userIds: null }, s), 0);
+});
+
+test("a revoked OLD token never wipes the new connection that replaced it", async () => {
+    const s = stores();
+    // x1 is the person's new, working token; Slack's tokens_revoked for U1 was about an older one
+    const stillWorks = async (t) => t === "x1";
+    assert.equal(await forgetSlackAccounts({ teamId: "T1", userIds: ["U1"] }, { ...s, stillWorks }), 0);
+    assert.equal(s.users[0].slack_access_token, "x1");
+    // app_uninstalled: every token of the workspace is dead, all cleared
+    assert.equal(await forgetSlackAccounts({ teamId: "T1", userIds: null }, { ...s, stillWorks: async () => false }), 2);
+});
+
+test("whether a stored token still works", async () => {
+    const answer = (body) => async () => ({ json: async () => body });
+    assert.equal(await slackTokenWorks("t", { fetchImpl: answer({ ok: true }) }), true);
+    assert.equal(await slackTokenWorks("t", { fetchImpl: answer({ ok: false, error: "token_revoked" }) }), false);
+    assert.equal(await slackTokenWorks("t", { fetchImpl: answer({ ok: false, error: "invalid_auth" }) }), false);
+    assert.equal(await slackTokenWorks("t", { fetchImpl: answer({ ok: false, error: "ratelimited" }) }), true);
+    assert.equal(await slackTokenWorks("t", { fetchImpl: async () => { throw new Error("offline"); } }), true);
 });
 
 test("Disconnect ends the token at Slack, and never throws", async () => {

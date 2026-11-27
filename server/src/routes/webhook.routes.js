@@ -81,7 +81,7 @@ import AttendanceRecord from "../models/AttendanceRecord.js";
 import { primarySupabaseClient as supabase, getChatSb } from "../config/supabaseClient.js";
 import CustomMcpServer from "../models/CustomMcpServer.js";
 import { deauthTarget, forgetZoomAccount, isSignedByZoom, urlValidationAnswer } from "../services/zoom-deauth.js";
-import { forgetSlackAccounts, isSignedBySlack, slackEventTarget } from "../services/slack-auth.js";
+import { forgetSlackAccounts, isSignedBySlack, slackEventTarget, slackTokenWorks } from "../services/slack-auth.js";
 
 const router = express.Router();
 
@@ -130,7 +130,7 @@ router.post("/slack/events", express.raw({ type: "*/*", limit: "1mb" }), async (
     if (!target) return res.status(200).json({ received: true });
     try {
         await connectDB();
-        const cleared = await forgetSlackAccounts(target, { User });
+        const cleared = await forgetSlackAccounts(target, { User, stillWorks: (t) => slackTokenWorks(t) });
         console.log(`[Slack events] ${body.event?.type}: ${cleared} account(s) cleared`);
     } catch (err) {
         console.error("[Slack events] could not clear the account:", err?.message || err);
