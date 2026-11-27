@@ -4,7 +4,7 @@ import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import CustomMcpServer from "../models/CustomMcpServer.js";
 import { encrypt } from "../utils/encryption.js";
-import { MCP_CATALOG } from "../services/custom-mcp-catalog.js";
+import { publicCatalog } from "../services/custom-mcp-catalog.js";
 import {
     assertSafeUrl, createServer, finishLogin, forgetServer, listServersForUser, publicServer, refreshTools, saveIcon, startLogin,
 } from "../services/custom-mcp.service.js";
@@ -44,7 +44,7 @@ router.get("/oauth/callback", async (req, res) => {
 router.use(isAuthenticated);
 
 router.get("/catalog", (req, res) => {
-    res.json({ success: true, apps: MCP_CATALOG });
+    res.json({ success: true, apps: publicCatalog() });
 });
 
 router.get("/", async (req, res) => {

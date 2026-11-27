@@ -5,7 +5,7 @@
  * a connect card with the app's logo and a Log in button (client: answer-cards/mcp-connect).
  */
 import CustomMcpServer from "../models/CustomMcpServer.js";
-import { MCP_CATALOG, findCatalogApp } from "./custom-mcp-catalog.js";
+import { publicCatalog, findCatalogApp } from "./custom-mcp-catalog.js";
 import { callServerTool, createServer, publicServer, refreshTools } from "./custom-mcp.service.js";
 
 export const CUSTOM_MCP_TOOL_NAME = "custom_mcp_connector";
@@ -61,7 +61,7 @@ export async function runCustomMcpTool(userId, args = {}) {
         if (op === "list_apps") {
             const mine = await CustomMcpServer.find({ userId }).select("catalogId").lean();
             const have = new Set(mine.map((m) => m.catalogId).filter(Boolean));
-            return out({ apps: MCP_CATALOG.map((a) => ({ app: a.id, name: a.name, what: a.description, login: a.auth === "oauth" ? "log in with the app" : a.auth === "api_key" ? "the user's API key, pasted in AI Hub > Plugins" : "no login", ...(a.askUrl ? { needs_url: `ask the user for their address, like ${a.askUrl.placeholder}` } : {}), added: have.has(a.id) })), note: "Any other app with a remote MCP URL can be added with name + url." });
+            return out({ apps: publicCatalog().map((a) => ({ app: a.id, name: a.name, what: a.description, login: a.auth === "oauth" ? "log in with the app" : a.auth === "api_key" ? "the user's API key, pasted in AI Hub > Plugins" : "no login", ...(a.askUrl ? { needs_url: `ask the user for their address, like ${a.askUrl.placeholder}` } : {}), added: have.has(a.id) })), note: "Any other app with a remote MCP URL can be added with name + url." });
         }
 
         if (op === "list_servers") {

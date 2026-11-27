@@ -4,6 +4,7 @@
 // Order: a tool with words of its own (describeNamed), then a tool whose name starts with an action word
 // (describeStep's general part), then the tool's own name said plainly (plainStep).
 import { parseResult, pick, unwrapList } from './primitives';
+import { mcpServerLabel } from './connectorWording';
 
 const PAST: Record<string, string> = {
   list: 'Found', search: 'Searched', find: 'Found', get: 'Read', read: 'Read', view: 'Viewed', count: 'Counted', recall: 'Recalled',
@@ -60,7 +61,7 @@ function describeCustomMcp(args: any, result: unknown, status: 'loading' | 'succ
   const parsed = parseResult(result);
   const data = parsed.data && typeof parsed.data === 'object' && !Array.isArray(parsed.data) ? parsed.data : {};
   const raw = String(data.card?.name || args?.server || args?.app || args?.name || 'the app');
-  const app = raw; // as the user named it ("n8n" stays n8n)
+  const app = mcpServerLabel(raw); // as the user named it ("n8n" stays n8n); a known app's id by its name ("canva-mcp" → "Canva (MCP)")
   const err = status === 'error' || data.error ? String(data.error || parsed.text || '').split('\n')[0]!.replace(new RegExp(`^${raw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*`, 'i'), '') : '';
   const loading = status === 'loading';
   switch (args?.operation) {

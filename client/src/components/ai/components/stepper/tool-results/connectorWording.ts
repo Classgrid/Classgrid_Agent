@@ -164,6 +164,17 @@ const BY_TOOL: Record<string, { ops: Record<string, Line>; app: string }> = {
   sanity_connector: { ops: SANITY, app: "Sanity" },
 };
 
+// Apps with a built-in plugin AND their official MCP server in the known apps ("Canva (MCP)", "Zoom (MCP)", server
+// services/custom-mcp-catalog.js): the MCP one's steps carry the same logo. The AI may name the server by its id.
+const MCP_TWIN_NAMES: Record<string, string> = { "canva-mcp": "Canva (MCP)", "zoom-mcp": "Zoom (MCP)" };
+/** A custom connector's name as the chat shows it ("canva-mcp" → "Canva (MCP)"; any other name as it is) */
+export const mcpServerLabel = (name: string) => MCP_TWIN_NAMES[String(name || "").toLowerCase()] || name;
+const twinIcon = (app: string) => {
+  const base = app.replace(/\s*\(mcp\)\s*$/i, "").trim().toLowerCase();
+  const key = ["Canva", "Zoom"].find((k) => k.toLowerCase() === base);
+  return key ? APP_ICONS[key] : undefined;
+};
+
 const humanize = (s: string) => String(s || "").replace(/[_-]+/g, " ").trim().replace(/^\w/, (c) => c.toUpperCase());
 
 /** The line for a connected app's step, or null when this step is not one of them */
@@ -172,9 +183,10 @@ export function connectorWording(tool: string, args: any, status: "loading" | "s
   const loading = status === "loading";
   // Custom connectors (any MCP server the user added): "Created an issue" with the server's name
   if (tool === "custom_mcp_connector") {
-    const app = String(args?.server || args?.app || args?.name || "Custom connector");
+    const given = String(args?.server || args?.app || args?.name || "Custom connector");
+    const app = mcpServerLabel(given);
     const action = humanize(String(args?.tool || args?.operation || ""));
-    return { text: action ? (loading ? `${action}…` : action) : (loading ? `Using ${app}…` : `Used ${app}`), app };
+    return { text: action ? (loading ? `${action}…` : action) : (loading ? `Using ${app}…` : `Used ${app}`), app, icon: twinIcon(app) };
   }
   const entry = BY_TOOL[tool];
   if (!entry) return null;

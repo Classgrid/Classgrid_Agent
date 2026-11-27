@@ -18,7 +18,7 @@ import { SSEClientTransport } from "@modelcontextprotocol/sdk/client/sse.js";
 import { auth, UnauthorizedError } from "@modelcontextprotocol/sdk/client/auth.js";
 import CustomMcpServer from "../models/CustomMcpServer.js";
 import { encrypt, decrypt } from "../utils/encryption.js";
-import { MCP_CATALOG } from "./custom-mcp-catalog.js";
+import { MCP_CATALOG, catalogAppReady, presetOAuthClient } from "./custom-mcp-catalog.js";
 import { uploadBufferToR2 } from "../config/r2Client.js";
 
 export const MAX_SERVERS_PER_USER = 50;
@@ -96,7 +96,8 @@ class DbOAuthProvider {
         await this.doc.save();
         return s;
     }
-    clientInformation() { return readJson(this.doc.oauthClientEnc); }
+    // A known app that lets no new app sign itself up (Zoom) logs in with our own app, read from the env each time
+    clientInformation() { return presetOAuthClient(this.doc.catalogId) || readJson(this.doc.oauthClientEnc); }
     async saveClientInformation(info) { this.doc.oauthClientEnc = encrypt(JSON.stringify(info)); await this.doc.save(); }
     tokens() { return readJson(this.doc.oauthTokensEnc); }
     async saveTokens(tokens) { this.doc.oauthTokensEnc = encrypt(JSON.stringify(tokens)); await this.doc.save(); }
@@ -117,6 +118,8 @@ class DbOAuthProvider {
 /** Starts the OAuth login. Returns { authUrl } to open in a popup, or { authorized: true } when tokens still work. */
 export async function startLogin(doc) {
     if (doc.authType !== "oauth") return { authorized: true };
+    const known = MCP_CATALOG.find((a) => a.id === doc.catalogId);
+    if (known && !catalogAppReady(known)) throw new Error(`${known.name} isn't set up on Classgrid yet. Please try again later.`);
     const provider = new DbOAuthProvider(doc);
     const result = await auth(provider, { serverUrl: doc.url, fetchFn: safeFetch, scope: doc.oauthScope || undefined });
     if (result === "REDIRECT" && provider.authUrl) return { authUrl: provider.authUrl };

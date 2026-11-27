@@ -2,12 +2,23 @@
 // Known apps with an official remote MCP server, offered in AI Hub > Plugins and by the AI ("connect Linear").
 // Every URL was checked on 2026-11-01: "oauth" ones answer 401 with an OAuth login that lets a new app sign
 // itself up (dynamic client registration); "none" ones work without any login.
-// Apps that already have a built-in Classgrid plugin (Notion, Canva, Vercel, Supabase, GitHub...) are not here.
+// Apps that already have a built-in Classgrid plugin (Notion, Vercel, Supabase, GitHub...) are not here, except Canva
+// and Zoom: their official MCP servers are listed as a second way to connect them, "Canva (MCP)" and "Zoom (MCP)",
+// next to the built-in plugins, which stay as they are (owner, 2026-11-27). Both ways can be connected at once: the
+// built-in ones are the canva_connector / zoom_connector tools, these go through custom_mcp_connector.
+// oauthClientEnv: a server that does not let a new app sign itself up (Zoom) logs in with our own app's client id and
+// secret, read from these env variables; the app is offered only once both are set. Never sent to the browser.
 
 const si = (slug) => `https://cdn.simpleicons.org/${slug}`;
 const fav = (domain) => `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+// The same logos the built-in plugins use
+const CDN = "https://cdn.classgrid.in/classgrid_intgration/";
 
 export const MCP_CATALOG = [
+    // Checked 2026-11-27: Canva lets a new app sign itself up (dynamic client registration accepted our callback URL).
+    // Zoom has no sign-up: it uses the built-in Zoom plugin's own Zoom app (ZOOM_CLIENT_ID / ZOOM_CLIENT_SECRET).
+    { id: "canva-mcp", name: "Canva (MCP)", description: "Create, edit and export designs", url: "https://mcp.canva.com/mcp", auth: "oauth", logo: `${CDN}canva.svg` },
+    { id: "zoom-mcp", name: "Zoom (MCP)", description: "Meetings, recordings, notes and docs", url: "https://mcp.zoom.us/mcp/zoom/streamable", auth: "oauth", logo: `${CDN}zoom-communications-icon_(1).svg`, oauthClientEnv: { id: "ZOOM_CLIENT_ID", secret: "ZOOM_CLIENT_SECRET" } },
     { id: "linear", name: "Linear", description: "Issues, projects and cycles", url: "https://mcp.linear.app/mcp", auth: "oauth", logo: si("linear") },
     { id: "atlassian", name: "Jira & Confluence", description: "Atlassian issues and pages", url: "https://mcp.atlassian.com/v1/mcp", auth: "oauth", logo: si("atlassian") },
     { id: "sentry", name: "Sentry", description: "Errors and performance issues", url: "https://mcp.sentry.dev/mcp", auth: "oauth", logo: si("sentry"), invertInDarkMode: true },
@@ -60,11 +71,31 @@ export const MCP_CATALOG = [
 
 const norm = (s) => String(s || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
-/** Finds a known app by id or name ("jira", "Linear", "monday.com"). */
-export function findCatalogApp(query) {
+/** Our own app's client for a known app that needs one (oauthClientEnv): { client_id, client_secret }, else null. */
+export function presetOAuthClient(catalogId, env = process.env) {
+    const keys = MCP_CATALOG.find((a) => a.id === catalogId)?.oauthClientEnv;
+    if (!keys) return null;
+    const id = String(env[keys.id] || "").trim();
+    const secret = String(env[keys.secret] || "").trim();
+    return id && secret ? { client_id: id, client_secret: secret } : null;
+}
+
+/** False for a known app whose own client (oauthClientEnv) is not set on this server: it cannot log in yet. */
+export function catalogAppReady(app, env = process.env) {
+    return !!app && (!app.oauthClientEnv || !!presetOAuthClient(app.id, env));
+}
+
+/** The known apps people can add now, without the server-only fields (AI Hub, the phone app, the AI's list_apps). */
+export function publicCatalog(env = process.env) {
+    return MCP_CATALOG.filter((a) => catalogAppReady(a, env)).map(({ oauthClientEnv, ...app }) => app);
+}
+
+/** Finds a known app people can add now, by id or name ("jira", "Linear", "monday.com", "canva mcp"). */
+export function findCatalogApp(query, env = process.env) {
     const q = norm(query);
     if (!q) return null;
-    return MCP_CATALOG.find((a) => norm(a.id) === q || norm(a.name) === q)
-        || MCP_CATALOG.find((a) => norm(a.name).includes(q) || (q.length >= 4 && q.includes(norm(a.id))))
-        || (/(jira|confluence)/.test(q) ? MCP_CATALOG.find((a) => a.id === "atlassian") : null);
+    const apps = MCP_CATALOG.filter((a) => catalogAppReady(a, env));
+    return apps.find((a) => norm(a.id) === q || norm(a.name) === q)
+        || apps.find((a) => norm(a.name).includes(q) || (q.length >= 4 && q.includes(norm(a.id))))
+        || (/(jira|confluence)/.test(q) ? apps.find((a) => a.id === "atlassian") : null);
 }
