@@ -12,7 +12,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import {
     forgetSlackAccounts, isDeadTokenError, isSignedBySlack, isState, newState, revokeSlackToken, safeReturnTo, SLACK_CLEARED,
-    SLACK_USER_SCOPES, slackEventTarget, slackProfile, slackTokenWorks,
+    SLACK_SEARCH_ON, SLACK_USER_SCOPES, slackEventTarget, slackProfile, slackTokenWorks,
 } from "../src/services/slack-auth.js";
 
 test("only the scopes the Slack tool uses, and they cover every method it calls", () => {
@@ -39,11 +39,13 @@ test("only the scopes the Slack tool uses, and they cover every method it calls"
     };
     for (const m of methods) {
         assert.ok(needs[m], `the Slack tool calls ${m}: add it here with its scopes`);
+        if (m === "search.messages" && !SLACK_SEARCH_ON) continue; // turned off: its scope is not asked for
         for (const s of needs[m]) assert.ok(SLACK_USER_SCOPES.includes(s), `${m} needs ${s}`);
     }
     const used = new Set(Object.values(needs).flat());
+    assert.equal(SLACK_USER_SCOPES.includes("search:read"), SLACK_SEARCH_ON);
     for (const s of SLACK_USER_SCOPES) assert.ok(used.has(s), `${s} is asked for but nothing uses it`);
-    assert.equal(SLACK_USER_SCOPES.length, 13);
+    assert.equal(SLACK_USER_SCOPES.length, SLACK_SEARCH_ON ? 13 : 12);
 });
 
 const SECRET = "a-secret-only-this-test-knows";

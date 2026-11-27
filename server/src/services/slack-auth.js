@@ -10,6 +10,11 @@
 
 import crypto from "node:crypto";
 
+// Searching messages (search_messages, scope search:read) is turned OFF (owner, 2026-11-28): Slack does not allow
+// search:read for Marketplace apps. The code stays; true here asks for the scope again and gives the AI the action
+// back (then search:read must be added to the Slack app's User Token Scopes again, or every connect fails).
+export const SLACK_SEARCH_ON = false;
+
 export const SLACK_USER_SCOPES = Object.freeze([
     "canvases:read",          // read_canvas (canvases.getContent)
     "canvases:write",         // create_canvas, update_canvas (canvases.create, canvases.edit)
@@ -21,7 +26,7 @@ export const SLACK_USER_SCOPES = Object.freeze([
     "groups:history",         // read_channel_messages, read_thread in private channels
     "groups:read",            // list_channels, search_channels (private)
     "groups:write",           // create_channel, archive_channel, invite_to_channel (private)
-    "search:read",            // search_messages
+    ...(SLACK_SEARCH_ON ? ["search:read"] : []), // search_messages
     "users:read",             // list_users, search_users, read_user_profile; the person's own name at connect
     "users:read.email",       // members' emails in search_users and read_user_profile; the person's own email
 ]);

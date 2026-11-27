@@ -95,7 +95,7 @@ import { Readable } from 'stream';
 import { cfAiFetch } from "../services/cf-neuron-cap.service.js";
 import * as eleven from "../services/elevenlabs.service.js";
 import { applyZoomTokens, refreshZoomToken } from "../services/zoom-oauth.js";
-import { isDeadTokenError, SLACK_CLEARED, slackProfile } from "../services/slack-auth.js";
+import { isDeadTokenError, SLACK_CLEARED, SLACK_SEARCH_ON, slackProfile } from "../services/slack-auth.js";
 
 const execPromise = util.promisify(exec);
 
@@ -1000,11 +1000,11 @@ export const getMcpTools = () => [
   },
   {
     name: 'slack_workspace_connector',
-    description: 'Interact with Slack API to list and search channels, read/send messages, read threads, create channels, search messages, list and search users, read a user profile, invite users to channels, archive channels, and create, read and update canvases using the connected user token.',
+    description: `Interact with Slack API to list and search channels, read/send messages, read threads, create channels, ${SLACK_SEARCH_ON ? "search messages, " : ""}list and search users, read a user profile, invite users to channels, archive channels, and create, read and update canvases using the connected user token.`,
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['list_channels', 'search_channels', 'read_channel_messages', 'read_thread', 'send_message', 'create_channel', 'list_users', 'search_users', 'read_user_profile', 'search_messages', 'invite_to_channel', 'archive_channel', 'create_canvas', 'read_canvas', 'update_canvas'], description: 'The operation to perform.' },
+        operation: { type: 'string', enum: ['list_channels', 'search_channels', 'read_channel_messages', 'read_thread', 'send_message', 'create_channel', 'list_users', 'search_users', 'read_user_profile', 'search_messages', 'invite_to_channel', 'archive_channel', 'create_canvas', 'read_canvas', 'update_canvas'].filter((op) => SLACK_SEARCH_ON || op !== 'search_messages'), description: 'The operation to perform.' },
         threadTs: { type: 'string', description: 'The ts of the thread\'s first message (for read_thread; with send_message it replies in that thread).' },
         userId: { type: 'string', description: 'Slack user ID (for read_user_profile).' },
         canvasId: { type: 'string', description: 'Canvas ID, e.g. F1234ABCD (for read_canvas, update_canvas).' },
@@ -6383,6 +6383,8 @@ ${lines}` }] };
           }
           return { content: [{ type: 'text', text: JSON.stringify({ total: members.length, more: !!cursor, members }) }] };
         } else if (operation === 'search_messages') {
+          // Turned off (services/slack-auth.js SLACK_SEARCH_ON): the connection has no search:read
+          if (!SLACK_SEARCH_ON) return { content: [{ type: 'text', text: "Searching Slack messages is turned off in Classgrid. To find something, use search_channels to find the channel, then read_channel_messages or read_thread." }] };
           if (!query) throw new Error("query is required for search_messages");
           const res = await fetch(`https://slack.com/api/search.messages?query=${encodeURIComponent(query)}&count=${limit}`, {
             headers: { "Authorization": `Bearer ${accessToken}` }
