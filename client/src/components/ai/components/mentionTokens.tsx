@@ -16,8 +16,10 @@ export type MentionItem = {
 
 // Web search and Deep research have logos of their own, drawn in the apps' logo style (flat colours that read on a
 // light and a dark background). Kept here as SVG; the phone app has the same two (src/components/composer/mentionLogos.ts).
+// A globe drawn the way people know "the web" (owner, 2026-11-27: the first one "is not looking like web"): a blue ball
+// with a centre line, a meridian, the equator and two curved latitude lines. The phone has the same one.
 export const WEB_SEARCH_SVG =
-  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10.5" fill="#2F80ED"/><g fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"><ellipse cx="12" cy="12" rx="4.3" ry="10.5"/><path d="M1.5 12h21M2.9 6.8h18.2M2.9 17.2h18.2"/></g></svg>';
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10.5" fill="#1A73E8"/><g fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round"><path d="M12 1.6v20.8"/><ellipse cx="12" cy="12" rx="4.8" ry="10.4"/><path d="M1.6 12h20.8"/><path d="M3.2 6.9Q12 9.5 20.8 6.9"/><path d="M3.2 17.1Q12 14.5 20.8 17.1"/></g></svg>';
 export const DEEP_RESEARCH_SVG =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M5 2.5h9.2L19 7.3V19a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 3 19V4.5a2 2 0 0 1 2-2z" fill="#7C5CFF"/><path d="M14.2 2.5V6a1.3 1.3 0 0 0 1.3 1.3H19z" fill="#B9A8FF"/><path d="M6.5 9.5h6M6.5 12.5h4" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-linecap="round"/><circle cx="15" cy="16" r="4" fill="#FFFFFF" stroke="#F5A623" stroke-width="2"/><path d="M18 19l3.4 3.4" fill="none" stroke="#F5A623" stroke-width="2.4" stroke-linecap="round"/></svg>';
 const svgUrl = (svg: string) => `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
