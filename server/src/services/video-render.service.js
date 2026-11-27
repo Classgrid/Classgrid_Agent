@@ -138,6 +138,13 @@ const mark = (o) => { try { process.stdout.write("@cg-stage " + JSON.stringify(o
   await page.evaluate(() => document.fonts && document.fonts.ready).catch(() => {});
   const total = Math.max(1, Math.round(cfg.seconds * cfg.fps));
   const checkFrames = new Map(cfg.checks.map((s, i) => [Math.min(total - 1, Math.round(s * cfg.fps)), i]));
+  // (the scenes' pictures, when make_video was given scenes: thumb_<n>.jpg, the frame at each one's time)
+  const thumbFrames = new Map();
+  (cfg.thumbs || []).forEach((s, n) => {
+    const f = Math.max(0, Math.min(total - 1, Math.round(s * cfg.fps)));
+    if (!thumbFrames.has(f)) thumbFrames.set(f, []);
+    thumbFrames.get(f).push(n);
+  });
   const ff = spawn("ffmpeg", ["-y", "-loglevel", "error", "-f", "image2pipe", "-framerate", String(cfg.fps), "-c:v", "mjpeg", "-i", "-",
     "-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "/work/out.mp4"]);
   let ffErr = "";
@@ -149,6 +156,7 @@ const mark = (o) => { try { process.stdout.write("@cg-stage " + JSON.stringify(o
     await page.evaluate((t) => window.__cgSeek(t), (i * 1000) / cfg.fps);
     const shot = await page.screenshot({ type: "jpeg", quality: 92 });
     if (checkFrames.has(i)) fs.writeFileSync("/work/check_" + checkFrames.get(i) + ".jpg", shot);
+    if (thumbFrames.has(i)) for (const n of thumbFrames.get(i)) fs.writeFileSync("/work/thumb_" + n + ".jpg", shot);
     if (!ff.stdin.write(shot)) await new Promise((r) => ff.stdin.once("drain", r));
     // (the frame it is at, every two seconds: often enough to see it move, few enough lines for a long video)
     if (Date.now() - marked >= 2000) { marked = Date.now(); mark({ at: "record", frame: i + 1, total }); }
@@ -179,21 +187,28 @@ const even = (n, fallback) => {
     return Math.max(64, Math.min(VIDEO_LIMITS.maxSide, v - (v % 2)));
 };
 
+/** The length a video is made at (seconds): 1-120, 10 when not given. */
+export const videoSeconds = (seconds) => Math.max(1, Math.min(VIDEO_LIMITS.maxSeconds, Number(seconds) || 10));
+
 /**
- * Renders the page. Returns { mp4: Buffer, checks: [{ at, jpg: Buffer }], frames, errors } or throws.
+ * Renders the page. Returns { mp4: Buffer, checks: [{ at, jpg: Buffer }], thumbs: [{ n, at, jpg: Buffer }], frames,
+ * errors, cfg } or throws. `thumbs` (optional): moments (seconds) to keep a picture of besides the three stills, for
+ * the scenes of a video artifact; each comes back with its place in that list (n), and one that could not be cut is
+ * left out.
  * `stages` (a stageRun over VIDEO_STAGES, utils/tool-stages.js): each stage of the work is reported to it as it
  * happens. When this throws, the stage that was running is left running: the caller knows the reason and fails it.
  */
-export async function renderVideo({ html, seconds, fps, width, height }, stages = null) {
+export async function renderVideo({ html, seconds, fps, width, height, thumbs }, stages = null) {
     if (!String(html || "").trim()) throw new Error("html is empty: give the full animated HTML page.");
     const cfg = {
-        seconds: Math.max(1, Math.min(VIDEO_LIMITS.maxSeconds, Number(seconds) || 10)),
+        seconds: videoSeconds(seconds),
         fps: [24, 25, 30, 50, 60].includes(Number(fps)) ? Number(fps) : 30,
         width: even(width, 1920),
         height: even(height, 1080),
     };
     if (cfg.seconds * cfg.fps > VIDEO_LIMITS.maxSeconds * 30) cfg.fps = 30; // long videos record at 30 fps
     cfg.checks = [0.2, 0.5, 0.85].map((p) => +(cfg.seconds * p).toFixed(2));
+    if (Array.isArray(thumbs) && thumbs.length) cfg.thumbs = thumbs.map((t) => +Math.max(0, Math.min(cfg.seconds, Number(t) || 0)).toFixed(3));
     const dir = `/home/ubuntu/sandbox_data/_video_${crypto.randomUUID()}`;
     const local = fs.mkdtempSync(path.join(os.tmpdir(), "cg-video-"));
     stages?.start("prepare");
@@ -224,9 +239,14 @@ export async function renderVideo({ html, seconds, fps, width, height }, stages 
             const p = path.join(local, `check_${i}.jpg`);
             try { await ssh.getFile(p, `${dir}/check_${i}.jpg`); checks.push({ at: cfg.checks[i], jpg: fs.readFileSync(p) }); } catch { /* frame not written */ }
         }
+        const shots = [];
+        for (const [n, at] of (cfg.thumbs || []).entries()) {
+            const p = path.join(local, `thumb_${n}.jpg`);
+            try { await ssh.getFile(p, `${dir}/thumb_${n}.jpg`); shots.push({ n, at, jpg: fs.readFileSync(p) }); } catch { /* frame not written */ }
+        }
         const mp4 = fs.readFileSync(path.join(local, "out.mp4"));
         stages?.done({ note: `${(mp4.length / 1048576).toFixed(1)} MB` });
-        return { mp4, checks, frames: result.frames, errors: result.errors || [], cfg };
+        return { mp4, checks, thumbs: shots, frames: result.frames, errors: result.errors || [], cfg };
     } finally {
         await ssh.execCommand(`rm -rf ${dir}`).catch(() => {});
         ssh.dispose();

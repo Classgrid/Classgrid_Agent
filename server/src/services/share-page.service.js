@@ -1,11 +1,12 @@
-// Share pages: database work used by the /api/pages routes and by the AI tools publish_page and page_comments.
+// Share pages: database work used by the /api/pages routes and by the AI tools publish_page and page_comments, and
+// the saving of a video the AI made with make_video as a page of kind "video" (saveVideoArtifact).
 import crypto from "crypto";
 import mongoose from "mongoose";
 import SharePage from "../models/SharePage.js";
 import User from "../models/User.js";
 import {
     pageLink, isOwner, canView, cleanTitle, checkHtml, checkVisibility, checkCommentText, checkDataWrite, dataEntries, COMMENTS_MAX,
-    cleanQuote, pageForClient, copyPageTitle,
+    cleanQuote, pageForClient, copyPageTitle, kindOf, commentPlace, clockTime, byteSize, VIDEO_SOURCE_MAX_BYTES,
 } from "./share-page.helpers.js";
 import { profilesOf } from "./live-doc-share.service.js";
 import { normEmail } from "./live-doc.helpers.js";
@@ -20,7 +21,7 @@ export async function findPage(id, select) {
 }
 
 export function commentView(c) {
-    return { id: c.id, userId: c.userId ? String(c.userId) : null, name: c.name, email: c.email, text: c.text, quote: c.quote || "", at: c.at, resolved: !!c.resolved, replyTo: c.replyTo || null, byAi: !!c.byAi };
+    return { id: c.id, userId: c.userId ? String(c.userId) : null, name: c.name, email: c.email, text: c.text, quote: c.quote || "", ...commentPlace(c), at: c.at, resolved: !!c.resolved, replyTo: c.replyTo || null, byAi: !!c.byAi };
 }
 
 /** The page as the signed-in user gets it, with everyone's current name and photo. */
@@ -35,13 +36,21 @@ export async function removeComment(pageId, commentId) {
     return res.modifiedCount > 0;
 }
 
-/** A copy of the page for this person: theirs, private, with the same HTML (not its comments or its saved data). */
-export const duplicatePage = (page, user) => SharePage.create({ owner: user._id, title: copyPageTitle(page.title), html: page.html, visibility: "private" });
+/**
+ * A copy of the page for this person: theirs, private, with the same HTML (not its comments or its saved data). A
+ * video's copy is a video with the same video (and the HTML it was made from, so their AI can change their copy).
+ */
+export function duplicatePage(page, user) {
+    const base = { owner: user._id, title: copyPageTitle(page.title), visibility: "private" };
+    if (kindOf(page) !== "video") return SharePage.create({ ...base, html: page.html });
+    const video = typeof page.video?.toObject === "function" ? page.video.toObject() : { ...page.video };
+    return SharePage.create({ ...base, kind: "video", video });
+}
 
 /** The pages this person owns and the pages shared with them by name (not the ones only a link opens). */
 export async function pagesOf(user) {
     const email = normEmail(user.email);
-    const fields = "title visibility linkRole owner members pinnedBy versions comments.resolved comments.replyTo createdAt updatedAt";
+    const fields = "title kind video.poster video.seconds video.url visibility linkRole owner members pinnedBy versions comments.resolved comments.replyTo createdAt updatedAt";
     const [mine, shared] = await Promise.all([
         SharePage.find({ owner: user._id }).select(fields).sort({ updatedAt: -1 }).limit(200).lean(),
         SharePage.find({ owner: { $ne: user._id }, $or: [{ "members.userId": user._id }, ...(email ? [{ "members.email": email }] : [])] }).select(fields).sort({ updatedAt: -1 }).limit(200).lean(),
@@ -55,10 +64,11 @@ export async function pagesOf(user) {
 
 export function summaryView(p) {
     const open = (p.comments || []).filter((c) => !c.resolved).length;
-    return { id: String(p._id), title: p.title, visibility: p.visibility, versions: p.versions, openComments: open, link: pageLink(p._id), createdAt: p.createdAt, updatedAt: p.updatedAt };
+    return { id: String(p._id), title: p.title, kind: kindOf(p), visibility: p.visibility, versions: p.versions, openComments: open, link: pageLink(p._id), createdAt: p.createdAt, updatedAt: p.updatedAt };
 }
 
-export async function addComment(pageId, { user, text, replyTo = null, byAi = false, quote = "" }) {
+// `place`: where on a video the comment is ({ time, timeEnd, area }, from checkCommentPlace); a reply has none
+export async function addComment(pageId, { user, text, replyTo = null, byAi = false, quote = "", place = null }) {
     const comment = {
         id: newCommentId(),
         userId: user?._id,
@@ -71,6 +81,11 @@ export async function addComment(pageId, { user, text, replyTo = null, byAi = fa
         replyTo: replyTo || null,
         byAi,
     };
+    if (place && !replyTo) {
+        comment.time = place.time;
+        if (place.timeEnd != null) comment.timeEnd = place.timeEnd;
+        if (place.area) comment.area = place.area;
+    }
     const res = await SharePage.updateOne(
         { _id: pageId, [`comments.${COMMENTS_MAX - 1}`]: { $exists: false } },
         { $push: { comments: comment } },
@@ -122,7 +137,7 @@ export const SHARE_PAGE_TOOLS = [
         type: "function",
         function: {
             name: "read_page",
-            description: "Reads a published page (chat.classgrid.in/p/<id>): its title, version and HTML. Use it before changing a page whose HTML is not in this chat (for example the page open beside the chat), then send the whole changed page to publish_page with its page_id. A long page comes in parts: call again with start set to the number given.",
+            description: "Reads a published page (chat.classgrid.in/p/<id>): its title, version and HTML. Use it before changing a page whose HTML is not in this chat (for example the page open beside the chat), then send the whole changed page to publish_page with its page_id. A long page comes in parts: call again with start set to the number given. On a video artifact it gives the HTML the video was made from.",
             parameters: {
                 type: "object",
                 properties: {
@@ -137,7 +152,7 @@ export const SHARE_PAGE_TOOLS = [
         type: "function",
         function: {
             name: "page_comments",
-            description: "Reads and answers comments on a page you published with publish_page. list = all comments, reply = answer a comment (or add a note when comment_id is empty), resolve = mark a comment done.",
+            description: "Reads and answers comments on a page you published with publish_page. list = all comments, reply = answer a comment (or add a note when comment_id is empty), resolve = mark a comment done. Works on video artifacts too (a comment on a video has its time).",
             parameters: {
                 type: "object",
                 properties: {
@@ -158,6 +173,7 @@ export const ARTIFACT_DOC_NAMES = `
 
 ARTIFACTS AND DOCS (the words the user uses):
 - An ARTIFACT is a web page built in HTML, published with publish_page (chat.classgrid.in/p/<id>; in Studio it opens beside the chat). "Artifact", "page", "/p page", "HTML page", "web page", "layout", "mock-up", "dashboard" and "mini app" all mean this. Write the HTML yourself; pictures inside it may come from generate_image, but the artifact itself is never a picture.
+- A video made with make_video is saved as a video artifact (its own chat.classgrid.in/p/<id> link); to change it, call make_video again with its artifactId.
 - A DOC is writing the user keeps editing, shares and comments on (headings, lists, tables, like Markdown or Word), made with create_doc (chat.classgrid.in/docs/<id>). "Doc", "document", "notes", "report to edit" and "Markdown" mean this.
 - Use generate_image only when the user asks for a picture itself. When the tool you need is not loaded, load its group with load_tools (share_pages for an artifact, live_docs for a doc).`;
 
@@ -168,7 +184,8 @@ SHARE PAGES (publish_page, read_page, page_comments):
 2. HOW: one self-contained HTML file: inline CSS and JS; outside scripts only from cdnjs.cloudflare.com, cdn.jsdelivr.net or unpkg.com with an exact version (e.g. chart.js@4.4.1). It must look good in light and dark mode (prefers-color-scheme), fit a phone screen, and use no login, cookies or localStorage for important data.
 3. SAVED DATA: the page can keep shared data (everyone who opens it sees the same): await window.classgrid.data.get(key), await window.classgrid.data.set(key, value) (value = any JSON, null deletes), await window.classgrid.data.list() (object of all keys). Keys: letters, numbers, _ - :. Max 200 keys and 500 KB in all. Use it for forms, polls, checklists and trackers. Use page_comments to read and answer comments people leave on the page.`;
 
-const idFrom = (v) => String(v ?? "").trim().replace(/^.*\/p\//, "").replace(/[/?#].*$/, "");
+// The page id in what the AI sent: the id, or the link itself
+export const idFrom = (v) => String(v ?? "").trim().replace(/^.*\/p\//, "").replace(/[/?#].*$/, "");
 
 export async function runPublishPage(user, args = {}) {
     if (!user?._id) return "FAILED to publish the page: no signed-in user.";
@@ -182,9 +199,10 @@ export async function runPublishPage(user, args = {}) {
     }
     const pageId = idFrom(args.page_id);
     if (pageId) {
-        const page = await findPage(pageId, "owner title visibility versions");
+        const page = await findPage(pageId, "owner title kind visibility versions");
         if (!page) return `FAILED to publish the page: page ${pageId} was not found.`;
         if (!isOwner(page, user._id)) return "FAILED to publish the page: only the person who owns this page can change it.";
+        if (kindOf(page) === "video") return `FAILED to publish the page: ${pageId} is a video, not a web page. To change the video, call make_video with artifactId ${pageId} (read_page gives the HTML it was made from).`;
         const set = { html: args.html };
         if (String(args.title ?? "").trim()) set.title = cleanTitle(args.title);
         if (visibility) set.visibility = visibility;
@@ -207,9 +225,10 @@ export const READ_PAGE_PART = 90000;
 export async function runReadPage(user, args = {}) {
     if (!user?._id) return "FAILED: no signed-in user.";
     const pageId = idFrom(args.page_id);
-    const page = await findPage(pageId, "owner title visibility linkRole members versions html updatedAt");
+    const page = await findPage(pageId, "owner title kind visibility linkRole members versions html video updatedAt");
     if (!page) return `FAILED: page ${pageId || "(empty)"} was not found.`;
     if (!canView(page, user)) return "FAILED: this page is not shared with the user.";
+    if (kindOf(page) === "video") return readVideoPage(page, user, args);
     const html = String(page.html || "");
     const start = Math.max(0, Math.min(html.length, Math.floor(Number(args.start) || 0)));
     const part = html.slice(start, start + READ_PAGE_PART);
@@ -220,10 +239,34 @@ export async function runReadPage(user, args = {}) {
     return `${head}${range}\n${part}`;
 }
 
+// read_page on a video: what the video is, and the HTML it was recorded from (in parts, like a page's HTML)
+function readVideoPage(page, user, args) {
+    const v = page.video || {};
+    const html = String(v.sourceHtml || "");
+    const start = Math.max(0, Math.min(html.length, Math.floor(Number(args.start) || 0)));
+    const part = html.slice(start, start + READ_PAGE_PART);
+    const end = start + part.length;
+    const owner = isOwner(page, user._id);
+    const scenes = (v.scenes || []).map((s) => `${clockTime(s.start)} ${s.title}`).join(" | ");
+    const head = `Video "${page.title}" (version ${page.versions || 1}, artifactId: ${page._id}, ${v.width}x${v.height}, ${v.seconds}s, ${v.fps} fps${owner ? "" : ", shared with the user: only its owner can make a new version"}). Link: ${pageLink(page._id)}\nVideo link: ${v.url}${scenes ? `\nScenes: ${scenes}` : ""}`;
+    const how = owner ? "\nTo change it, change this HTML and call make_video with the whole page and artifactId (same link, new version)." : "";
+    if (!html) return `${head}\nThe HTML it was made from was not kept.`;
+    const range = html.length > READ_PAGE_PART || start > 0 ? `\nHTML it was made from, characters ${start}-${end} of ${html.length}${end < html.length ? ` (more: call read_page again with start ${end})` : " (the end)"}:` : `\nHTML it was made from (${html.length} characters):`;
+    return `${head}${how}${range}\n${part}`;
+}
+
+// Where on a video a comment is, for the AI: " at 0:21", " at 0:21-0:30", and the box on the frame
+function placeWords(c) {
+    if (typeof c.time !== "number") return "";
+    const a = c.area;
+    const box = a ? `, area x ${a.x} y ${a.y} w ${a.w} h ${a.h} of the frame` : "";
+    return ` at ${clockTime(c.time)} (${c.time}s${c.timeEnd != null ? `-${c.timeEnd}s` : ""})${box}`;
+}
+
 export async function runPageComments(user, args = {}) {
     if (!user?._id) return "FAILED: no signed-in user.";
     const pageId = idFrom(args.page_id);
-    const page = await findPage(pageId, "owner title comments");
+    const page = await findPage(pageId, "owner title kind comments");
     if (!page) return `FAILED: page ${pageId || "(empty)"} was not found.`;
     if (!isOwner(page, user._id)) return "FAILED: you can only read comments on the user's own pages.";
     const action = String(args.action || "list").toLowerCase();
@@ -231,7 +274,7 @@ export async function runPageComments(user, args = {}) {
         const list = (page.comments || []).map(commentView);
         if (!list.length) return `"${page.title}" has no comments yet.`;
         return `Comments on "${page.title}" (${list.length}):\n` + list.map((c) =>
-            `- [${c.id}]${c.replyTo ? ` (reply to ${c.replyTo})` : ""} ${c.byAi ? "Classgrid AI" : `${c.name || "Someone"} <${c.email}>`}, ${new Date(c.at).toISOString()}${c.resolved ? ", resolved" : ""}${c.quote ? `, on "${String(c.quote).slice(0, 300)}"` : ""}: ${c.text}`
+            `- [${c.id}]${c.replyTo ? ` (reply to ${c.replyTo})` : ""} ${c.byAi ? "Classgrid AI" : `${c.name || "Someone"} <${c.email}>`}, ${new Date(c.at).toISOString()}${c.resolved ? ", resolved" : ""}${placeWords(c)}${c.quote ? `, on "${String(c.quote).slice(0, 300)}"` : ""}: ${c.text}`
         ).join("\n");
     }
     const cid = String(args.comment_id || "").trim();
@@ -247,4 +290,46 @@ export async function runPageComments(user, args = {}) {
         return c ? `Reply added (${c.id}).` : "FAILED: this page has too many comments.";
     }
     return 'FAILED: action must be "list", "reply" or "resolve".';
+}
+
+// ---------------------------------------------------------------------------------------------------------
+// make_video: the video is an artifact (owner, 2026-11-27)
+
+/**
+ * Before a video is made to update an artifact: whether this person may (their own video). Answers the reason it
+ * can't, or "" when it can. `artifactId` is the id or the /p/ link.
+ */
+export async function videoArtifactProblem(user, artifactId) {
+    const id = idFrom(artifactId);
+    if (!id) return "";
+    const page = await findPage(id, "owner kind");
+    if (!page) return `artifact ${id} was not found.`;
+    if (!isOwner(page, user?._id)) return "only the person who owns this video can change it.";
+    if (kindOf(page) !== "video") return `${id} is a web page, not a video. Leave artifactId out to make a new video.`;
+    return "";
+}
+
+/**
+ * Saves a made video as an artifact: a new private page of kind "video" owned by `user`, or (artifactId) a new
+ * version of the person's own video at the same link. `video`: { url, poster, stills, seconds, width, height, fps,
+ * scenes: [{ title, start, end, thumb }], sourceHtml }. Answers { id, title, versions, link } or throws.
+ */
+export async function saveVideoArtifact(user, { artifactId = "", title = "", video }) {
+    if (!user?._id) throw new Error("no signed-in user.");
+    // (the HTML it was made from is kept for the AI to change the video later, when it fits well inside the page's
+    // database record; a bigger one is left out and read_page says it was not kept)
+    if (byteSize(video?.sourceHtml) > VIDEO_SOURCE_MAX_BYTES) video = { ...video, sourceHtml: "" };
+    const id = idFrom(artifactId);
+    if (id) {
+        const problem = await videoArtifactProblem(user, id);
+        if (problem) throw new Error(problem);
+        const set = { kind: "video", video };
+        if (String(title ?? "").trim()) set.title = cleanTitle(title);
+        // (the owner again in the filter: the video changes only while it is still theirs)
+        const saved = await SharePage.findOneAndUpdate({ _id: id, owner: user._id }, { $set: set, $inc: { versions: 1 } }, { new: true, runValidators: true }).select("title versions");
+        if (!saved) throw new Error("only the person who owns this video can change it.");
+        return { id: String(saved._id), title: saved.title, versions: saved.versions, link: pageLink(saved._id) };
+    }
+    const page = await SharePage.create({ owner: user._id, title: cleanTitle(title), kind: "video", video, visibility: "private" });
+    return { id: String(page._id), title: page.title, versions: page.versions, link: pageLink(page._id) };
 }

@@ -137,6 +137,8 @@ test("every writer writes the row down, with the store it really uploads to and 
     const video = squeeze(chat.slice(chat.indexOf('const { key, url } = await uploadToCdn(video.mp4, name, "video/mp4");'), chat.indexOf("const libraryRoom = await libraryRoomFor(req.user, video.mp4.length)")).replace(/^\s*\/\/.*$/gm, ""));
     assert.ok(video.includes('rememberStoredFile({ userId: req.user?._id, store: "s3", key, kind: "video" });'));
     assert.ok(video.includes('const frame = await uploadToCdn(c.jpg, `frame-${c.at}s.jpg`, "image/jpeg"); rememberStoredFile({ userId: req.user?._id, store: "s3", key: frame.key, kind: "video-frame" });'));
+    // (and each scene's picture of a video artifact, 2026-11-27)
+    assert.ok(video.includes('const shot = await uploadToCdn(t.jpg, `scene-${t.at}s.jpg`, "image/jpeg"); rememberStoredFile({ userId: req.user?._id, store: "s3", key: shot.key, kind: "video-frame" });'));
     const render = read("../src/services/video-render.service.js");
     assert.ok(render.includes('await s3.send(new PutObjectCommand({ Bucket: process.env.AWS_S3_ERP_BUCKET_NAME || "erp-classgrid", Key: key, Body: buffer, ContentType: mimeType }));'));
     assert.ok(render.includes("return { key, url:"));
@@ -146,7 +148,7 @@ test("every writer writes the row down, with the store it really uploads to and 
     assert.ok(picture.includes("await uploadBufferToR2( imageBuffer,"));
     assert.ok(squeeze(chat).includes("const r2Url = await uploadBufferToR2( imageBuffer, `generated-${Date.now()}.${imageExt}`, imageMime, imageKey );"), "the picture is uploaded under the key written down");
     // No writer of these kinds is left without a row: as many rows as uploads
-    assert.equal((chat.match(/rememberStoredFile\(\{/g) || []).length, 8);
+    assert.equal((chat.match(/rememberStoredFile\(\{/g) || []).length, 9);
     assert.equal((chat.match(/`ai-generated\//g) || []).length, 6, "a new ai-generated writer needs a row too: add it here");
 
     // WhatsApp: R2 through r2.service.js, in the bucket that file names; the readers pass the account on

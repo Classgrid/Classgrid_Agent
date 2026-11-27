@@ -3,14 +3,15 @@
 // with a role, who has it open now, views, pin, a copy and reports. The sharing itself is the live docs' service
 // (services/live-doc-share.service.js), which works on a doc or a page; who may do what is in
 // services/share-page.helpers.js. The answers the phone app already reads (GET /:id, PATCH /:id, the comment
-// routes) keep their old fields.
+// routes) keep their old fields. A video the AI made (make_video) is a page of kind "video" (2026-11-27): the same
+// routes, with `video` in place of the HTML, and comments that may be on a time and an area of the video.
 import express from "express";
 import { isAuthenticated } from "../middleware/auth.middleware.js";
 import SharePage from "../models/SharePage.js";
 import User from "../models/User.js";
 import {
     pageLink, isOwner, canView, canWriteData, canComment, canShare, canRename, canResolveComment, canDeleteComment, cleanTitle, checkVisibility,
-    checkCommentText, pageRow, DATA_KEY_RE,
+    checkCommentText, checkCommentPlace, pageRow, kindOf, DATA_KEY_RE,
 } from "../services/share-page.helpers.js";
 import {
     findPage, commentView, summaryView, addComment, setCommentResolved, removeComment, writeData, dataObject, pageFor, duplicatePage, pagesOf,
@@ -26,12 +27,13 @@ const fail = (res, status, message, more = {}) => res.status(status).json({ mess
 const NOT_FOUND = "This page doesn't exist or you don't have access to it.";
 const CANT_SHARE = "Only the owner and the editors of this page can share it.";
 const CANT_COMMENT = "You can open this page, but not comment on it.";
-// (everything of a page but its HTML and its saved data: enough to know who may do what, and to send it back)
-const LIGHT = "-html -data";
+// (everything of a page but its HTML and its saved data: enough to know who may do what, and to send it back; a
+// video's HTML it was made from is never sent)
+const LIGHT = "-html -data -video.sourceHtml";
 
-const wrap = (fn) => async (req, res) => {
+const wrap = (fn) => async (req, res, next) => {
     try {
-        await fn(req, res);
+        await fn(req, res, next);
     } catch (err) {
         console.error("[share-pages]", err?.message || err);
         // (the sharing service says what went wrong in words for the person: "Type an email address first.")
@@ -61,8 +63,24 @@ router.get("/", isAuthenticated, wrap(async (req, res) => {
     res.json({ pages: mine.map((p) => ({ ...summaryView(p), ...pageRow(p, req.user) })), shared: shared.map((p) => pageRow(p, req.user, profiles)) });
 }));
 
+// ?card=1: only what the card of a /p/ link in the chat needs to draw itself (2026-11-27), with the same access
+// check; it is not opening the page, so no view is counted, no invite is tied to the account and nobody is shown
+// as reading it
+router.get("/:id", isAuthenticated, wrap(async (req, res, next) => {
+    if (req.query.card !== "1") return next();
+    const page = await load(req, res, { select: "owner kind title visibility linkRole members requests video.poster video.seconds video.url" });
+    if (!page) return;
+    const kind = kindOf(page);
+    res.json({
+        page: {
+            _id: String(page._id), kind, title: page.title,
+            ...(kind === "video" ? { video: { poster: String(page.video?.poster || ""), seconds: Number(page.video?.seconds) || 0, url: String(page.video?.url || "") } } : {}),
+        },
+    });
+}));
+
 router.get("/:id", isAuthenticated, wrap(async (req, res) => {
-    const page = await load(req, res, { select: "-data" });
+    const page = await load(req, res, { select: "-data -video.sourceHtml" });
     if (!page) return;
     const reading = await readingNow(page, req.user);
     // Polling: nothing changed since the time the screen already has (who has it open is told every time)
@@ -105,7 +123,7 @@ router.patch("/:id", isAuthenticated, wrap(async (req, res) => {
         if (!v.ok) return fail(res, 400, v.error);
         set.visibility = v.value;
     }
-    const saved = await SharePage.findByIdAndUpdate(page._id, { $set: set }, { new: true }).select("title visibility versions comments.resolved createdAt updatedAt");
+    const saved = await SharePage.findByIdAndUpdate(page._id, { $set: set }, { new: true }).select("title kind visibility versions comments.resolved createdAt updatedAt");
     res.json({ page: summaryView(saved) });
 }));
 
@@ -200,15 +218,18 @@ router.post("/:id/report", isAuthenticated, wrap(async (req, res) => {
 
 // ── Comments ──
 
-// { text, replyTo, quote }: `quote` is the words of the page the comment is on
+// { text, replyTo, quote }: `quote` is the words of the page the comment is on. On a video also { time, timeEnd,
+// area }: the moment (seconds), the end of a stretch of time, and a box on the frame (x, y, w, h, each 0-1)
 router.post("/:id/comments", isAuthenticated, wrap(async (req, res) => {
-    const page = await load(req, res, { check: canComment, refused: CANT_COMMENT, select: "owner visibility linkRole members requests comments.id" });
+    const page = await load(req, res, { check: canComment, refused: CANT_COMMENT, select: "owner kind video.seconds visibility linkRole members requests comments.id" });
     if (!page) return;
     const text = checkCommentText(req.body?.text);
     if (!text.ok) return fail(res, 400, text.error);
     const replyTo = req.body?.replyTo ? String(req.body.replyTo) : null;
     if (replyTo && !(page.comments || []).some((c) => c.id === replyTo)) return fail(res, 400, "That comment was not found.");
-    const comment = await addComment(page._id, { user: req.user, text: text.value, replyTo, quote: req.body?.quote });
+    const place = checkCommentPlace(req.body, page);
+    if (!place.ok) return fail(res, 400, place.error);
+    const comment = await addComment(page._id, { user: req.user, text: text.value, replyTo, quote: req.body?.quote, place: place.value });
     if (!comment) return fail(res, 400, "This page has too many comments.");
     res.status(201).json({ comment: commentView(comment), page: await fresh(req) });
 }));

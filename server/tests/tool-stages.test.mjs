@@ -36,6 +36,11 @@ class FakeSSH {
     }
     async getFile(local, remote) {
         if (remote.endsWith("out.mp4")) fs.writeFileSync(local, Buffer.alloc(3 * 1048576 + 200000));
+        else if (remote.includes("thumb_")) {
+            // (the scenes' pictures of a video artifact: the ones in sandbox.thumbs were written)
+            if ((sandbox.thumbs || []).includes(Number(remote.match(/thumb_(\d+)\.jpg$/)?.[1]))) fs.writeFileSync(local, "thumb");
+            else throw new Error("No such file");
+        }
         else if ((sandbox.stills ?? 3) > Number(remote.match(/check_(\d)\.jpg$/)?.[1] ?? 9)) fs.writeFileSync(local, "jpg");
         else throw new Error("No such file");
     }
@@ -223,6 +228,14 @@ test("the still frames are still written by the recorder, one per check time", a
     assert.deepEqual(Object.keys(written).filter((p) => p.includes("check_")).sort(), ["/work/check_0.jpg", "/work/check_1.jpg", "/work/check_2.jpg"]);
 });
 
+test("the scenes' pictures (a video artifact) are written by the recorder at each scene's frame, two at one frame both", async () => {
+    const { written } = await runRecorder({ seconds: 2, fps: 30, width: 640, height: 360, checks: [0.4, 1, 1.7], thumbs: [0, 1, 1.01, 5] });
+    assert.deepEqual(Object.keys(written).filter((p) => p.includes("thumb_")).sort(), ["/work/thumb_0.jpg", "/work/thumb_1.jpg", "/work/thumb_2.jpg", "/work/thumb_3.jpg"]);
+    // (with no scenes there are none, as before)
+    const before = await runRecorder({ seconds: 1, fps: 30, width: 640, height: 360, checks: [0.2, 0.5, 0.85] });
+    assert.equal(Object.keys(before.written).some((p) => p.includes("thumb_")), false);
+});
+
 test("marks are read whole however the output is cut into pieces, and nothing else in the output is taken for one", () => {
     const text = `@cg-stage {"at":"open"}\nDocker says something\n@cg-stage {"at":"record","frame":0,"total":90}\n@cg-stage {"at":"record","frame":45,"total":90}\n@cg-stage not json\n@cg-stage {"at":"join","total":90}\n`;
     for (const size of [1, 7, 23, 1000]) {
@@ -406,6 +419,18 @@ test("renderVideo: the recorder's output becomes stages while it still runs, the
     assert.equal(video.frames, 300);
     assert.deepEqual(video.checks.map((k) => k.at), [2, 5, 8.5]);
     assert.deepEqual(video.cfg, { seconds: 10, fps: 30, width: 1280, height: 720, checks: [2, 5, 8.5] });
+});
+
+test("renderVideo: the scenes' pictures come back with their place in the list; one that was not cut is left out", async () => {
+    sandbox = { output: OUTPUT, result: JSON.stringify({ ok: true, frames: 300, errors: [] }), thumbs: [0, 2] };
+    const video = await renderVideo({ html: "<html></html>", seconds: 10, thumbs: [1, 4.5, 12, -3] });
+    assert.deepEqual(video.cfg.thumbs, [1, 4.5, 10, 0]);
+    assert.deepEqual(video.thumbs.map((t) => [t.n, t.at, String(t.jpg)]), [[0, 1, "thumb"], [2, 10, "thumb"]]);
+    assert.deepEqual(video.checks.map((k) => k.at), [2, 5, 8.5]);
+    // (no scenes: nothing new in the recorder's settings)
+    sandbox = { output: OUTPUT, result: JSON.stringify({ ok: true, frames: 300, errors: [] }) };
+    const plain = await renderVideo({ html: "<html></html>", seconds: 10 });
+    assert.deepEqual([plain.thumbs, "thumbs" in plain.cfg], [[], false]);
 });
 
 test("renderVideo with nobody showing stages works as before", async () => {

@@ -4161,7 +4161,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                     type: "function",
                     function: {
                         name: "make_video",
-                        description: "Makes an MP4 video (explainer, product or launch promo, animated intro, reel, motion graphics, animated slides) from an animated HTML page you write, like a motion designer. The page is recorded frame by frame in Chromium and joined with ffmpeg, so text is sharp, fonts are real and motion is smooth; no video model is used. Write ONE complete HTML page that plays its whole animation once from page load (time 0), sized exactly to width x height (body margin 0, overflow hidden). Animate with CSS @keyframes and animation-delay, the Web Animations API, GSAP from cdnjs, or requestAnimationFrame with performance.now(). The recorder controls time, so never wait for clicks, hover, scroll or real waiting. Google Fonts and public script/image URLs load. No sound. Plan the scenes on a timeline and keep each text on screen long enough to read. Recording takes about 1 minute per 10 seconds of 1080p video. Returns the video link (put it in your reply; it plays in the chat) and three still frames to check.",
+                        description: "Makes an MP4 video (explainer, product or launch promo, animated intro, reel, motion graphics, animated slides) from an animated HTML page you write, like a motion designer. The page is recorded frame by frame in Chromium and joined with ffmpeg, so text is sharp, fonts are real and motion is smooth; no video model is used. Write ONE complete HTML page that plays its whole animation once from page load (time 0), sized exactly to width x height (body margin 0, overflow hidden). Animate with CSS @keyframes and animation-delay, the Web Animations API, GSAP from cdnjs, or requestAnimationFrame with performance.now(). The recorder controls time, so never wait for clicks, hover, scroll or real waiting. Google Fonts and public script/image URLs load. No sound. Plan the scenes on a timeline and keep each text on screen long enough to read. Recording takes about 1 minute per 10 seconds of 1080p video. The video is saved as an artifact: give it a title and its scenes, and send artifactId to change a video you made before (same link, new version). Returns the artifact link (put it in your reply; it opens the video with its scenes), the video link and three still frames to check.",
                         parameters: {
                             type: "object",
                             properties: {
@@ -4170,7 +4170,21 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                                 fps: { type: "number", description: "Frames per second: 24, 30 (default) or 60." },
                                 width: { type: "number", description: "Width in pixels (default 1920). Use 1080 with height 1920 for a vertical reel or WhatsApp status." },
                                 height: { type: "number", description: "Height in pixels (default 1080)." },
-                                fileName: { type: "string", description: "Short file name, e.g. classgrid-launch.mp4" }
+                                fileName: { type: "string", description: "Short file name, e.g. classgrid-launch.mp4" },
+                                title: { type: "string", description: "The video's name, shown on its card, e.g. \"Classgrid Studio Mode\"." },
+                                scenes: {
+                                    type: "array",
+                                    description: "The scenes on your timeline, in order: each a short title and the second it starts at (the first at 0). Each ends where the next starts.",
+                                    items: {
+                                        type: "object",
+                                        properties: {
+                                            title: { type: "string", description: "Short scene name, e.g. \"AI Hub\"." },
+                                            start: { type: "number", description: "Second the scene starts at." }
+                                        },
+                                        required: ["title", "start"]
+                                    }
+                                },
+                                artifactId: { type: "string", description: "Id (or link) of a video artifact you made before, to change it: the new video replaces it at the same link." }
                             },
                             required: ["html", "seconds"]
                         }
@@ -5611,14 +5625,26 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     },
                     make_video: async (args) => {
                         // Every stage of the work is a row of this step in the chat, as it happens (utils/tool-stages.js;
-                        // the words are VIDEO_STAGES in video-render.service.js). A stage that fails shows the reason; what
-                        // the model is told below is the same as before.
+                        // the words are VIDEO_STAGES in video-render.service.js). A stage that fails shows the reason.
+                        // The video is an artifact (2026-11-27): a page of kind "video" at chat.classgrid.in/p/<id>, with its
+                        // scenes, each with a picture cut at its start (share-page.service.js saveVideoArtifact).
                         let stages = null;
                         try {
-                            const { renderVideo, uploadToCdn, VIDEO_STAGES } = await import('../services/video-render.service.js');
+                            const { renderVideo, uploadToCdn, VIDEO_STAGES, videoSeconds } = await import('../services/video-render.service.js');
+                            const { saveVideoArtifact, videoArtifactProblem } = await import('../services/share-page.service.js');
+                            const { cleanScenes, sceneThumbTime, nearestStill, clockTime } = await import('../services/share-page.helpers.js');
+                            // (a video someone else owns, or a web page, is refused before minutes of recording)
+                            const artifactId = String(args?.artifactId || "").trim();
+                            if (artifactId) {
+                                const problem = await videoArtifactProblem(req.user, artifactId);
+                                if (problem) return `FAILED to make the video: ${problem}`;
+                            }
                             stages = stageRun(VIDEO_STAGES);
                             const name = `${String(args?.fileName || "video").replace(/\.mp4$/i, "").replace(/[^\w-]+/g, "-").slice(0, 60) || "video"}.mp4`;
-                            const video = await renderVideo(args || {}, stages);
+                            // (the card's name: the title, else the file name, else "Video"; a new version keeps its name when none is given)
+                            const title = String(args?.title || "").trim() || (artifactId ? "" : (args?.fileName ? name.replace(/\.mp4$/, "").replace(/[-_]+/g, " ").trim() : "") || "Video");
+                            const sceneList = Array.isArray(args?.scenes) && args.scenes.length ? cleanScenes(args.scenes, videoSeconds(args?.seconds), title || "Video") : [];
+                            const video = await renderVideo({ ...(args || {}), thumbs: sceneList.map(sceneThumbTime) }, stages);
                             stages.start("upload");
                             const { key, url } = await uploadToCdn(video.mp4, name, "video/mp4");
                             stages.done();
@@ -5626,14 +5652,31 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                             // record is made, and each still frame, which never has one)
                             rememberStoredFile({ userId: req.user?._id, store: "s3", key, kind: "video" });
                             const stills = [];
+                            const stillShots = [];
                             for (const [i, c] of video.checks.entries()) {
                                 // (each still frame is its own row, with its picture once it is uploaded)
                                 stages.start(`still-${i}`, { note: `at ${c.at}s` });
                                 const frame = await uploadToCdn(c.jpg, `frame-${c.at}s.jpg`, "image/jpeg");
                                 rememberStoredFile({ userId: req.user?._id, store: "s3", key: frame.key, kind: "video-frame" });
                                 stills.push(`${c.at}s: ${frame.url}`);
+                                stillShots.push({ at: c.at, url: frame.url });
                                 stages.done({ note: `at ${c.at}s`, image: frame.url });
                             }
+                            // Each scene's picture, cut by the recorder; a scene whose frame could not be cut or
+                            // uploaded gets the still frame nearest it
+                            const scenes = cleanScenes(sceneList, video.cfg.seconds, title || "Video");
+                            const thumbs = {};
+                            for (const t of video.thumbs || []) {
+                                try {
+                                    const shot = await uploadToCdn(t.jpg, `scene-${t.at}s.jpg`, "image/jpeg");
+                                    rememberStoredFile({ userId: req.user?._id, store: "s3", key: shot.key, kind: "video-frame" });
+                                    thumbs[t.n] = shot.url;
+                                } catch (thumbErr) {
+                                    console.error("[make_video] Couldn't upload a scene's picture:", thumbErr.message);
+                                }
+                            }
+                            const poster = stillShots[0]?.url || "";
+                            for (const [n, s] of scenes.entries()) s.thumb = thumbs[n] || nearestStill(stillShots, sceneThumbTime(s)) || poster;
                             const libraryRoom = await libraryRoomFor(req.user, video.mp4.length).catch(() => ({ ok: true }));
                             if (libraryRoom.ok) try {
                                 stages.start("library");
@@ -5650,7 +5693,22 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 console.error("[make_video] Couldn't add the video to the AI Library:", libErr.message);
                             }
                             const { width, height, seconds, fps } = video.cfg;
-                            return `SUCCESS: ${name} is ready (${width}x${height}, ${seconds}s, ${fps} fps, ${(video.mp4.length / 1048576).toFixed(1)} MB). Video link: ${url}\nPut this link in your reply; it plays in the chat.\nStill frames: ${stills.join("  ")}${video.errors.length ? `\nProblems on the page: ${video.errors.join(" | ")}` : ""}\nIf you can see the frames, check them: if text overlaps, is cut off, or something is missing, fix the HTML and call make_video again.`;
+                            // The artifact: the card in the chat and the viewer with its scenes and comments
+                            let artifact = null;
+                            let artifactError = "";
+                            try {
+                                artifact = await saveVideoArtifact(req.user, {
+                                    artifactId, title,
+                                    video: { url, poster, stills: stillShots.map((s) => s.url), seconds, width, height, fps, scenes, sourceHtml: String(args?.html || "") },
+                                });
+                            } catch (saveErr) {
+                                artifactError = saveErr.message;
+                                console.error("[make_video] Couldn't save the video as an artifact:", saveErr.message);
+                            }
+                            const size = `${name} is ready (${width}x${height}, ${seconds}s, ${fps} fps, ${(video.mp4.length / 1048576).toFixed(1)} MB)`;
+                            const checkNote = `\nStill frames: ${stills.join("  ")}${video.errors.length ? `\nProblems on the page: ${video.errors.join(" | ")}` : ""}\nIf you can see the frames, check them: if text overlaps, is cut off, or something is missing, fix the HTML and call make_video again${artifact ? ` with artifactId ${artifact.id}` : ""}.`;
+                            if (!artifact) return `SUCCESS: ${size}. Video link: ${url}\nPut this link in your reply; it plays in the chat.\n(The video could not be saved as an artifact: ${artifactError})${checkNote}`;
+                            return `SUCCESS: ${size}. "${artifact.title}" is saved as a video artifact (version ${artifact.versions}, private), artifactId: ${artifact.id}\nArtifact: ${artifact.link}\nVideo link: ${url}\nPut the Artifact link in your reply, on its own line: it shows as the video's card in the chat and opens the video with its scenes. Do not put the Video link in your reply.\nScenes: ${scenes.map((s) => `${clockTime(s.start)} ${s.title}`).join(" | ")}${checkNote}`;
                         } catch (e) {
                             stages?.fail(e.message);
                             return `FAILED to make the video: ${e.message}`;
