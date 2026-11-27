@@ -171,6 +171,8 @@ import { PermissionCard, PermissionModePicker, PERMISSION_MODE_KEY, readPermissi
 
 import AIThinkingBlock from "./AIThinkingBlock";
 import RichChatInput, { type RichChatTarget } from "./RichChatInput";
+import { registerMentionItems, useMentionItems, WithMentions, SEARCH_MENTION_ITEMS, WEB_SEARCH_LOGO, DEEP_RESEARCH_LOGO } from "./mentionTokens";
+import { mcpApi, type CustomMcpServer } from "./custom-mcp/customMcpApi";
 import ReactMarkdown from "react-markdown";
 import remarkMath from "remark-math";
 import remarkGfm from "remark-gfm";
@@ -1726,11 +1728,17 @@ export const USER_MD_COMPONENTS: any = {
   blockquote: ({ children }: any) => <blockquote className="border-l-2 border-foreground/30 pl-2 my-1">{children}</blockquote>,
   img: () => null,
 };
+// The user's own bubble only (not doc comments): a picked app's "@Name" shows as its logo and name (mentionTokens.tsx)
+const USER_BUBBLE_MD_COMPONENTS: any = {
+  ...USER_MD_COMPONENTS,
+  p: ({ children }: any) => <p className="m-0 [&+p]:mt-2"><WithMentions>{children}</WithMentions></p>,
+  li: ({ children }: any) => <li className="my-0.5"><WithMentions>{children}</WithMentions></li>,
+};
 function UserMessageText({ text }: { text: string }) {
   return (
     <div className="text-[16px] leading-[24px] break-words text-[#37352f] dark:text-[#F0EFED] cursor-text">
       {/* every line break the user typed stays a line break */}
-      <ReactMarkdown remarkPlugins={[remarkGfm]} components={USER_MD_COMPONENTS} skipHtml>{String(text || "").replace(/\n/g, "  \n")}</ReactMarkdown>
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={USER_BUBBLE_MD_COMPONENTS} skipHtml>{String(text || "").replace(/\n/g, "  \n")}</ReactMarkdown>
     </div>
   );
 }
@@ -2271,6 +2279,13 @@ export const INTEGRATIONS_LIST: any[] = [
   { id: "instagram", name: "Instagram Business", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/Instagram_logo_2016.svg" },
 ];
 
+// "@Web search", "@Deep research" and "@<plugin>" in the chat box and in the user's own messages show as the app's
+// logo and name (mentionTokens.tsx); the user's custom connectors are added by the panel once they are loaded
+registerMentionItems("builtin", [
+  ...SEARCH_MENTION_ITEMS,
+  ...INTEGRATIONS_LIST.filter((i) => i.imgUrl).map((i) => ({ name: i.name, logo: i.imgUrl, invertInDarkMode: i.invertInDarkMode, invertInLightMode: i.invertInLightMode })),
+]);
+
 
 
 // Desktop app: a Windows notification when the user isn't looking at the app
@@ -2472,6 +2487,25 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
 
   // @ mention state
   const [atMenuOpen, setAtMenuOpen] = useState(false);
+  // The user's custom connectors (turned on): listed in the "@" menu after the built-in plugins, and their "@Name"
+  // shows as their logo and name like the built-in ones
+  const [customConnectors, setCustomConnectors] = useState<CustomMcpServer[]>([]);
+  useEffect(() => {
+    if (!user?._id) return;
+    let alive = true;
+    mcpApi.list().then((list) => {
+      if (!alive) return;
+      const on = list.filter((s) => s.enabled);
+      setCustomConnectors(on);
+      registerMentionItems("custom", on.filter((s) => s.iconUrl).map((s) => ({ name: s.name, logo: s.iconUrl, invertInDarkMode: s.invertInDarkMode })));
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [user?._id]);
+  const atMenuIntegrations = useMemo(
+    () => [...INTEGRATIONS_LIST, ...customConnectors.map((s) => ({ id: `server:${s.id}`, name: s.name, description: s.description, imgUrl: s.iconUrl || undefined, invertInDarkMode: s.invertInDarkMode }))],
+    [customConnectors]
+  );
+  const mentionItems = useMentionItems();
   const [atMenuQuery, setAtMenuQuery] = useState("");
   const [atMenuSelectedIndex, setAtMenuSelectedIndex] = useState(0);
   const [slashMenuOpen, setSlashMenuOpen] = useState(false);
@@ -7294,7 +7328,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                         className="absolute bottom-[100%] mb-2 left-0 w-full max-h-[350px] overflow-y-auto bg-popover rounded-2xl border border-border shadow-2xl z-50 flex flex-col p-1.5"
                       >
                         {(() => {
-                          const filteredIntegrations = INTEGRATIONS_LIST.filter(item =>
+                          const filteredIntegrations = atMenuIntegrations.filter(item =>
                             item.name.toLowerCase().includes(atMenuQuery.toLowerCase()) ||
                             (item.description && item.description.toLowerCase().includes(atMenuQuery.toLowerCase()))
                           );
@@ -7303,8 +7337,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                             { id: "add-library", name: "Add from library", description: "Browse and search your files", icon: FileText, action: () => setShowFilesPanel(true) },
                             { id: "create-image", name: "Create image", description: "Visualize anything", icon: FileImage },
                             { id: "sketch", name: "Sketch", description: "Draw and attach an image", icon: FileImage },
-                            { id: "web-search", name: "Web search", description: "Find real-time news and info", icon: Globe2 },
-                            { id: "deep-research", name: "Deep research", description: "Get a detailed report", icon: Globe2 },
+                            { id: "web-search", name: "Web search", description: "Find real-time news and info", imgUrl: WEB_SEARCH_LOGO },
+                            { id: "deep-research", name: "Deep research", description: "Get a detailed report", imgUrl: DEEP_RESEARCH_LOGO },
                           ].filter(item => item.name.toLowerCase().includes(atMenuQuery.toLowerCase()));
                           const menuItems = [...baseItems, ...notListedYet(baseItems, filteredIntegrations)];
 
@@ -7430,12 +7464,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                     ref={inputRef as any}
                     disabled={isRecording || isTranscribing || !!chatEnded}
                     value={input}
+                    mentions={mentionItems}
                     onChange={onTyped}
                     onPaste={handlePaste}
                     onKeyDown={(e) => {
                       if (slashMenuKey(e)) return;
                       if (atMenuOpen) {
-                        const filteredIntegrations = INTEGRATIONS_LIST.filter(item =>
+                        const filteredIntegrations = atMenuIntegrations.filter(item =>
                           item.name.toLowerCase().includes(atMenuQuery.toLowerCase()) ||
                           (item.description && item.description.toLowerCase().includes(atMenuQuery.toLowerCase()))
                         );
@@ -7444,8 +7479,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                           { id: "add-library", name: "Add from library", description: "Browse and search your files", icon: FileText, action: () => setShowFilesPanel(true) },
                           { id: "create-image", name: "Create image", description: "Visualize anything", icon: FileImage },
                           { id: "sketch", name: "Sketch", description: "Draw and attach an image", icon: FileImage },
-                          { id: "web-search", name: "Web search", description: "Find real-time news and info", icon: Globe2 },
-                          { id: "deep-research", name: "Deep research", description: "Get a detailed report", icon: Globe2 },
+                          { id: "web-search", name: "Web search", description: "Find real-time news and info", imgUrl: WEB_SEARCH_LOGO },
+                          { id: "deep-research", name: "Deep research", description: "Get a detailed report", imgUrl: DEEP_RESEARCH_LOGO },
                         ].filter(item => item.name.toLowerCase().includes(atMenuQuery.toLowerCase()));
                         const menuItems = [...baseItems, ...notListedYet(baseItems, filteredIntegrations)];
 
@@ -8118,7 +8153,7 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                   className="absolute top-[100%] mt-2 left-0 w-full max-h-[160px] overflow-y-auto bg-popover rounded-2xl border border-border shadow-2xl z-50 flex flex-col p-1.5 custom-scrollbar"
                                 >
                                   {(() => {
-                                    const filteredIntegrations = INTEGRATIONS_LIST.filter(item =>
+                                    const filteredIntegrations = atMenuIntegrations.filter(item =>
                                       item.name.toLowerCase().includes(atMenuQuery.toLowerCase()) ||
                                       (item.description && item.description.toLowerCase().includes(atMenuQuery.toLowerCase()))
                                     );
@@ -8127,8 +8162,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                       { id: "add-library", name: "Add from library", description: "Browse and search your files", icon: FileText, action: () => setShowFilesPanel(true) },
                                       { id: "create-image", name: "Create image", description: "Visualize anything", icon: FileImage },
                                       { id: "sketch", name: "Sketch", description: "Draw and attach an image", icon: FileImage },
-                                      { id: "web-search", name: "Web search", description: "Find real-time news and info", icon: Globe2 },
-                                      { id: "deep-research", name: "Deep research", description: "Get a detailed report", icon: Globe2 },
+                                      { id: "web-search", name: "Web search", description: "Find real-time news and info", imgUrl: WEB_SEARCH_LOGO },
+                                      { id: "deep-research", name: "Deep research", description: "Get a detailed report", imgUrl: DEEP_RESEARCH_LOGO },
                                     ].filter(item => item.name.toLowerCase().includes(atMenuQuery.toLowerCase()));
                                     const menuItems = [...baseItems, ...notListedYet(baseItems, filteredIntegrations)];
 
@@ -8201,12 +8236,13 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                               ref={inputRef as any}
                               disabled={isRecording || isTranscribing}
                               value={input}
+                              mentions={mentionItems}
                               onChange={onTyped}
                               onPaste={handlePaste}
                               onKeyDown={(e) => {
                                 if (slashMenuKey(e)) return;
                                 if (atMenuOpen) {
-                                  const filteredIntegrations = INTEGRATIONS_LIST.filter(item =>
+                                  const filteredIntegrations = atMenuIntegrations.filter(item =>
                                     item.name.toLowerCase().includes(atMenuQuery.toLowerCase()) ||
                                     (item.description && item.description.toLowerCase().includes(atMenuQuery.toLowerCase()))
                                   );
@@ -8215,8 +8251,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
                                     { id: "add-library", name: "Add from library", description: "Browse and search your files", icon: FileText, action: () => setShowFilesPanel(true) },
                                     { id: "create-image", name: "Create image", description: "Visualize anything", icon: FileImage },
                                     { id: "sketch", name: "Sketch", description: "Draw and attach an image", icon: FileImage },
-                                    { id: "web-search", name: "Web search", description: "Find real-time news and info", icon: Globe2 },
-                                    { id: "deep-research", name: "Deep research", description: "Get a detailed report", icon: Globe2 },
+                                    { id: "web-search", name: "Web search", description: "Find real-time news and info", imgUrl: WEB_SEARCH_LOGO },
+                                    { id: "deep-research", name: "Deep research", description: "Get a detailed report", imgUrl: DEEP_RESEARCH_LOGO },
                                   ].filter(item => item.name.toLowerCase().includes(atMenuQuery.toLowerCase()));
                                   const menuItems = [...baseItems, ...notListedYet(baseItems, filteredIntegrations)];
 

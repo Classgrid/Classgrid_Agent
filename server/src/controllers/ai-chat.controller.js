@@ -132,6 +132,8 @@ import { isWebsite } from "../utils/client-app.js";
 import { confirmedEmails, cleanEmail as cleanAccountEmail } from "../utils/account-email.js";
 import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
 import { takeInlineImages, findInlineImage, withInlineImages, isDataUrl, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
+import { pickedApps, pickedGroupIds, pickedAppsNote } from "../utils/picked-apps.js";
+import CustomMcpServer from "../models/CustomMcpServer.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
 const dashboardList = uniqueDashboards.map(d => `- ${d}`).join('\n');
@@ -7093,11 +7095,21 @@ You work on the user's own Windows computer through their Classgrid desktop app,
         const safetyRules = safetyRulesFor(recentUserTexts);
         // (they depend on the last few messages, so they go with the message; Claude never gets them, see above)
         if (safetyRules && !CLAUDE_CHAT_MODELS.has(typeof body.selectedModel === "string" ? body.selectedModel : "")) tailPrompt += `\n\n${safetyRules}`;
+        // Apps picked in the chat box ("@Gmail", "@Web search": utils/picked-apps.js): the AI is told to use them for
+        // this request and their tool groups are loaded from the start. The message itself is not changed. Plugins are
+        // off in a shared Grid chat, so there only Web search and Deep research count.
+        const askedText = typeof body.question === "string" ? body.question : "";
+        const customMcpNames = askedText.includes("@") && !gridSender && req.user
+            ? (await CustomMcpServer.find({ userId: req.user._id || req.user.id, enabled: true }).select("name").lean().catch(() => [])).map((s) => s.name)
+            : [];
+        const picked = pickedApps(askedText, { customNames: customMcpNames, pluginsAllowed: !gridSender });
+        if (picked.names.length) tailPrompt += pickedAppsNote(picked, { researchLine: SLASH_COMMAND_LINES.research });
         console.log(`[AI-TIMING] prompt built at +${Date.now() - requestStartedAt}ms`);
         const toolPlan = planToolsForMessage({
             allTools: llmConfig.tools,
             text: [body.question || "", ...requestAttachments.map(a => a?.name || "")].join(" "),
             attachments: requestAttachments,
+            pickedGroupIds: pickedGroupIds(picked),
             stickyGroupIds: [...Object.keys(stickyAged), ...(body.appMode === "studio" ? ["code_project"] : []), ...(COMMAND_TOOL_GROUPS[slashCommand] || [])], // Studio: the project tools (and the Browser worker) are always there
             role: req.user?.role,
             email: req.user?.email,

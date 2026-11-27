@@ -275,7 +275,7 @@ const IMAGE_MIME = /^image\//i;
  * @param email      the user's email; staff-only (internal) tools also need an @classgrid.in address
  */
 // loadAll: every group this user may use is loaded from the start (background tasks: WhatsApp calls, long tasks)
-export function planToolsForMessage({ allTools, text = "", attachments = [], stickyGroupIds = [], role, hasOrg, email, loadAll = false }) {
+export function planToolsForMessage({ allTools, text = "", attachments = [], stickyGroupIds = [], pickedGroupIds = [], role, hasOrg, email, loadAll = false }) {
     // Internal tools (server logs, terminal, support tickets, leads, all organizations) need BOTH
     // a staff role and an @classgrid.in email, so a staff role alone never unlocks them.
     const staff = isStaffRole(role) && String(email || "").trim().toLowerCase().endsWith("@classgrid.in");
@@ -296,6 +296,8 @@ export function planToolsForMessage({ allTools, text = "", attachments = [], sti
     for (const g of allowedGroups) if (g.pattern.test(normalizedText)) matched.add(g.id);
     if (attachments.length > 0) for (const g of allowedGroups) if (g.onAttachment) matched.add(g.id);
     if (attachments.some((a) => IMAGE_MIME.test(String(a?.mimeType || "")))) for (const g of allowedGroups) if (g.onImageAttachment) matched.add(g.id);
+    // Apps the user picked in the chat box ("@Gmail": utils/picked-apps.js) count as named by the message.
+    for (const id of pickedGroupIds) if (allowedIds.has(id)) matched.add(id);
     const active = new Set(matched);
     for (const id of stickyGroupIds) if (allowedIds.has(id)) active.add(id);
     if (loadAll) for (const g of allowedGroups) active.add(g.id);

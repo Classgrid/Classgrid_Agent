@@ -4,6 +4,7 @@ import { Marked } from "marked";
 import DOMPurify from "dompurify";
 import { cn } from "@/lib/utils";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/marketing_ui/dialog";
+import { decorateMentions, mentionAtEnd, mentionNode, type MentionItem } from "./mentionTokens";
 
 // The chat box with formatting shown while typing: links, bold, italic, inline code, code blocks, lists.
 // It still works like the old textarea for the panel: `value` is markdown (that is what the AI gets),
@@ -20,6 +21,11 @@ td.remove(["script", "style", "img", "meta", "head"] as any);
 td.addRule("bareLink", {
   filter: (n: any) => n.nodeName === "A" && !!n.getAttribute("href") && (n.textContent || "").trim() === n.getAttribute("href"),
   replacement: (_c: string, n: any) => n.getAttribute("href"),
+});
+// A picked app (the "@" menu) is one piece in the box: it goes out as the "@<name>" it stands for (mentionTokens.tsx)
+td.addRule("mention", {
+  filter: (n: any) => n.nodeName === "SPAN" && n.hasAttribute?.("data-mention"),
+  replacement: (_c: string, n: any) => `@${n.getAttribute("data-mention")}`,
 });
 td.addRule("strike", { filter: ["del", "s", "strike"] as any, replacement: (c: string) => `~~${c}~~` });
 
@@ -85,13 +91,17 @@ type Props = {
   onChange?: (e: { target: RichChatTarget; currentTarget: RichChatTarget }) => void;
   onPaste?: (e: React.ClipboardEvent<any>) => any;
   onKeyDown?: (e: React.KeyboardEvent<any>) => void;
+  /** The apps whose "@Name" shows as their logo and name in the box (the chat box only). */
+  mentions?: MentionItem[];
 };
 
 const RichChatInput = forwardRef<any, Props>(function RichChatInput(
-  { id, name, value, disabled, placeholder, className, onChange, onPaste, onKeyDown },
+  { id, name, value, disabled, placeholder, className, onChange, onPaste, onKeyDown, mentions },
   ref
 ) {
   const elRef = useRef<HTMLDivElement | null>(null);
+  const mentionsRef = useRef<MentionItem[]>(mentions || []);
+  mentionsRef.current = mentions || [];
   const lastValue = useRef<string | null>(null);
   // Values given to onChange that the panel has not shown back in `value` yet. The panel takes typed text as a
   // low-priority update, so a redraw of the panel for something else can still carry an older `value`; that older
@@ -132,6 +142,7 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
           pendingEmits.current = [];
           lastValue.current = s;
           node.innerHTML = markdownToHtml(s);
+          decorateMentions(node, mentionsRef.current);
           if (!s) node.style.height = "";
           if (document.activeElement === node) placeCaretAtEnd(node);
         },
@@ -160,9 +171,17 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
     pendingEmits.current = [];
     lastValue.current = v;
     el.innerHTML = markdownToHtml(v);
+    decorateMentions(el, mentionsRef.current);
     if (!v) el.style.height = "";
     if (document.activeElement === el) placeCaretAtEnd(el);
   }, [value]);
+
+  // The list of apps arrived (or changed) after the text was shown: their mentions are drawn now (not while the
+  // user is typing in the box, so the caret is never moved)
+  useLayoutEffect(() => {
+    const el = elRef.current;
+    if (el && document.activeElement !== el) decorateMentions(el, mentions || []);
+  }, [mentions]);
 
   // Same empty size as the old textarea (it showed 2 lines): never smaller than 2 lines + its padding
   useLayoutEffect(() => {
@@ -248,11 +267,44 @@ const RichChatInput = forwardRef<any, Props>(function RichChatInput(
     sel.addRange(caret);
   }, []);
 
+  // "@Gmail" typed by hand, then a space (or , ! ? ; : )): the name becomes the same piece as a pick from the menu
+  const mentionTyped = useCallback((typed: string | null) => {
+    const items = mentionsRef.current;
+    if (!items.length || !typed || !/^[\s ,!?;:)]$/.test(typed)) return;
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return;
+    const node = sel.anchorNode;
+    if (!node || node.nodeType !== Node.TEXT_NODE) return;
+    if ((node.parentElement as HTMLElement | null)?.closest("code,pre,a,[data-mention]")) return;
+    const text = node.textContent || "";
+    const end = sel.anchorOffset - typed.length;
+    if (end <= 0 || text.slice(end, sel.anchorOffset) !== typed) return;
+    const found = mentionAtEnd(text.slice(0, end), items);
+    if (!found) return;
+    const r = document.createRange();
+    r.setStart(node, found.start);
+    r.setEnd(node, end);
+    r.deleteContents();
+    const token = mentionNode(document, found.item, found.raw);
+    r.insertNode(token);
+    // the caret stays after the typed key
+    const after = token.nextSibling;
+    const caret = document.createRange();
+    if (after && after.nodeType === Node.TEXT_NODE) caret.setStart(after, Math.min(typed.length, (after.textContent || "").length));
+    else caret.setStartAfter(token);
+    caret.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(caret);
+  }, []);
+
   const handleInput = useCallback((e: React.FormEvent<HTMLDivElement>) => {
     const ne = e.nativeEvent as InputEvent;
-    if (ne.inputType === "insertText" && !ne.isComposing) formatTyped(ne.data);
+    if (ne.inputType === "insertText" && !ne.isComposing) {
+      formatTyped(ne.data);
+      mentionTyped(ne.data);
+    }
     emit();
-  }, [emit, formatTyped]);
+  }, [emit, formatTyped, mentionTyped]);
 
   const wrapSelection = useCallback((tag: "code" | "a") => {
     const sel = window.getSelection();
