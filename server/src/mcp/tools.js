@@ -6323,12 +6323,22 @@ ${lines}` }] };
 
       try {
         if (operation === 'list_channels') {
-          const res = await fetch(`https://slack.com/api/conversations.list?types=public_channel,private_channel&limit=50`, {
-            headers: { "Authorization": `Bearer ${accessToken}` }
-          });
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error || "Failed to list channels");
-          return { content: [{ type: 'text', text: JSON.stringify(data.channels.map(c => ({ id: c.id, name: c.name, is_private: c.is_private })), null, 2) }] };
+          // Every open channel, page by page (Slack gives at most 200 a page); archived channels are left out. Before,
+          // one page of 50 with the archived ones in it showed only part of a workspace (owner, 2026-11-27: 123
+          // channels, 107 of them archived, and the 16 open ones were mostly missing).
+          const channels = [];
+          let cursor = '';
+          for (let page = 0; page < 10; page++) {
+            const res = await fetch(`https://slack.com/api/conversations.list?types=public_channel,private_channel&exclude_archived=true&limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, {
+              headers: { "Authorization": `Bearer ${accessToken}` }
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || "Failed to list channels");
+            for (const c of data.channels) channels.push({ id: c.id, name: c.name, is_private: c.is_private, members: c.num_members });
+            cursor = data.response_metadata?.next_cursor || '';
+            if (!cursor) break;
+          }
+          return { content: [{ type: 'text', text: JSON.stringify({ total: channels.length, more: !!cursor, channels }) }] };
         } else if (operation === 'read_channel_messages') {
           if (!channelId) throw new Error("channelId is required for read_channel_messages");
           const res = await fetch(`https://slack.com/api/conversations.history?channel=${channelId}&limit=${limit}`, {
@@ -6358,12 +6368,20 @@ ${lines}` }] };
           if (!data.ok) throw new Error(data.error || "Failed to create channel");
           return { content: [{ type: 'text', text: JSON.stringify({ id: data.channel.id, name: data.channel.name }, null, 2) }] };
         } else if (operation === 'list_users') {
-          const res = await fetch(`https://slack.com/api/users.list?limit=50`, {
-            headers: { "Authorization": `Bearer ${accessToken}` }
-          });
-          const data = await res.json();
-          if (!data.ok) throw new Error(data.error || "Failed to list users");
-          return { content: [{ type: 'text', text: JSON.stringify(data.members.filter(u => !u.deleted).map(u => ({ id: u.id, name: u.name, real_name: u.real_name })), null, 2) }] };
+          // Every active member, page by page, the same way as list_channels (before: one page of 50, deleted ones in it)
+          const members = [];
+          let cursor = '';
+          for (let page = 0; page < 10; page++) {
+            const res = await fetch(`https://slack.com/api/users.list?limit=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`, {
+              headers: { "Authorization": `Bearer ${accessToken}` }
+            });
+            const data = await res.json();
+            if (!data.ok) throw new Error(data.error || "Failed to list users");
+            for (const u of data.members) if (!u.deleted) members.push({ id: u.id, name: u.name, real_name: u.real_name, is_bot: !!u.is_bot });
+            cursor = data.response_metadata?.next_cursor || '';
+            if (!cursor) break;
+          }
+          return { content: [{ type: 'text', text: JSON.stringify({ total: members.length, more: !!cursor, members }) }] };
         } else if (operation === 'search_messages') {
           if (!query) throw new Error("query is required for search_messages");
           const res = await fetch(`https://slack.com/api/search.messages?query=${encodeURIComponent(query)}&count=${limit}`, {
