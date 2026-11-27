@@ -659,6 +659,12 @@ const userSchema = new mongoose.Schema(
       type: String,
       default: null,
     },
+    // Which of the Zoom app's two keys these tokens came from ("production" or "development"): a refresh uses that key
+    // first (services/zoom-oauth.js)
+    zoom_client_kind: {
+      type: String,
+      default: null,
+    },
     zoom_name: {
       type: String,
       default: null,

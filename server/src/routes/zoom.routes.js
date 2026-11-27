@@ -77,19 +77,38 @@ import User from "../models/User.js";
 import Classroom from "../models/Classroom.js";
 import connectDB from "../../config/db.js";
 import { primarySupabaseClient as supabase } from "../config/supabaseClient.js";
+import redis from "../config/redis.js";
+import {
+    applyZoomTokens, connectClient, exchangeZoomCode, INSTALL_TTL_SECONDS, installKey, isInstallId, newInstallId, refreshZoomToken,
+} from "../services/zoom-oauth.js";
 
 const router = express.Router();
 
-// Helper to generate Basic Auth string for Zoom OAuth
-const getZoomBasicAuth = () => {
-    return Buffer.from(`${process.env.ZOOM_CLIENT_ID}:${process.env.ZOOM_CLIENT_SECRET}`).toString('base64');
+// The web app a Zoom install that started on Zoom's side is finished in (the person signs in there if needed)
+const chatAppUrl = () => (process.env.CHAT_APP_URL || "https://chat.classgrid.in").replace(/\/$/, "");
+
+// The Zoom account behind a token: its id, email and name (the id is how Zoom's removal event finds the account)
+const zoomProfile = async (accessToken) => {
+    try {
+        const zUser = await fetch("https://api.zoom.us/v2/users/me", { headers: { "Authorization": `Bearer ${accessToken}` } }).then((r) => r.json());
+        if (!zUser) return {};
+        return {
+            zoom_user_id: zUser.id ? String(zUser.id) : null,
+            zoom_email: zUser.email || null,
+            zoom_name: `${zUser.first_name || ''} ${zUser.last_name || ''}`.trim(),
+        };
+    } catch (e) {
+        console.error("Failed to fetch Zoom profile:", e);
+        return {};
+    }
 };
 
 // ─────────────────────────────────────────────
 // 1. GENERATE OAUTH URL (Redirect User to Zoom)
 // ─────────────────────────────────────────────
 router.get("/connect", isAuthenticated, (req, res) => {
-    const clientId = process.env.ZOOM_CLIENT_ID;
+    const clientId = connectClient()?.id;
+    if (!clientId) return res.status(500).json({ error: "Zoom is not set up on the server" });
     const redirectUri = encodeURIComponent(process.env.ZOOM_REDIRECT_URI);
     
     const returnTo = req.query.returnTo || req.headers.referer || req.headers.origin || process.env.FRONTEND_URL;
@@ -165,6 +184,20 @@ router.get("/callback", async (req, res) => {
                 : res.status(400).json({ error });
         }
 
+        // An install that started on Zoom's side (Zoom App Marketplace "Add", or the app's install link): Zoom sends no
+        // state, so the account is not known here. The code is traded now (it lives only minutes), the tokens are held
+        // for 15 minutes, and the web app gives them to the account the person is (or gets) signed in with
+        // (POST /api/zoom/claim).
+        if (code && !state) {
+            returnTo = `${chatAppUrl()}/`;
+            const { tokens, kind } = await exchangeZoomCode(code, process.env.ZOOM_REDIRECT_URI);
+            const profile = await zoomProfile(tokens.access_token);
+            const installId = newInstallId();
+            await redis.set(installKey(installId), JSON.stringify({ tokens, kind, profile, at: Date.now() }), "EX", INSTALL_TTL_SECONDS);
+            console.log(`[zoom] install from Zoom's side held for claiming (${kind} key, Zoom user ${profile.zoom_user_id || "unknown"})`);
+            return res.redirect(`${chatAppUrl()}/?zoom_install=${encodeURIComponent(installId)}`);
+        }
+
         if (!code || !userId) {
             console.error("❌ Zoom Callback Missing code or state. Query was:", req.query);
             if (isPopup) {
@@ -188,25 +221,8 @@ router.get("/callback", async (req, res) => {
                 : res.status(400).json({ error: "Missing code or state" });
         }
 
-        // Exchange code for tokens
-        const tokenResponse = await fetch("https://zoom.us/oauth/token", {
-            method: "POST",
-            headers: {
-                "Authorization": `Basic ${getZoomBasicAuth()}`,
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            body: new URLSearchParams({
-                grant_type: "authorization_code",
-                code: code,
-                redirect_uri: process.env.ZOOM_REDIRECT_URI
-            })
-        });
-
-        const tokenData = await tokenResponse.json();
-
-        if (tokenData.error) {
-            throw new Error(`Zoom API Error: ${tokenData.error} - ${tokenData.error_description}`);
-        }
+        // Exchange code for tokens (with whichever of the app's two keys started this sign-in: services/zoom-oauth.js)
+        const { tokens: tokenData, kind: zoomKind } = await exchangeZoomCode(code, process.env.ZOOM_REDIRECT_URI, { prefer: connectClient()?.kind });
 
         const user = await User.findById(userId);
         if (!user) {
@@ -231,28 +247,8 @@ router.get("/callback", async (req, res) => {
                 : res.status(404).json({ error: "User not found" });
         }
 
-        user.zoom_access_token = tokenData.access_token;
-        
-        try {
-            const userRes = await fetch("https://api.zoom.us/v2/users/me", {
-                headers: { "Authorization": `Bearer ${tokenData.access_token}` }
-            });
-            const zUser = await userRes.json();
-            if (zUser) {
-                user.zoom_user_id = zUser.id ? String(zUser.id) : null;
-                user.zoom_email = zUser.email || null;
-                user.zoom_name = (zUser.first_name || '') + ' ' + (zUser.last_name || '');
-                user.zoom_name = user.zoom_name.trim();
-            }
-        } catch (e) {
-            console.error("Failed to fetch Zoom profile:", e);
-        }
-        if (tokenData.refresh_token) {
-            user.zoom_refresh_token = tokenData.refresh_token; 
-        }
-        if (tokenData.expires_in) {
-            user.zoom_token_expiry = new Date(Date.now() + tokenData.expires_in * 1000);
-        }
+        applyZoomTokens(user, tokenData, zoomKind);
+        Object.assign(user, await zoomProfile(tokenData.access_token));
 
         // Clear any previous errors on success
         user.metadata = user.metadata || {};
@@ -319,6 +315,38 @@ router.get("/callback", async (req, res) => {
     }
 });
 
+// ─────────────────────────────────────────────
+// 2b. CLAIM AN INSTALL THAT STARTED ON ZOOM'S SIDE
+// The web app sends the id from ?zoom_install= once the person is signed in; the held Zoom tokens become this
+// account's Zoom connection. An id is used once.
+// ─────────────────────────────────────────────
+router.post("/claim", isAuthenticated, async (req, res) => {
+    try {
+        const installId = String(req.body?.installId || "");
+        if (!isInstallId(installId)) return res.status(400).json({ error: "Invalid install id" });
+        const raw = await redis.get(installKey(installId));
+        if (!raw) return res.status(404).json({ error: "This Zoom install has expired. Add Classgrid from Zoom again." });
+        await redis.del(installKey(installId));
+        const held = JSON.parse(raw);
+        await connectDB();
+        const user = await User.findById(req.user._id);
+        if (!user) return res.status(404).json({ error: "User not found" });
+        applyZoomTokens(user, held.tokens, held.kind);
+        Object.assign(user, held.profile || {});
+        user.metadata = user.metadata || {};
+        if (user.metadata.integration_errors && user.metadata.integration_errors.zoom) {
+            delete user.metadata.integration_errors.zoom;
+            user.markModified('metadata');
+        }
+        await user.save();
+        console.log(`[zoom] install claimed by user ${user._id} (${held.kind} key)`);
+        res.json({ ok: true, provider: "zoom" });
+    } catch (err) {
+        console.error("Zoom claim failed:", err);
+        res.status(500).json({ error: "Zoom connection failed" });
+    }
+});
+
 // Helper Function: Check and refresh Zoom token if expired
 const getValidZoomToken = async (userId) => {
     const user = await User.findById(userId);
@@ -328,22 +356,11 @@ const getValidZoomToken = async (userId) => {
 
     // Check if within 5 minutes of expiring
     if (user.zoom_token_expiry && new Date(user.zoom_token_expiry.getTime() - 5 * 60000) < new Date()) {
-        // Token is expired or about to expire, refresh it
-        const tokenResponse = await fetch("https://zoom.us/oauth/token", {
-            method: "POST",
-            headers: {
-                "Authorization": `Basic ${getZoomBasicAuth()}`,
-                "Content-Type": "application/x-www-form-urlencoded"
-            },
-            body: new URLSearchParams({
-                grant_type: "refresh_token",
-                refresh_token: user.zoom_refresh_token
-            })
-        });
-
-        const tokenData = await tokenResponse.json();
-        
-        if (tokenData.error) {
+        // Token is expired or about to expire, refresh it (with the key the tokens came from first)
+        let refreshed;
+        try {
+            refreshed = await refreshZoomToken(user.zoom_refresh_token, { prefer: user.zoom_client_kind });
+        } catch {
             // Refresh token invalid/revoked
             user.zoom_access_token = null;
             user.zoom_refresh_token = null;
@@ -351,10 +368,7 @@ const getValidZoomToken = async (userId) => {
             await user.save();
             throw new Error("Zoom refresh token expired. Please reconnect.");
         }
-
-        user.zoom_access_token = tokenData.access_token;
-        user.zoom_refresh_token = tokenData.refresh_token; 
-        user.zoom_token_expiry = new Date(Date.now() + tokenData.expires_in * 1000);
+        applyZoomTokens(user, refreshed.tokens, refreshed.kind);
         await user.save();
     }
 

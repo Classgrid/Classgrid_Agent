@@ -94,6 +94,7 @@ import Handlebars from 'handlebars';
 import { Readable } from 'stream';
 import { cfAiFetch } from "../services/cf-neuron-cap.service.js";
 import * as eleven from "../services/elevenlabs.service.js";
+import { applyZoomTokens, refreshZoomToken } from "../services/zoom-oauth.js";
 
 const execPromise = util.promisify(exec);
 
@@ -5889,19 +5890,9 @@ export const handleToolCall = async (name, args, context = {}) => {
       try {
         let accessToken = user.zoom_access_token;
         if (user.zoom_token_expiry && new Date(user.zoom_token_expiry.getTime() - 5 * 60000) < new Date()) {
-          const tokenResponse = await fetch("https://zoom.us/oauth/token", {
-            method: "POST",
-            headers: {
-              "Authorization": `Basic ${Buffer.from(process.env.ZOOM_CLIENT_ID + ':' + process.env.ZOOM_CLIENT_SECRET).toString('base64')}`,
-              "Content-Type": "application/x-www-form-urlencoded"
-            },
-            body: new URLSearchParams({ grant_type: "refresh_token", refresh_token: user.zoom_refresh_token })
-          });
-          const tokenData = await tokenResponse.json();
-          if (tokenData.error) throw new Error("Zoom token expired");
-          user.zoom_access_token = tokenData.access_token;
-          user.zoom_refresh_token = tokenData.refresh_token;
-          user.zoom_token_expiry = new Date(Date.now() + tokenData.expires_in * 1000);
+          // with the key the tokens came from first (the Zoom app has a Development and a Production key)
+          const refreshed = await refreshZoomToken(user.zoom_refresh_token, { prefer: user.zoom_client_kind });
+          applyZoomTokens(user, refreshed.tokens, refreshed.kind);
           await user.save();
           accessToken = user.zoom_access_token;
         }

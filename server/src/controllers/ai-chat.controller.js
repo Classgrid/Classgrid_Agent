@@ -134,6 +134,7 @@ import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDe
 import { takeInlineImages, findInlineImage, withInlineImages, isDataUrl, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
 import { pickedApps, pickedGroupIds, pickedAppsNote } from "../utils/picked-apps.js";
 import CustomMcpServer from "../models/CustomMcpServer.js";
+import { applyZoomTokens, refreshZoomToken } from "../services/zoom-oauth.js";
 
 const uniqueDashboards = [...new Set(Object.values(ROLE_DEFINITIONS).map(r => r.dashboard))];
 const dashboardList = uniqueDashboards.map(d => `- ${d}`).join('\n');
@@ -3522,18 +3523,15 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     const refreshZoom = async () => {
                         try {
                             if (!latestUser.zoom_refresh_token) return null;
-                            const res = await fetch('https://zoom.us/oauth/token', {
-                                method: 'POST',
-                                headers: { 'Authorization': `Basic ${Buffer.from(process.env.ZOOM_CLIENT_ID + ':' + process.env.ZOOM_CLIENT_SECRET).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-                                body: new URLSearchParams({ grant_type: 'refresh_token', refresh_token: latestUser.zoom_refresh_token }),
-                                signal: AbortSignal.timeout(5000)
+                            // with the key the tokens came from first (the Zoom app has a Development and a Production key)
+                            const { tokens: data, kind } = await refreshZoomToken(latestUser.zoom_refresh_token, {
+                                prefer: latestUser.zoom_client_kind,
+                                fetchImpl: (url, opts) => fetch(url, { ...opts, signal: AbortSignal.timeout(5000) }),
                             });
-                            const data = await res.json();
-                            if (data.access_token) {
-                                await mongoose.model('User').updateOne({ _id: latestUser._id }, { zoom_access_token: data.access_token, zoom_refresh_token: data.refresh_token, zoom_token_expiry: new Date(Date.now() + data.expires_in * 1000) });
-                                return data.access_token;
-                            }
-                            return null;
+                            const fields = {};
+                            applyZoomTokens(fields, data, kind);
+                            await mongoose.model('User').updateOne({ _id: latestUser._id }, fields);
+                            return data.access_token;
                         } catch { return null; }
                     };
 

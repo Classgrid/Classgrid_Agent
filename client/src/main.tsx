@@ -69,6 +69,7 @@ import { captureEditorSignIn } from "@/features/auth/editorHandoff";
 import { queryClient } from "@/lib/queryClient";
 import "@/styles/global.css";
 import { applyFontChoice } from "./lib/fontChoice";
+import { watchZoomInstall } from "@/lib/zoomInstall";
 
 // Local testing and the desktop app (never the website build): the API calls also send the saved login token, so the
 // app stays logged in when it talks to the live server (whose login cookie is made for .classgrid.in, not localhost)
@@ -240,6 +241,8 @@ if (hasIntegrationCallback) {
 }
 
 function renderApp() {
+  // Classgrid added from Zoom's side: finish the Zoom connection once signed in (lib/zoomInstall.ts)
+  watchZoomInstall();
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <BrowserRouter>
