@@ -3629,7 +3629,7 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     if (zoomConnected) {
                         const zoomName = latestUser.zoom_name ? ` (Name: ${latestUser.zoom_name})` : '';
                         const zoomEmail = latestUser.zoom_email ? `(Connected as: ${latestUser.zoom_email}${zoomName}) ` : '';
-                        activeDescriptions.push(`- **Zoom**: ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ CONNECTED. ${zoomEmail}Use 'zoom_connector' tool to list_meetings, create_meeting.`);
+                        activeDescriptions.push(`- **Zoom**: ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ CONNECTED. ${zoomEmail}Use 'zoom_connector' tool to list_meetings, create_meeting, delete_meeting (only when the user asks to delete a meeting).`);
                     }
 
                     if (notionConnected) {

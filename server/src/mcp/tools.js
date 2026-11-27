@@ -929,12 +929,13 @@ export const getMcpTools = () => [
   },
   {
     name: 'zoom_connector',
-    description: 'Interact with Zoom API to list or create meetings using the connected user token.',
+    description: 'Interact with Zoom API to list, create or delete meetings using the connected user token. delete_meeting removes a meeting from the user’s Zoom for everyone: only call it after the user has clearly asked to delete that meeting (ask them to confirm which one when it is not certain).',
     inputSchema: {
       type: 'object',
       properties: {
-        operation: { type: 'string', enum: ['list_meetings', 'create_meeting'], description: 'The operation to perform.' },
-        topic: { type: 'string', description: 'The topic or title of the meeting (required for create_meeting).' },
+        operation: { type: 'string', enum: ['list_meetings', 'create_meeting', 'delete_meeting'], description: 'The operation to perform.' },
+        meetingId: { type: 'string', description: 'For delete_meeting: the meeting’s id (the "id" from list_meetings). Best when known.' },
+        topic: { type: 'string', description: 'The topic or title of the meeting (required for create_meeting; for delete_meeting, the title of the upcoming meeting to delete when its id is not known).' },
         startTime: { type: 'string', description: 'The start time of the meeting in ISO format (required for create_meeting).' },
         duration: { type: 'number', description: 'The duration of the meeting in minutes (optional for create_meeting).' }
       },
@@ -5949,6 +5950,45 @@ export const handleToolCall = async (name, args, context = {}) => {
           const data = await res.json();
           if (data.code) throw new Error(`Zoom API error: ${data.message}`);
           return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+        } else if (operation === 'delete_meeting') {
+          // A meeting the user asked to delete (owner, 2026-11-27: "it can't delete"): by its id, or by its title among
+          // the upcoming meetings when that title names exactly one of them
+          let meetingId = String(args.meetingId || '').replace(/\s+/g, '');
+          let found = null;
+          if (!meetingId) {
+            const title = String(args.topic || '').trim().toLowerCase();
+            if (!title) throw new Error("meetingId or topic is required for delete_meeting");
+            const upcoming = await fetch("https://api.zoom.us/v2/users/me/meetings?type=upcoming&page_size=100", {
+              headers: { "Authorization": `Bearer ${accessToken}` }
+            }).then((r) => r.json());
+            const list = upcoming?.meetings || [];
+            const same = list.filter((m) => String(m.topic || '').trim().toLowerCase() === title);
+            const like = same.length ? same : list.filter((m) => String(m.topic || '').toLowerCase().includes(title));
+            if (!like.length) {
+              return { content: [{ type: 'text', text: `No upcoming Zoom meeting is called "${args.topic}". Nothing was deleted.` }] };
+            }
+            if (like.length > 1) {
+              const lines = like.map((m) => `- ${m.topic} (id ${m.id}, ${m.start_time})`).join('\n');
+              return { content: [{ type: 'text', text: `More than one upcoming Zoom meeting matches "${args.topic}". Nothing was deleted. Ask the user which one, then call delete_meeting with its meetingId:
+${lines}` }] };
+            }
+            found = like[0];
+            meetingId = String(found.id);
+          }
+          if (!/^\d+$/.test(meetingId)) throw new Error("meetingId must be the meeting's number");
+          const res = await fetch(`https://api.zoom.us/v2/meetings/${meetingId}`, {
+            method: "DELETE",
+            headers: { "Authorization": `Bearer ${accessToken}` }
+          });
+          if (res.status === 204) {
+            const what = found ? `"${found.topic}" (${found.start_time}, id ${meetingId})` : `the meeting with id ${meetingId}`;
+            return { content: [{ type: 'text', text: `Deleted ${what} from the user's Zoom.` }] };
+          }
+          const data = await res.json().catch(() => ({}));
+          if (res.status === 404) {
+            return { content: [{ type: 'text', text: `Zoom has no meeting with id ${meetingId} on this account (it may already be deleted). Nothing was deleted.` }] };
+          }
+          throw new Error(`Zoom API error: ${data.message || res.status}`);
         } else {
           throw new Error(`Unsupported operation: ${operation}`);
         }
