@@ -606,6 +606,31 @@ export async function createSharedSnapshot(sessionId, userEmail, userName, title
  * Retrieves a shared chat snapshot by its public share ID.
  * No authentication required — this is a public endpoint.
  */
+/**
+ * The read-only share links this person made of one chat: how many there are, and turning them all off (owner,
+ * 2026-11-28: a share link could not be turned off anywhere). Only the links this email made are counted or deleted.
+ */
+export async function countSharedSnapshots(sessionId, userEmail) {
+    const { count, error } = await primarySupabaseClient
+        .from('shared_chat_snapshots')
+        .select('share_id', { count: 'exact', head: true })
+        .eq('original_session_id', sessionId)
+        .eq('user_email', userEmail);
+    if (error) throw error;
+    return count || 0;
+}
+
+export async function deleteSharedSnapshots(sessionId, userEmail) {
+    const { data, error } = await primarySupabaseClient
+        .from('shared_chat_snapshots')
+        .delete()
+        .eq('original_session_id', sessionId)
+        .eq('user_email', userEmail)
+        .select('share_id');
+    if (error) throw error;
+    return (data || []).length;
+}
+
 export async function getSharedSnapshot(shareId) {
     const { data, error } = await primarySupabaseClient
         .from('shared_chat_snapshots')

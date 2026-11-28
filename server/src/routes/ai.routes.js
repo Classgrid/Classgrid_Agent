@@ -78,7 +78,7 @@ import {
     chatWithSyllabus, 
     getMyPersona 
 } from "../controllers/ai.controller.js";
-import { streamAskAi, clientToolResult, pcToolResult, localJobDone, turnEvents, turnCommand, turnStop, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, takeChatOnline, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
+import { streamAskAi, clientToolResult, pcToolResult, localJobDone, turnEvents, turnCommand, turnStop, getWorkingChats, getChatHelpers, getChatSessions, getChatSession, getChatSessionMessages, uploadChatImage, takeChatOnline, updateChatSession, archiveChatSession, deleteChatSession, shareChatSession, reopenChatSession, createPublicShare, getPublicShares, deletePublicShares, getPublicShare, submitAiFeedback, getAgentReviews, updateAgentReviewStatus, processAgentReviewsCron, deleteAgentReview, bulkDeleteAgentReviews, generateImage, getMyGeneratedImages, deleteGeneratedImage, getMyUsage, getOrgUsage, getSkills, createSkill, updateSkill, deleteSkill, getPreferences, updatePreferences } from "../controllers/ai-chat.controller.js";
 
 import { getFavicon } from "../controllers/ai-favicon.controller.js";
 import { speakAnswer, listVoices } from "../controllers/ai-speak.controller.js";
@@ -301,6 +301,8 @@ router.delete("/sessions/:id", isAuthenticated, deleteChatSession);
 router.post("/sessions/:id/share", isAuthenticated, shareChatSession);
 router.post("/sessions/:id/reopen", isAuthenticated, reopenChatSession); // super_admin only (checked in controller)
 router.post("/sessions/:id/public-share", isAuthenticated, createPublicShare);
+router.get("/sessions/:id/public-share", isAuthenticated, getPublicShares);
+router.delete("/sessions/:id/public-share", isAuthenticated, deletePublicShares);
 
 // Site icons for the AI's source chips (public: loaded by <img>, no token)
 router.get("/favicon", getFavicon);

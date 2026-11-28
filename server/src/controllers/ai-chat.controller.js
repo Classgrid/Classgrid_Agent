@@ -9227,6 +9227,26 @@ export const createPublicShare = async (req, res) => {
     }
 };
 
+// GET: how many read-only links of this chat the user made; DELETE: turns them all off (the links then show "not found")
+export const getPublicShares = async (req, res) => {
+    try {
+        const { countSharedSnapshots } = await import("../services/ai-chat.service.js");
+        res.json({ links: await countSharedSnapshots(req.params.id, req.user?.email) });
+    } catch (e) {
+        console.error("[Chat API] Failed to count public shares:", e?.message || e);
+        res.status(500).json({ error: "Could not read the share links." });
+    }
+};
+export const deletePublicShares = async (req, res) => {
+    try {
+        const { deleteSharedSnapshots } = await import("../services/ai-chat.service.js");
+        res.json({ success: true, turnedOff: await deleteSharedSnapshots(req.params.id, req.user?.email) });
+    } catch (e) {
+        console.error("[Chat API] Failed to turn off public shares:", e?.message || e);
+        res.status(500).json({ error: "Could not turn off the share link." });
+    }
+};
+
 /**
  * Retrieves a shared chat snapshot by share ID.
  * PUBLIC ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â no authentication required.
