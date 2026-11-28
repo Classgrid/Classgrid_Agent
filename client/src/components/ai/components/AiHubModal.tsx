@@ -551,17 +551,14 @@ export function AiHubModal({ isOpen, onClose, onSendPrompt, initialTab = "plugin
                             </PluginGrid>
                           )}
 
-                          {pluginFilter !== "connected" && builtinOther.length > 0 && (
-                            <PluginGrid title="Built-in" count={builtinOther.length}>
+                          {/* Built-in plugins and the known apps with an MCP server in ONE group (owner, 2026-11-28: "why show
+                              Built-in and More apps separately, show together") */}
+                          {pluginFilter !== "connected" && builtinOther.length + catalogMatches.length > 0 && (
+                            <PluginGrid title="Available" count={builtinOther.length + catalogMatches.length}>
                               {builtinOther.map((i) => (
                                 <PluginCard key={i.id} name={i.name} description={BUILTIN_META[i.id]?.description || i.description || "Connect your workspace"} logo={i.imgUrl} icon={i.icon}
                                   invert={i.invertInDarkMode} invertLight={i.invertInLightMode} onClick={() => setSelectedPlugin(i)} />
                               ))}
-                            </PluginGrid>
-                          )}
-
-                          {pluginFilter !== "connected" && catalogMatches.length > 0 && (
-                            <PluginGrid title="More apps" count={catalogMatches.length}>
                               {catalogMatches.map((a) => (
                                 <PluginCard key={a.id} name={a.name} description={a.description} logo={a.logo} invert={a.invertInDarkMode} onClick={() => setSelectedApp(a)} />
                               ))}
