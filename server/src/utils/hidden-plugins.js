@@ -1,5 +1,6 @@
 // Plugins that are HIDDEN everywhere (owner, 2026-11-28: "hide Canva and Spotify from all, mobile, web, everything,
-// don't remove"; Facebook Pages and Instagram Business the same day). Their code stays as it is; while an id is listed here nobody sees it or can use it:
+// don't remove"; Facebook Pages, Instagram Business and WhatsApp Business the same day;
+// Classgrid's own WhatsApp tools, send_whatsapp_message and the others, are NOT part of this and stay). Their code stays as it is; while an id is listed here nobody sees it or can use it:
 //   - not in AI Hub > Plugins (website, desktop app, Classgrid Code: client INTEGRATIONS_LIST; phone: src/api/connectors.ts)
 //   - not in the connected-apps status (GET /api/ai-integrations/status) nor the home strip
 //   - the AI never gets the tool and is never told about the app (ai-chat.controller.js), "@Canva" picks nothing,
@@ -8,9 +9,9 @@
 //     not listed nor offered to the AI
 // To bring one back, take its id out of HIDDEN_PLUGINS (and put its entry back in the two app lists).
 
-export const HIDDEN_PLUGINS = Object.freeze(new Set(["canva", "spotify", "facebook", "instagram"]));
+export const HIDDEN_PLUGINS = Object.freeze(new Set(["canva", "spotify", "facebook", "instagram", "whatsapp"]));
 
-const TOOL_OF = { canva: "canva_connector", spotify: "spotify_connector", facebook: "facebook_connector", instagram: "instagram_connector" };
+const TOOL_OF = { canva: "canva_connector", spotify: "spotify_connector", facebook: "facebook_connector", instagram: "instagram_connector", whatsapp: "whatsapp_business_connector" };
 const CATALOG_OF = { canva: "canva-mcp" };
 const MCP_HOSTS_OF = { canva: ["mcp.canva.com"], spotify: [] };
 

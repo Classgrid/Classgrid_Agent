@@ -2266,7 +2266,8 @@ export const INTEGRATIONS_LIST: any[] = [
   { id: "outlook", name: "Microsoft Outlook", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/Microsoft_Outlook_Icon_(2025%C3%A2%C2%80%C2%93present).svg" },
   { id: "teams", name: "Microsoft Teams", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/microsoft-teams-svgrepo-com.svg" },
   { id: "zoom", name: "Zoom", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/zoom-communications-icon_(1).svg" },
-  { id: "whatsapp", name: "WhatsApp Business", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/whatsapp-svgrepo-com_(1).svg" },
+  // WhatsApp Business hidden too (owner, 2026-11-28)
+  // { id: "whatsapp", name: "WhatsApp Business", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/whatsapp-svgrepo-com_(1).svg" },
   { id: "vercel", name: "Vercel", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/vercel-icon-svgrepo-com.svg", invertInDarkMode: true },
   { id: "slack", name: "Slack", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/slack-new-logo-logo-svgrepo-com.svg" },
   { id: "github", name: "GitHub", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/github-icon.svg", invertInDarkMode: true },

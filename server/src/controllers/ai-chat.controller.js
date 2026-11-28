@@ -3583,7 +3583,7 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     if (vercelConnected) console.log('[integration-verify] Vercel: ÃƒÂ¢Ã…â€œÃ¢â‚¬Â¦ CONNECTED (token in DB)');
 
                     // ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ MCP-based plugins (no API to ping, just config check) ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬ÃƒÂ¢Ã¢â‚¬ÂÃ¢â€šÂ¬
-                    whatsappConnected = connectedMcps.includes('whatsapp');
+                    whatsappConnected = !isHiddenPlugin("whatsapp") && connectedMcps.includes('whatsapp'); // utils/hidden-plugins.js
                     cursorConnected = connectedMcps.includes('mcp-cursor');
                     chatgptConnected = connectedMcps.includes('mcp-chatgpt');
                     claudeConnected = connectedMcps.includes('mcp-claude');
