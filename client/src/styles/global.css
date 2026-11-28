@@ -282,6 +282,16 @@
     --background: #ffffff;
     --color-background: #ffffff;
   }
+  /* The desktop app's light chat: a warm off-white #fbfbf8 instead of pure white (owner, 2026-11-28); cards and the
+     message box stay white on it. The website keeps #ffffff; Classgrid Code keeps its own greys (below). */
+  html.desktop-app:not(.dark),
+  html.desktop-app:not(.cg-editor).studio-mode:not(.dark) .studio-chat {
+    --background: #fbfbf8;
+    --color-background: #fbfbf8;
+  }
+  html.desktop-app:not(.cg-editor).studio-mode:not(.dark) .studio-chat :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]) {
+    background-color: #fbfbf8 !important;
+  }
   /* Classgrid Code's light mode: soft greys, not bright white (the AI panel and its windows) */
   html.desktop-app.cg-editor:not(.dark) {
     --background: #f3f3f3;
