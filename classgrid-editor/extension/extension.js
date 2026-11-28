@@ -49,17 +49,46 @@ const pages = new Set();
 const screens = { agent: null, chats: null };
 // Session-to-session messaging (desktop/sessions.js): this editor's session handle, and the messages and notices that
 // arrived while the Agent panel's page wasn't ready (it says so with "peerReady"; then they are flushed to it)
-const peer = { handle: null, queue: [], ready: new WeakSet() };
+const peer = { handle: null, queue: [], ready: new WeakSet(), views: new Set(), status: new Map(), lastBusy: null, sentFrom: new Map() };
+// Which Agent panel a message or notice goes to. A window can have two Agent panels open (the right side and the left
+// icon); every message used to go to the one that became visible last, so an answer to a message sent from the other
+// panel landed in a panel nobody was looking at, or waited there unread (owner, 2026-11-28: five messages answered,
+// no answer seen). Now: an answer goes to the panel whose chat sent the message (sentFrom, by message id), anything
+// else to the panel that ran the last turn, else the visible one.
+function peerTarget(event) {
+  const replyTo = event?.data?.replyTo;
+  const asked = replyTo ? peer.sentFrom.get(String(replyTo)) : null;
+  if (asked && peer.views.has(asked)) return asked;
+  if (peer.lastBusy && peer.views.has(peer.lastBusy)) return peer.lastBusy;
+  return screens.agent;
+}
 function peerSend(event) {
-  const w = screens.agent;
+  const w = peerTarget(event);
   if (w && peer.ready.has(w)) { w.postMessage(event); return; }
   peer.queue.push(event);
   if (peer.queue.length > 200) peer.queue.shift();
 }
+// A message this window sent, and the panel it came from (its answer goes back there)
+function peerSentFrom(id, webview) {
+  if (!id || !webview) return;
+  peer.sentFrom.set(String(id), webview);
+  if (peer.sentFrom.size > 200) peer.sentFrom.delete(peer.sentFrom.keys().next().value);
+}
+// The session is busy while any of its Agent panels runs a turn
+function peerStatus(webview, status) {
+  peer.status.set(webview, status);
+  if (status === "busy") peer.lastBusy = webview;
+  const busy = [...peer.status.values()].includes("busy");
+  peer.handle?.setStatus(busy ? "busy" : "idle");
+}
 function peerFlush(webview) {
   peer.ready.add(webview);
+  // (what waited goes to this panel unless it belongs to another Agent panel that is ready: that one gets it)
   const q = peer.queue.splice(0);
-  for (const e of q) webview.postMessage(e);
+  for (const e of q) {
+    const w = peerTarget(e);
+    (w && w !== webview && peer.ready.has(w) ? w : webview).postMessage(e);
+  }
 }
 function startSession(context, runner) {
   try {
@@ -132,12 +161,18 @@ async function activate(context) {
   const agentProvider = {
     resolveWebviewView(view) {
       screens.agent = view.webview;
+      peer.views.add(view.webview);
       // (it opens on the chat that was open last time in this folder, like the editor brings back your files)
       const load = holdScreens(view.webview, () => {
         const last = lastChatFor(context.workspaceState.get(LAST_CHAT_KEY));
         return last ? `/editor/project/${last}` : "/editor/project";
       });
-      view.onDidDispose(() => { loaders.delete(load); stopFetches(view.webview); if (screens.agent === view.webview) screens.agent = null; });
+      view.onDidDispose(() => {
+        loaders.delete(load); stopFetches(view.webview); if (screens.agent === view.webview) screens.agent = null;
+        peer.views.delete(view.webview);
+        if (peer.status.delete(view.webview)) peer.handle?.setStatus([...peer.status.values()].includes("busy") ? "busy" : "idle");
+        if (peer.lastBusy === view.webview) peer.lastBusy = null;
+      });
       view.onDidChangeVisibility(() => { if (view.visible) screens.agent = view.webview; });
     },
   };
@@ -966,18 +1001,24 @@ const HANDLERS = {
   githubRepo: (_p, folder) => parts.runner.githubRepoOf(String(folder || "")),
   readFile: (_p, folder, rel) => parts.runner.readForFilesTab(String(folder || ""), String(rel || "")),
   // One AI step on this computer (pc_tool_call on the answer's own stream): the same runner the socket fallback uses
-  runTool: (_p, req) => parts.runner.runTool(req && typeof req === "object" ? req : {}),
+  runTool: async (p, req) => {
+    const r = await parts.runner.runTool(req && typeof req === "object" ? req : {});
+    // (a message sent from this panel's chat: its answer comes back to this panel)
+    if (req?.tool === "message_classgrid_session") peerSentFrom(/message id ([0-9a-f-]{8,})/i.exec(String(r?.text || ""))?.[1], p?.webview);
+    return r;
+  },
   // "Run in background" on a command the AI is waiting for (runner.js backgroundCommand)
   backgroundCommand: (_p, id) => parts.runner.backgroundCommand(String(id || "")),
   // Session messaging: the page is ready for peer messages (flush what waited), its busy/idle state, and the messages it showed
-  peerReady: (p) => { if (p.webview === screens.agent) peerFlush(p.webview); },
-  sessionStatus: (p, status) => { if (p.webview === screens.agent && (status === "busy" || status === "idle")) peer.handle?.setStatus(status); },
-  peerRead: (p, ids) => { if (p.webview === screens.agent && Array.isArray(ids)) peer.handle?.markRead(ids.map(String)); },
+  // (every Agent panel of this window, not only the one that became visible last: see peerTarget)
+  peerReady: (p) => { if (peer.views.has(p.webview)) peerFlush(p.webview); },
+  sessionStatus: (p, status) => { if (peer.views.has(p.webview) && (status === "busy" || status === "idle")) peerStatus(p.webview, status); },
+  peerRead: (p, ids) => { if (peer.views.has(p.webview) && Array.isArray(ids)) peer.handle?.markRead(ids.map(String)); },
   // Unread messages still in the inbox (came while a turn ran and no later step picked them up): read when the turn ends
-  peerInbox: (p) => (p.webview === screens.agent && peer.handle ? peer.handle.peek() : []),
+  peerInbox: (p) => (peer.views.has(p.webview) && peer.handle ? peer.handle.peek() : []),
   // The chat screen sends a message itself: a session's whole answer back to the session that asked (replyTo)
   sendToSession: async (p, req) => {
-    if (p.webview !== screens.agent || !peer.handle) return { error: "this session is not set up for messaging other sessions" };
+    if (!peer.views.has(p.webview) || !peer.handle) return { error: "this session is not set up for messaging other sessions" };
     try { return await require(path.join(DESKTOP_DIR, "sessions.js")).send({ target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle), replyTo: req && req.replyTo, from: peer.handle.identity() }); }
     catch (err) { return { error: String(err?.message || err) }; }
   },
