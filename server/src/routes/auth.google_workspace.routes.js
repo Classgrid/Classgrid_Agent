@@ -107,23 +107,13 @@ router.get("/connect", isAuthenticated, (req, res) => {
 
     let scopes = [];
 
+    // Only one scope per permission: a "see and change" scope already lets the app read, so its ".readonly" twin is
+    // not asked for (Google's verification lists every scope asked; 2026-11-28 the list went from 25 to 18).
+    // Full "calendar" covers events; classroom.X covers classroom.X.readonly.
     if (wants('calendar') || wants('meet') || wants('all')) {
         scopes.push('https://www.googleapis.com/auth/calendar');
-        scopes.push('https://www.googleapis.com/auth/calendar.events');
     }
     if (wants('classroom') || wants('all')) {
-        scopes.push('https://www.googleapis.com/auth/classroom.courses.readonly');
-        scopes.push('https://www.googleapis.com/auth/classroom.coursework.me.readonly');
-        scopes.push('https://www.googleapis.com/auth/classroom.coursework.students');
-        scopes.push('https://www.googleapis.com/auth/classroom.student-submissions.me.readonly');
-        scopes.push('https://www.googleapis.com/auth/classroom.student-submissions.students.readonly');
-        scopes.push('https://www.googleapis.com/auth/classroom.rosters.readonly');
-        scopes.push('https://www.googleapis.com/auth/classroom.announcements.readonly'); // Required for AI to read announcements
-        scopes.push('https://www.googleapis.com/auth/classroom.topics.readonly'); // Required to filter by topic
-        scopes.push('https://www.googleapis.com/auth/classroom.courseworkmaterials.readonly'); // Required for question papers/materials
-        scopes.push('https://www.googleapis.com/auth/drive.readonly'); // Required to read Classroom attachments
-        
-        // FULL WRITE SCOPES (Added per request)
         scopes.push('https://www.googleapis.com/auth/classroom.courses');
         scopes.push('https://www.googleapis.com/auth/classroom.coursework.me');
         scopes.push('https://www.googleapis.com/auth/classroom.coursework.students');
@@ -133,6 +123,7 @@ router.get("/connect", isAuthenticated, (req, res) => {
         scopes.push('https://www.googleapis.com/auth/classroom.announcements');
         scopes.push('https://www.googleapis.com/auth/classroom.topics');
         scopes.push('https://www.googleapis.com/auth/classroom.courseworkmaterials');
+        scopes.push('https://www.googleapis.com/auth/drive.readonly'); // Required to read Classroom attachments
     }
 
     if (wants('drive') || wants('all')) {
