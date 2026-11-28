@@ -34,6 +34,7 @@ import User from "../models/User.js";
 import connectDB from "../../config/db.js";
 import { builtinPluginTools } from "../services/builtin-plugin-tools.js";
 import { revokeSlackToken, SLACK_CLEARED } from "../services/slack-auth.js";
+import { isHiddenPlugin } from "../utils/hidden-plugins.js";
 
 const router = express.Router();
 
@@ -131,7 +132,8 @@ router.get("/status", isAuthenticated, async (req, res) => {
         // Log what we found for debugging
         console.log(`[Integration Status] User ${req.user._id}: connected=[${connected.join(',')}], google_token=${!!user.google_access_token}, ms_token=${!!user.microsoft_access_token}, zoom_token=${!!user.zoom_access_token}, vercel_token=${!!user.vercel_access_token}, notion_token=${!!user.notion_access_token}, slack_token=${!!user.slack_access_token}, github_token=${!!user.github_access_token}`);
 
-        res.json({ connected });
+        // Hidden plugins (utils/hidden-plugins.js: Canva, Spotify) are never shown as connected
+        res.json({ connected: connected.filter((id) => !isHiddenPlugin(id)) });
     } catch (err) {
         console.error("AI Integration Status Error:", err);
         res.status(500).json({ message: "Failed to fetch integration status" });

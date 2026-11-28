@@ -9,6 +9,8 @@
 // oauthClientEnv: a server that does not let a new app sign itself up (Zoom) logs in with our own app's client id and
 // secret, read from these env variables; the app is offered only once both are set. Never sent to the browser.
 
+import { isHiddenCatalogApp } from "../utils/hidden-plugins.js";
+
 const si = (slug) => `https://cdn.simpleicons.org/${slug}`;
 const fav = (domain) => `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
 // The same logos the built-in plugins use
@@ -82,7 +84,8 @@ export function presetOAuthClient(catalogId, env = process.env) {
 
 /** False for a known app whose own client (oauthClientEnv) is not set on this server: it cannot log in yet. */
 export function catalogAppReady(app, env = process.env) {
-    return !!app && (!app.oauthClientEnv || !!presetOAuthClient(app.id, env));
+    // A hidden app (utils/hidden-plugins.js: Canva) is never offered nor added
+    return !!app && !isHiddenCatalogApp(app.id) && (!app.oauthClientEnv || !!presetOAuthClient(app.id, env));
 }
 
 /** The known apps people can add now, without the server-only fields (AI Hub, the phone app, the AI's list_apps). */

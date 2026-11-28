@@ -39,6 +39,8 @@
  * never offered over MCP.
  */
 
+import { HIDDEN_CONNECTOR_TOOLS } from "../utils/hidden-plugins.js";
+
 export function getConnectedAppToolNames(user) {
     const names = new Set();
     if (!user) return names;
@@ -52,5 +54,6 @@ export function getConnectedAppToolNames(user) {
     if (user.github_access_token) names.add("github_workspace_connector");
     const googleServices = user.metadata?.connected_google_services;
     if (Array.isArray(googleServices) && googleServices.includes("youtube")) names.add("youtube_connector");
+    for (const t of HIDDEN_CONNECTOR_TOOLS) names.delete(t); // hidden plugins (utils/hidden-plugins.js)
     return names;
 }

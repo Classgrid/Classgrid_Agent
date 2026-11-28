@@ -5,6 +5,7 @@
  * a connect card with the app's logo and a Log in button (client: answer-cards/mcp-connect).
  */
 import CustomMcpServer from "../models/CustomMcpServer.js";
+import { isHiddenCustomServer } from "../utils/hidden-plugins.js";
 import { publicCatalog, findCatalogApp } from "./custom-mcp-catalog.js";
 import { callServerTool, createServer, publicServer, refreshTools } from "./custom-mcp.service.js";
 
@@ -46,7 +47,8 @@ function card(doc) {
 }
 
 async function findServer(userId, ref) {
-    const servers = await CustomMcpServer.find({ userId });
+    // Connectors for hidden apps (utils/hidden-plugins.js) are left out everywhere the AI looks
+    const servers = (await CustomMcpServer.find({ userId })).filter((s) => !isHiddenCustomServer(s));
     const r = String(ref || "").trim();
     return servers.find((s) => String(s._id) === r) || servers.find((s) => norm(s.name) === norm(r)) ||
         servers.find((s) => s.catalogId && norm(s.catalogId) === norm(r)) || servers.find((s) => norm(s.name).includes(norm(r)) && norm(r)) || null;
@@ -65,7 +67,7 @@ export async function runCustomMcpTool(userId, args = {}) {
         }
 
         if (op === "list_servers") {
-            const servers = await CustomMcpServer.find({ userId }).sort({ createdAt: 1 });
+            const servers = (await CustomMcpServer.find({ userId }).sort({ createdAt: 1 })).filter((s) => !isHiddenCustomServer(s));
             return out({ servers: servers.map((d) => ({ id: String(d._id), name: d.name, status: d.status, enabled: d.enabled, tools: d.tools.map((t) => ({ name: t.name, description: String(t.description || "").slice(0, 200) })), lastError: d.lastError || undefined })) });
         }
 
@@ -149,7 +151,7 @@ export async function customMcpPromptLine(userId) {
     return promise;
 }
 async function readCustomMcpPromptLine(userId) {
-    const servers = await CustomMcpServer.find({ userId, enabled: true }).select("name status lastError tools.name createdAt").sort({ createdAt: 1 }).lean();
+    const servers = (await CustomMcpServer.find({ userId, enabled: true }).select("name status lastError tools.name createdAt url catalogId").sort({ createdAt: 1 }).lean()).filter((s) => !isHiddenCustomServer(s));
     if (!servers.length) return "";
     const rows = servers.map((s) => {
         if (s.status !== "connected") return `${s.name} (${s.status === "needs_login" ? "needs login: use operation login to show the card" : "error: " + s.lastError})`;

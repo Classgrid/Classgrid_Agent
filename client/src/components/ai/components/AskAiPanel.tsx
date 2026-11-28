@@ -2270,8 +2270,9 @@ export const INTEGRATIONS_LIST: any[] = [
   { id: "vercel", name: "Vercel", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/vercel-icon-svgrepo-com.svg", invertInDarkMode: true },
   { id: "slack", name: "Slack", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/slack-new-logo-logo-svgrepo-com.svg" },
   { id: "github", name: "GitHub", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/github-icon.svg", invertInDarkMode: true },
-  { id: "canva", name: "Canva", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/canva.svg" },
-  { id: "spotify", name: "Spotify", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/spotify.svg" },
+  // Canva and Spotify are hidden everywhere (owner, 2026-11-28; server/src/utils/hidden-plugins.js): their code stays
+  // { id: "canva", name: "Canva", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/canva.svg" },
+  // { id: "spotify", name: "Spotify", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/spotify.svg" },
   { id: "youtube", name: "YouTube", imgUrl: "https://cdn.classgrid.in/youtube-icon.svg" },
   { id: "supabase", name: "Supabase", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/supabase-icon.svg" },
   { id: "sanity", name: "Sanity CMS", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/sanity-icon-logo-png_seeklogo-653456.png", invertInDarkMode: true },

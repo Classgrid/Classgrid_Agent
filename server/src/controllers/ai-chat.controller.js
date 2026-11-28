@@ -133,6 +133,7 @@ import { confirmedEmails, cleanEmail as cleanAccountEmail } from "../utils/accou
 import { offFeatures, sendFeatureOff, toolOffBy, isFlaggedTool, getFeatureFlagDefinition } from "../services/feature-flag.service.js";
 import { takeInlineImages, findInlineImage, withInlineImages, isDataUrl, INLINE_IMAGE_PREFIX, INLINE_IMAGE_NOTE } from "../utils/inline-images.js";
 import { pickedApps, pickedGroupIds, pickedAppsNote } from "../utils/picked-apps.js";
+import { isHiddenPlugin, isHiddenConnectorTool, isHiddenCustomServer } from "../utils/hidden-plugins.js";
 import CustomMcpServer from "../models/CustomMcpServer.js";
 import { applyZoomTokens, refreshZoomToken } from "../services/zoom-oauth.js";
 
@@ -269,7 +270,7 @@ SUPPORT & PLUGINS
 - When you describe what Classgrid is (in a comparison, or when asked what you are), never call it a "general assistant", "general assistant + agent" or a tool for general questions. Classgrid is an agent built for long tasks: it plans the work, keeps going for a long time, and runs helpers (subagents) side by side, each with its own part of the work.
 - Classgrid Talk no longer exists; it was merged into Support. Classgrid now has only Support (tickets), for everyone: platform users (people with a Classgrid AI account) and non-platform users (people with only a classgrid.in website account). It covers pre-sales and product questions as well as technical and billing help. Never mention Classgrid Talk as a current service.
 - Memory: saved skills are your memory across chats. To remember anything for future chats, call create_skill. When the user shares a lasting personal fact or preference without asking you to remember it, you may save it yourself with quiet: true and not mention it. Never say you saved or will remember something unless create_skill returned success.
-- "Plugins" means 3rd-party integrations (Zoom, Google Meet, Google Classroom, Vercel, GitHub, Canva, etc.).
+- "Plugins" means 3rd-party integrations (Zoom, Google Meet, Google Classroom, Vercel, GitHub, Slack, etc.).
 
 INLINE CODE (BACKTICKS) RULE:
 CRITICAL: When you want to highlight a single word, short phrase, or variable (like \`cat\`, \`localStorage\`, \`id\`), ALWAYS wrap it in single backticks. This will render as a premium inline box with a grey background and red text. NEVER wrap entire sentences or paragraphs in single backticks. NEVER use bold or italics when backticks would be more appropriate for emphasizing technical or specific terms.`;
@@ -3655,22 +3656,25 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                         disconnectedLinks.push(`[Slack](/api/auth/slack/connect)`);
                     }
 
-                    const canvaConnected = !!(latestUser.canva_access_token || latestUser.canva_refresh_token);
+                    // Hidden plugins (utils/hidden-plugins.js) count as not there at all: no tool, no line, no connect link
+                    const canvaHidden = isHiddenPlugin("canva");
+                    const canvaConnected = !canvaHidden && !!(latestUser.canva_access_token || latestUser.canva_refresh_token);
                     if (canvaConnected) {
                         const canvaName = latestUser.canva_name ? `(Connected as: ${latestUser.canva_name}) ` : '';
                         activeDescriptions.push(`- **Canva**: CONNECTED. ${canvaName}${promptBlock("connector:canva", `Use the 'canva_connector' tool to search, read and create designs, export them (pdf, png, jpg, pptx, mp4...), upload images, manage folders, comments and brand templates in the user's Canva account.`)}`);
                         allowedConnectorNames.add('canva_connector');
                     } else {
-                        disconnectedLinks.push(`[Canva](/api/auth/canva/connect)`);
+                        if (!canvaHidden) disconnectedLinks.push(`[Canva](/api/auth/canva/connect)`);
                     }
 
-                    const spotifyConnected = !!(latestUser.spotify_access_token || latestUser.spotify_refresh_token);
+                    const spotifyHidden = isHiddenPlugin("spotify");
+                    const spotifyConnected = !spotifyHidden && !!(latestUser.spotify_access_token || latestUser.spotify_refresh_token);
                     if (spotifyConnected) {
                         const spotifyName = latestUser.spotify_email || latestUser.spotify_name ? `(Connected as: ${latestUser.spotify_email || latestUser.spotify_name}) ` : '';
                         activeDescriptions.push(`- **Spotify**: CONNECTED. ${spotifyName}${promptBlock("connector:spotify", `Use the 'spotify_connector' tool to search music, see and control playback, manage playlists and the saved library, and read top and recently played tracks in the user's Spotify account.`)}`);
                         allowedConnectorNames.add('spotify_connector');
                     } else {
-                        disconnectedLinks.push(`[Spotify](/api/auth/spotify/connect)`);
+                        if (!spotifyHidden) disconnectedLinks.push(`[Spotify](/api/auth/spotify/connect)`);
                     }
 
                     const githubConnected = !!latestUser.github_access_token;
@@ -3871,7 +3875,7 @@ If a user explicitly asks about them, here are the exact definitions you must us
 You must NOT pretend to be either of these services. Keep them completely separate from your own AI capabilities!`);
 
         dynamicSystemPrompt += promptBlock("off", `\n\nPLUGIN & ROLE DEFINITION RULE:
-CRITICAL: If a user asks what "plugins" Classgrid supports, they mean 3rd-party integrations (like Zoom, Google Meet, Google Classroom, Vercel, GitHub, Canva, etc.). DO NOT confuse "plugins" with internal Classgrid "modules" (like Attendance, Fees, Library). 
+CRITICAL: If a user asks what "plugins" Classgrid supports, they mean 3rd-party integrations (like Zoom, Google Meet, Google Classroom, Vercel, GitHub, Slack, etc.). DO NOT confuse "plugins" with internal Classgrid "modules" (like Attendance, Fees, Library). 
 Furthermore, you are a helpful AI Assistant, NOT a pre-sales representative! NEVER act like a salesman trying to pitch Classgrid features to the user. Just answer their questions directly without marketing fluff.`);
 
         dynamicSystemPrompt += promptBlock("off", `\n\nINLINE CODE (BACKTICKS) RULE:
@@ -4019,7 +4023,7 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
             tools: [
                 ...SHARE_PAGE_TOOLS,
                 ...getMcpTools()
-                    .filter(t => !t.name.endsWith('_connector') || allowedConnectorNames.has(t.name))
+                    .filter(t => !t.name.endsWith('_connector') || (allowedConnectorNames.has(t.name) && !isHiddenConnectorTool(t.name)))
                     .map(t => ({
                         type: "function",
                         function: {
@@ -7107,7 +7111,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
         // off in a shared Grid chat, so there only Web search and Deep research count.
         const askedText = typeof body.question === "string" ? body.question : "";
         const customMcpNames = askedText.includes("@") && !gridSender && req.user
-            ? (await CustomMcpServer.find({ userId: req.user._id || req.user.id, enabled: true }).select("name").lean().catch(() => [])).map((s) => s.name)
+            ? (await CustomMcpServer.find({ userId: req.user._id || req.user.id, enabled: true }).select("name url catalogId").lean().catch(() => [])).filter((s) => !isHiddenCustomServer(s)).map((s) => s.name)
             : [];
         const picked = pickedApps(askedText, { customNames: customMcpNames, pluginsAllowed: !gridSender });
         if (picked.names.length) tailPrompt += pickedAppsNote(picked, { researchLine: SLASH_COMMAND_LINES.research });

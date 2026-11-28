@@ -6,8 +6,10 @@
 // The names are the apps' own (client INTEGRATIONS_LIST in AskAiPanel.tsx, the phone's BUILTIN_PLUGINS in
 // src/api/connectors.ts); a custom connector is picked by its name as the user saved it.
 
+import { isHiddenConnectorTool } from "./hidden-plugins.js";
+
 /** Built-in plugins: the name in the box, its tool and the tool group that holds it (services/ai-tool-groups.js). */
-export const PICKABLE_PLUGINS = [
+const ALL_PLUGINS = [
     { name: "Notion", tool: "notion_connector", group: "connector:notion" },
     { name: "Gmail", tool: "google_workspace_connector", group: "connector:google" },
     { name: "Google Calendar", tool: "google_workspace_connector", group: "connector:google" },
@@ -30,6 +32,8 @@ export const PICKABLE_PLUGINS = [
     { name: "Facebook Pages", tool: "facebook_connector", group: "connector:facebook" },
     { name: "Instagram Business", tool: "instagram_connector", group: "connector:instagram" },
 ];
+// Hidden plugins (utils/hidden-plugins.js: Canva, Spotify) cannot be picked with "@"
+export const PICKABLE_PLUGINS = ALL_PLUGINS.filter((p) => !isHiddenConnectorTool(p.tool));
 
 /** The box's own two search items. */
 export const SEARCH_PICKS = ["Web search", "Deep research"];

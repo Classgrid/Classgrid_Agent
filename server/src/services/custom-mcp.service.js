@@ -20,6 +20,7 @@ import CustomMcpServer from "../models/CustomMcpServer.js";
 import { encrypt, decrypt } from "../utils/encryption.js";
 import { MCP_CATALOG, catalogAppReady, presetOAuthClient } from "./custom-mcp-catalog.js";
 import { uploadBufferToR2 } from "../config/r2Client.js";
+import { isHiddenCustomServer } from "../utils/hidden-plugins.js";
 
 export const MAX_SERVERS_PER_USER = 50;
 const CALL_TIMEOUT_MS = 120000;
@@ -341,6 +342,8 @@ export async function createServer(userId, input) {
     const name = String(input.name || "").trim().slice(0, 60);
     if (!name) throw new Error("Please give the connector a name.");
     const url = (await assertSafeUrl(String(input.url || "").trim())).href;
+    // A hidden app's own MCP server (utils/hidden-plugins.js: Canva) cannot be added
+    if (isHiddenCustomServer({ url, catalogId: input.catalogId })) throw new Error("This app is not available in Classgrid.");
     // Same server added before: a connected one is reused; one whose login never finished is replaced
     const same = await CustomMcpServer.find({ userId, url });
     const working = same.find((d) => d.status === "connected" || d.toolsFetchedAt);
@@ -372,5 +375,6 @@ export async function createServer(userId, input) {
 }
 
 export async function listServersForUser(userId) {
-    return CustomMcpServer.find({ userId }).sort({ createdAt: 1 });
+    // A connector for a hidden app (utils/hidden-plugins.js) is not listed
+    return (await CustomMcpServer.find({ userId }).sort({ createdAt: 1 })).filter((s) => !isHiddenCustomServer(s));
 }
