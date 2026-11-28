@@ -1,6 +1,6 @@
 ---
 name: classgrid-guide
-description: Guide and sitemap for Classgrid AI (chat.classgrid.in and the Windows desktop app): Agent Mode, Project Mode, Studio Mode, the desktop app, settings and permissions, and everything the agent connects to (WhatsApp, email, schedules, plugins, GitHub, Vercel). Use it when the user asks how to use, set up or change anything in Classgrid AI, what Classgrid can do, how it compares with other AI tools, about plans, limits, usage or top-ups, or where to download the apps.
+description: Guide and sitemap for Classgrid AI (chat.classgrid.in, the Windows desktop app and the Android phone app): Agent Mode, Project Mode, Studio Mode, the desktop app, settings and permissions, and everything the agent connects to (WhatsApp, email, schedules, plugins, GitHub, Vercel). Use it when the user asks how to use, set up or change anything in Classgrid AI, what Classgrid can do, how it compares with other AI tools, about plans, limits, usage or top-ups, or where to download the apps.
 ---
 
 # Classgrid AI Guide & Sitemap
@@ -31,6 +31,10 @@ how Classgrid works, read the page below that matches what the user is asking ab
     -   Following and answering a chat that runs on the computer from the Classgrid phone app: `/remote`, the phone's
         Remote PC screens (permission cards, Review, Files, Terminal, Details), the green / yellow / red dot, and the
         computer's Remote PC settings (tray, keep awake, start with Windows).
+-   **The phone app (Android)**: [references/phone-app/README.md](references/phone-app/README.md)
+    -   How to do everything in the Classgrid Android app, one page per screen or task (sign-in, accounts, settings,
+        chats, models, voice, plans and usage, projects, Library, Docs, schedules, calls, plugins, Remote PC,
+        troubleshooting). For any question from a phone user, read the list there and then the matching page.
 -   **"/" commands**: [references/slash-commands.md](references/slash-commands.md)
     -   The "/" commands in the Project Mode and Studio chat box (/artifact and /docs in Agent Mode too) (/artifact, /docs, /classgrid-guide, /studio-guide, /project-guide, /plan, /goal, /schedule, /browser,
         /generative_ui, /grill-me, /plugin, /teamwork, /boost, /learn, /compact): what each does and how to use it.

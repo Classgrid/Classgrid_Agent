@@ -24,7 +24,10 @@ let cached = null;
 // [{ rel, text }] of every guide file, and a version that changes when any of them changes
 export async function guideFiles() {
     if (cached) return cached;
-    const files = await Promise.all(GUIDE_FILES.map(async (rel) => ({ rel, text: await fs.readFile(fileURLToPath(new URL(rel, GUIDE_DIR)), "utf8") })));
+    // The phone app pages (references/phone-app/, one per screen or task) go along, whatever pages are there
+    const phone = (await fs.readdir(fileURLToPath(new URL("references/phone-app/", GUIDE_DIR))).catch(() => []))
+        .filter((f) => f.endsWith(".md")).sort().map((f) => `references/phone-app/${f}`);
+    const files = await Promise.all([...GUIDE_FILES, ...phone].map(async (rel) => ({ rel, text: await fs.readFile(fileURLToPath(new URL(rel, GUIDE_DIR)), "utf8") })));
     const version = crypto.createHash("sha1").update(files.map((f) => `${f.rel}\n${f.text}`).join("\n")).digest("hex");
     cached = { files, version };
     return cached;

@@ -124,6 +124,7 @@ import AiUsageLog from "../models/AiUsageLog.js";
 import { LIVE_DOC_TOOLS, LIVE_DOC_PROMPT, buildLiveDocHandlers } from "../services/live-doc-tools.js";
 import { APP_HISTORY_TOOLS, buildAppHistoryHandlers } from "../mcp/mcp-extra-tools.js";
 import { PLAN_INFO_TOOLS, buildPlanInfoHandlers } from "../services/plan-info-tools.js";
+import { APP_GUIDE_TOOLS, buildAppGuideHandlers } from "../services/app-guide-tools.js";
 import { SAVED_NOTE_TOOLS, buildSavedNoteHandlers, savedNotesOf, savedNotesBlock, SAVED_NOTES_GUIDE, notesFromChat } from "../services/ai-memory-notes.js";
 import { ROLE_DEFINITIONS } from "../utils/roles.js";
 import { SHARE_PAGE_TOOLS, SHARE_PAGE_PROMPT, ARTIFACT_DOC_NAMES, runPublishPage, runReadPage, runPageComments } from "../services/share-page.service.js";
@@ -3029,7 +3030,7 @@ The user is in ${appMode === "agent" ? "Agent mode" : appMode === "project" ? "S
         // The Android app sends clientApp "web" with phone: true (its chats are filed with the website's): it is told the
         // user is on the phone and how plugins are connected there (owner, 2026-11-28: the AI sent a phone user to the
         // website's AI Hub)
-        else if (body.phone === true && body.taskOrigin !== "whatsapp") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid app on their Android phone, not the chat.classgrid.in website and not the desktop app. When you give steps, give them for the phone app. Do not bring up plugins or connecting apps unless the user asks about them or the task really needs one; only then: on the phone a plugin is connected with the + button in the message box > Plugins (or Settings > Plugins), pick the app, tap Connect. Never send them to the website or to \"AI Hub\", and do not call open_integration_panel on the phone.";
+        else if (body.phone === true && body.taskOrigin !== "whatsapp") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using the Classgrid app on their Android phone, not the chat.classgrid.in website and not the desktop app. When you give steps, give them for the phone app. Do not bring up plugins or connecting apps unless the user asks about them or the task really needs one; only then: on the phone a plugin is connected with the + button in the message box > AI Hub > Plugins (or Settings > Plugins), pick the app, tap Connect. Never send them to the website, and do not call open_integration_panel on the phone. When they ask how to do anything in the app (sign in, accounts, settings, usage, plans, Docs, projects, schedules, voice, plugins, Remote PC or anything else), first call read_app_guide with page \"phone\" to see the phone app pages, then read the page that matches, and give only the steps it has, with its button names.";
         else if (body.clientApp === "web") volatilePrompt += "\n\n--- WHERE THE USER IS ---\nThe user is using Classgrid on the website (chat.classgrid.in) in their browser, not the desktop app.";
         // Voice mode in the Android app (owner, 2026-11-14): the user speaks, the answer is read aloud in Classgrid's voice
         if (body.voice === true) volatilePrompt += "\n\n--- VOICE MODE ---\nThe user is talking to you out loud in the Classgrid phone app, and your answer is read aloud to them. Answer like a person on a call: short, natural spoken sentences (usually two to four), no markdown, headings, tables, lists, code blocks, links or emoji. Ask at most one question at a time. If something needs a long or visual answer (code, a table, a document), say so in a sentence and offer to put it in the chat instead." + (typeof body.voiceKey === "string" ? ` ${speakerGenderNote(body.voiceKey)}` : "");
@@ -4220,6 +4221,8 @@ Every user is using you as a personal AI assistant and agent (like ChatGPT) to m
                 ...APP_HISTORY_TOOLS,
                 // Plans, prices, limits and the user's own usage, live (tool group account_plan)
                 ...PLAN_INFO_TOOLS,
+                // Classgrid's own how-to guide for the website, desktop and phone apps (always loaded)
+                ...APP_GUIDE_TOOLS,
                 // The AI's online memory notes (tool group memory_notes)
                 ...SAVED_NOTE_TOOLS,
                 {
@@ -5344,6 +5347,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                     ...buildLiveDocHandlers({ user: req.user }),
                     ...buildAppHistoryHandlers({ user: req.user }),
                     ...buildPlanInfoHandlers({ user: req.user, modelNames: MODEL_DISPLAY_NAMES }),
+                    ...buildAppGuideHandlers(),
                     ...buildSavedNoteHandlers({ user: isIncognito ? null : req.user, sessionId, onChange: () => forgetKept(`usernotes:${userId}`) }),
                     ...buildEndConversationHandlers({ sessionId, isIncognito, messages, question: body.question, res }),
                     update_plan_step: async (args) => {

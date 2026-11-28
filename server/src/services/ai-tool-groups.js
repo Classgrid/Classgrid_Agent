@@ -62,6 +62,9 @@ export const CORE_TOOL_NAMES = [
     "computer_terminal",
     "open_integration_panel",
     "get_timezone_time",
+    // Classgrid's own how-to guide (website, desktop and phone app pages): always loaded so any "how do I" in the app is
+    // answered from it (owner, 2026-11-28)
+    "read_app_guide",
     "search_web",
     "open_url",
     "search_knowledge_base",

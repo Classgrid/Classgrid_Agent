@@ -65,11 +65,10 @@ Everything Classgrid AI connects to, and every way to reach it from outside the 
 - Open: tap the sliders icon in the message box → **AI Hub** → **Plugins** tab (**Plugins & Integrations**) → tap an app → **Connect** → sign in and allow access.
 - Each plugin card has **Try asking the AI** examples.
 - Use it by asking in plain words, or type **@** in the message box and pick the app (handy when you have Gmail and Outlook both connected).
-- Apps: Gmail, Google Calendar, Google Drive, Google Classroom, Google Forms, Google Meet, Microsoft Outlook, Microsoft Teams, Zoom, Slack, Notion, GitHub, Vercel, Sanity CMS, Canva, YouTube, Spotify, Facebook Pages, Instagram Business, WhatsApp Business.
-- Canva and Zoom can also be connected a second way, through their own official MCP servers: **Canva (MCP)** and **Zoom (MCP)** under **More apps** in the same Plugins tab (Connect, then sign in to Canva or Zoom). They are separate from the built-in **Canva** and **Zoom** plugins; you can connect either one or both.
+- Apps: Gmail, Google Calendar, Google Drive, Google Classroom, Google Forms, Google Meet, Microsoft Outlook, Microsoft Teams, Zoom, Slack, Notion, GitHub, Vercel, Sanity CMS, YouTube. (Canva, Spotify, Facebook Pages, Instagram Business and WhatsApp Business are hidden for now: they are not offered in any Classgrid app.)
+- Zoom can also be connected a second way, through its own official MCP server: **Zoom (MCP)** in the same Plugins tab (Connect, then sign in to Zoom). It is separate from the built-in **Zoom** plugin; you can connect either one or both.
 - The agent acts as you: Gmail sends from your address, Slack posts as you, Drive uploads go to your Drive. Ask for a draft first before anything is sent or posted.
-- Each plugin does a focused set of things. For example: Calendar can list and create events but not move or cancel them; Vercel can deploy but can't roll back or show build logs; Outlook can't delete or move emails; Instagram posts need an image; Spotify playback needs Premium and an open Spotify app.
-- **WhatsApp Business** needs your own Meta app details (Phone Number ID, Permanent Access Token, Webhook Verify Token) and sends from your business number, not the Classgrid number.
+- Each plugin does a focused set of things. For example: Calendar can list and create events but not move or cancel them; Vercel can deploy but can't roll back or show build logs; Outlook can't delete or move emails;
 - Disconnect: **AI Hub** → **Plugins** → tap the app → **Disconnect**. Things already done in the app stay there.
 - The **Connected apps** tab in the AI Hub is the other direction: outside apps like Claude, Cursor or ChatGPT that you allowed to use your Classgrid account. **Remove** cuts one off straight away.
 

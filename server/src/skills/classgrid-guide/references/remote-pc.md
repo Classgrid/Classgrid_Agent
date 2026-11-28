@@ -32,7 +32,7 @@ There is nothing to pair: the phone and the computer are signed in to the same C
     in this chat, always, or No with what to do instead). A phone notification "Your computer needs your OK" comes
     when the app is not open.
 -   A message sent while the AI is answering waits above the box (**Send now**, **Remove**), as in the normal chat.
--   The **⋮** menu: Files in chat, Your questions, Rename, Pin, Archive, Archived chats, Copy, then **Details**
+-   The **⋮** menu: Files in chat, Your questions, Rename, Pin, Archive, Copy, then **Details**
     (computer, connected since, total connected time, project folder, mode), **Changes** (every file the chat
     changed), **Review** (each answer's changes with Accept / Reject / Undo), **Files** (the project's files, read
     from the computer when opened, read only), **Terminal** (the chat's commands and their output),
