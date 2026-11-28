@@ -282,15 +282,24 @@
     --background: #ffffff;
     --color-background: #ffffff;
   }
-  /* The desktop app's light chat: a warm off-white #fbfbf8 instead of pure white (owner, 2026-11-28); cards and the
-     message box stay white on it. The website keeps #ffffff; Classgrid Code keeps its own greys (below). */
-  html.desktop-app:not(.dark),
-  html.desktop-app:not(.cg-editor).studio-mode:not(.dark) .studio-chat {
+  /* Light chat: a warm off-white #fbfbf8 instead of pure white, in the desktop app and on the website (owner,
+     2026-11-28); cards and the message box stay white on it. Classgrid Code keeps its own greys (below), incognito its
+     own colors. */
+  html.desktop-app:not(.cg-editor):not(.dark),
+  html.studio-colors:not(.dark),
+  html.desktop-app:not(.cg-editor).studio-mode:not(.dark) .studio-chat,
+  html.studio-colors.studio-mode:not(.dark) .studio-chat {
     --background: #fbfbf8;
     --color-background: #fbfbf8;
   }
-  html.desktop-app:not(.cg-editor).studio-mode:not(.dark) .studio-chat :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]) {
+  html.desktop-app:not(.cg-editor).studio-mode:not(.dark) .studio-chat :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]),
+  html.studio-colors.studio-mode:not(.dark) .studio-chat :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]):not(.cg-incognito, .cg-incognito *) {
     background-color: #fbfbf8 !important;
+  }
+  /* (incognito on the website stays white, as before; the desktop app's incognito has its own rule further down) */
+  html.studio-colors:not(.dark) .cg-incognito {
+    --background: #ffffff;
+    --color-background: #ffffff;
   }
   /* Classgrid Code's light mode: soft greys, not bright white (the AI panel and its windows) */
   html.desktop-app.cg-editor:not(.dark) {
@@ -315,6 +324,11 @@
   html.desktop-app:not(.dark) :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]):not(.cg-incognito, .cg-incognito *),
   html.studio-colors:not(.dark) :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]):not(.cg-incognito, .cg-incognito *) {
     background-color: #ffffff !important;
+  }
+  /* (the same chat backgrounds in the warm off-white #fbfbf8, 2026-11-28; Classgrid Code keeps white here) */
+  html.desktop-app:not(.cg-editor):not(.dark) :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]):not(.cg-incognito, .cg-incognito *),
+  html.studio-colors:not(.dark) :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]):not(.cg-incognito, .cg-incognito *) {
+    background-color: #fbfbf8 !important;
   }
   html.dark.desktop-app [class*="dark:!bg-[#000000]"]:not(.cg-incognito, .cg-incognito *),
   html.dark.studio-colors [class*="dark:!bg-[#000000]"]:not(.cg-incognito, .cg-incognito *) {
