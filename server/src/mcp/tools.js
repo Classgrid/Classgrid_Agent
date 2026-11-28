@@ -1025,7 +1025,7 @@ export const getMcpTools = () => [
   },
   {
     name: 'canva_connector',
-    description: "Work in the user's connected Canva account (Canva REST API): search, read and create designs, export designs as files, upload images, manage folders, comments and brand templates. Export, upload, autofill, resize and import wait for Canva to finish and return the result. Canva's API cannot add or edit content inside a design: create_design makes a blank design. import_design_from_url turns a public .pptx, .pdf, .docx, .key or image file into a fully editable Canva design with its slides, text and pictures.",
+    description: "Work in the user's connected Canva account (Canva REST API): search, read and create designs, export designs as files, upload images, manage folders, comments and brand templates. Export, upload, autofill, resize and import wait for Canva to finish and return the result. create_design makes a new design; to put a picture in it, first upload the picture with upload_asset_from_url and pass that asset_id to create_design, and the picture is placed in the new design. Canva's API cannot change a design after it is made (no adding or editing text or pictures in an existing design). import_design_from_url turns a public .pptx, .pdf, .docx, .key or image file into a fully editable Canva design with its slides, text and pictures.",
     inputSchema: {
       type: 'object',
       properties: {
@@ -1044,7 +1044,7 @@ export const getMcpTools = () => [
         width: { type: 'number', description: 'Custom size in pixels, 40-8000 (create_design, resize_design), or the export width for jpg/png/gif.' },
         height: { type: 'number', description: 'Custom size in pixels, 40-8000 (create_design, resize_design), or the export height for jpg/png/gif.' },
         title: { type: 'string', description: 'Title of the new design (create_design, autofill_brand_template, import_design_from_url).' },
-        asset_id: { type: 'string', description: 'Canva asset ID (get_asset, update_asset, delete_asset, or an image to start a new design with in create_design).' },
+        asset_id: { type: 'string', description: 'Canva asset ID (get_asset, update_asset, delete_asset, or in create_design an uploaded image to place in the new design: always pass it when the design should show a picture you uploaded).' },
         format: { type: 'string', enum: ['pdf', 'jpg', 'png', 'gif', 'pptx', 'mp4', 'csv', 'html_bundle', 'html_standalone'], description: 'Export file type (export_design). Use get_export_formats to see which ones a design supports.' },
         pages: { type: 'array', items: { type: 'number' }, description: 'Page numbers to export, starting at 1 (export_design). Leave out for all pages.' },
         quality: { type: 'string', description: 'export_design: jpg quality 1-100, or the mp4 quality (e.g. horizontal_1080p).' },
