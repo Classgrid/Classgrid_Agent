@@ -3597,10 +3597,12 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     sanityConnected = !!(latestUser.sanity_project_id && latestUser.sanity_access_token);
                     if (sanityConnected) console.log('[integration-verify] Sanity: ✓ CONNECTED (token in DB)');
 
-                    const facebookConnected = !!latestUser.facebook_access_token || (isSuperAdmin && !!process.env.META_SYSTEM_ACCESS_TOKEN);
+                    const facebookHidden = isHiddenPlugin("facebook"); // utils/hidden-plugins.js
+                    const facebookConnected = !facebookHidden && (!!latestUser.facebook_access_token || (isSuperAdmin && !!process.env.META_SYSTEM_ACCESS_TOKEN));
                     if (facebookConnected) console.log('[integration-verify] Facebook: ✓ CONNECTED (token in DB or ENV)');
 
-                    const instagramConnected = !!latestUser.instagram_access_token || (isSuperAdmin && !!process.env.META_SYSTEM_ACCESS_TOKEN);
+                    const instagramHidden = isHiddenPlugin("instagram");
+                    const instagramConnected = !instagramHidden && (!!latestUser.instagram_access_token || (isSuperAdmin && !!process.env.META_SYSTEM_ACCESS_TOKEN));
                     if (instagramConnected) console.log('[integration-verify] Instagram: ✓ CONNECTED (token in DB or ENV)');
 
                     // Only VERIFIED integrations get tools
@@ -3717,12 +3719,12 @@ CRITICAL: If you call ANY integration tool (e.g. Google Classroom, Gmail, Google
                     if (facebookConnected) {
                         activeDescriptions.push(`- **Facebook Pages**: ✓ CONNECTED. ${promptBlock("connector:facebook", `Use 'facebook_connector' tool. Available operations: 'publish_post', 'list_posts', 'list_messages', 'send_message', 'list_comments', 'reply_comment', 'get_insights', 'get_profile'. For messages, targetId MUST be the numeric PSID/IGSID from list_messages, never a string username.`)}`);
                     } else {
-                        disconnectedLinks.push(`[Facebook](#) (Connect via AI Hub)`);
+                        if (!facebookHidden) disconnectedLinks.push(`[Facebook](#) (Connect via AI Hub)`);
                     }
                     if (instagramConnected) {
                         activeDescriptions.push(`- **Instagram Business**: ✓ CONNECTED. ${promptBlock("connector:instagram", `Use 'instagram_connector' tool. Available operations: 'publish_post', 'list_posts', 'list_messages', 'send_message', 'list_comments', 'reply_comment', 'get_insights', 'get_profile'. For messages, targetId MUST be the numeric IGSID from list_messages, never a string username.`)}`);
                     } else {
-                        disconnectedLinks.push(`[Instagram](#) (Connect via AI Hub)`);
+                        if (!instagramHidden) disconnectedLinks.push(`[Instagram](#) (Connect via AI Hub)`);
                     }
                     try {
                         const customLine = await customMcpPromptLine(latestUser._id);

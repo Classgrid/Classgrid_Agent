@@ -2276,8 +2276,9 @@ export const INTEGRATIONS_LIST: any[] = [
   { id: "youtube", name: "YouTube", imgUrl: "https://cdn.classgrid.in/youtube-icon.svg" },
   { id: "supabase", name: "Supabase", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/supabase-icon.svg" },
   { id: "sanity", name: "Sanity CMS", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/sanity-icon-logo-png_seeklogo-653456.png", invertInDarkMode: true },
-  { id: "facebook", name: "Facebook Pages", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/2023_Facebook_icon.svg" },
-  { id: "instagram", name: "Instagram Business", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/Instagram_logo_2016.svg" },
+  // Facebook Pages and Instagram Business hidden too (owner, 2026-11-28)
+  // { id: "facebook", name: "Facebook Pages", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/2023_Facebook_icon.svg" },
+  // { id: "instagram", name: "Instagram Business", imgUrl: "https://cdn.classgrid.in/classgrid_intgration/Instagram_logo_2016.svg" },
 ];
 
 // "@Web search", "@Deep research" and "@<plugin>" in the chat box and in the user's own messages show as the app's
