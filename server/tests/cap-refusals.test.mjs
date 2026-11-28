@@ -56,7 +56,7 @@ test("claudeSwitches: the Claude flag and the Model manager reach every stand-in
 
     // Haiku turned off in the Model manager: the small jobs go to Sonnet; both off: no stand-in
     disabled = ["claude-haiku-5-5"];
-    assert.equal(claudeFor("small", await claudeSwitches()), "claude-sonnet-5-5");
+    assert.equal(claudeFor("small", await claudeSwitches()), null); // only Haiku (owner, 2026-11-28): never Sonnet
     disabled = ["claude-haiku-5-5", "claude-sonnet-5-5"];
     assert.equal(claudeFor("simple", await claudeSwitches()), null);
 

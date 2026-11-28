@@ -31,6 +31,7 @@ mock.module("../src/services/cf-neuron-cap.service.js", {
         isCfNeuronCapError: (e) => !!e && e.code === "cf_neuron_cap",
         cfAiFetch: async (url, init) => {
             const next = script.shift();
+            if (next === "fail") throw new Error("HTTP 500: upstream error");
             if (!next || next === "refuse") throw new CapError();
             sent.push(JSON.parse(init.body));
             if (next.stopAfter) {
@@ -70,6 +71,21 @@ const toolRound = [
 ];
 const start = (s) => { script = s; sent.length = 0; claudeCalls = []; };
 const standIn = (extra = {}) => async () => ({ model: "claude-haiku-5-5", ...extra });
+
+test("a Cloudflare model that fails twice (not the cap): Claude Haiku finishes the answer, never the next backup", async () => {
+    start(["fail", "fail"]);
+    const mistral = { name: "mistral", url: "https://api.mistral.ai/v1/chat/completions", apiKey: "m", model: "open-mistral-nemo" };
+    const r = await streamChat({ provider, fallbackProviders: [mistral], messages, tools, maxTokens: 1000, capStandIn: standIn() });
+    assert.equal(claudeCalls.length, 1);
+    assert.equal(claudeCalls[0].model, "claude-haiku-5-5");
+    assert.equal(r.answer, "Done by the stand-in.");
+});
+
+test("a Cloudflare failure with no stand-in goes up as before", async () => {
+    start(["fail", "fail", "fail", "fail", "fail", "fail"]);
+    await assert.rejects(streamChat({ provider, messages, tools, maxTokens: 1000 }), /HTTP 500/);
+    assert.equal(claudeCalls.length, 0);
+});
 
 test("refused at the first round: the stand-in answers, nothing is counted for the Cloudflare model", async () => {
     start(["refuse"]);

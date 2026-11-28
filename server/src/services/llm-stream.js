@@ -600,6 +600,14 @@ export async function streamChat({
                         conversation.push({ role: "assistant", content: shownText });
                         conversation.push({ role: "user", content: CONTINUE_PROMPT });
                     }
+                    // A Cloudflare model that failed twice (an error, a timeout, too busy): Claude Haiku finishes the answer
+                    // from where it stands, in the same reply, instead of the next backup in the list (Mistral) (owner,
+                    // 2026-11-28: "whenever Cloudflare fails send it to Haiku", Auto and every other job). Only where the
+                    // caller gave a stand-in (capStandIn: titles, summaries, memory notes, helpers, the main answer).
+                    if (capStandIn && tryNo >= 1 && String(roundProviders[at]?.model || "").startsWith("@cf/")) {
+                        e.cfFailed = true;
+                        throw e;
+                    }
                     if (tryNo % 2 === 1 && at < roundProviders.length - 1) at++;
                     onStatus?.("The model is busy, trying again…");
                     await new Promise((r) => setTimeout(r, busy ? Math.min(10000 * (tryNo + 1), 30000) : Math.min(3000 * (tryNo + 1), 10000)));
@@ -858,9 +866,13 @@ export async function streamChat({
     } catch (err) {
         // Cloudflare's daily cap refused a round and no model outside Cloudflare could take it: the Claude stand-in
         // finishes the answer (its own failure goes up as it is, with `standIn` on it)
-        if (isCfNeuronCapError(err)) {
+        // (also when a Cloudflare model failed twice for any other reason: e.cfFailed, set in the round loop above)
+        if (isCfNeuronCapError(err) || err?.cfFailed) {
             const stand = await askStandIn();
-            if (stand) return finishWithClaude(stand);
+            if (stand) {
+                if (err?.cfFailed) console.warn(`[AI-STREAM] Cloudflare failed (${String(err?.message || err).slice(0, 160)}); ${stand.model} finishes the answer`);
+                return finishWithClaude(stand);
+            }
         }
         const wrapped = err instanceof StreamChatError ? err : new StreamChatError(err?.message || String(err));
         // (the cap's refusal stays recognisable to the caller, isCfNeuronCapError: it is not an error to try again)

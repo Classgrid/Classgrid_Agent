@@ -52,8 +52,8 @@ test("under the cap: Cloudflare as usual", async () => {
 test("at the cap: each job gets its Claude model", async () => {
     set({ neurons: 9500 });
     assert.equal(await cloudflareCapped(), true);
-    assert.equal(await claudeWhenCapped("hard"), CAP_SONNET);
-    assert.equal(await claudeWhenCapped("helper"), CAP_SONNET);
+    assert.equal(await claudeWhenCapped("hard"), CAP_HAIKU);
+    assert.equal(await claudeWhenCapped("helper"), CAP_HAIKU);
     assert.equal(await claudeWhenCapped("simple"), CAP_HAIKU);
     assert.equal(await claudeWhenCapped("small"), CAP_HAIKU);
     assert.equal(await claudeWhenCapped("something else"), CAP_HAIKU);
@@ -63,7 +63,7 @@ test("at the cap: each job gets its Claude model", async () => {
 
 test("a count that cannot be read counts as used up; settings that cannot be read do not", async () => {
     set({ noCount: true });
-    assert.equal(await claudeWhenCapped("hard"), CAP_SONNET);
+    assert.equal(await claudeWhenCapped("hard"), CAP_HAIKU);
     set({ noSettings: true, neurons: 50000 });
     assert.equal(await claudeWhenCapped("hard"), null);
 });
@@ -75,10 +75,10 @@ test("no Anthropic key, or the Claude family switched off: nothing moves", async
     assert.equal(await claudeWhenCapped("hard", { claudeOff: true }), null);
 });
 
-test("a Claude model turned off in the Model manager is replaced by the other one", async () => {
+test("only Haiku: Haiku turned off in the Model manager means nothing moves (never Sonnet)", async () => {
     set({ neurons: 20000 });
     assert.equal(await claudeWhenCapped("hard", { disabled: [CAP_SONNET] }), CAP_HAIKU);
-    assert.equal(await claudeWhenCapped("small", { disabled: [CAP_HAIKU] }), CAP_SONNET);
+    assert.equal(await claudeWhenCapped("small", { disabled: [CAP_HAIKU] }), null);
     assert.equal(await claudeWhenCapped("hard", { disabled: [CAP_SONNET, CAP_HAIKU] }), null);
 });
 
@@ -103,8 +103,8 @@ test("imageTypeOf: the picture types Claude reads, from the file's first bytes",
 test("claudeFor: the stand-in right after a refusal, whatever today's count is", async () => {
     set({ neurons: 100 }); // far under the cap: one big request was refused, the day is not used up
     assert.equal(await claudeWhenCapped("hard"), null);
-    assert.equal(claudeFor("hard"), CAP_SONNET);
-    assert.equal(claudeFor("helper"), CAP_SONNET);
+    assert.equal(claudeFor("hard"), CAP_HAIKU);
+    assert.equal(claudeFor("helper"), CAP_HAIKU);
     assert.equal(claudeFor("simple"), CAP_HAIKU);
     assert.equal(claudeFor("small"), CAP_HAIKU);
     assert.equal(claudeFor("hard", { disabled: [CAP_SONNET] }), CAP_HAIKU);
