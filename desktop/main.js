@@ -379,6 +379,7 @@ ipcMain.handle("cg:backgroundCommand", (e, id) => {
 // Session-to-session messaging (sessions.js): this app is one running Classgrid session others on this computer can
 // list and message. Host -> screens: "cg-peer-message", "cg-peer-notice". Screens -> host: "cg-session-status", "cg-peer-read".
 let peerSession = null;
+let peerOutbox = null; // answers to other sessions that did not get there yet (sessions.js createOutbox)
 let peerReady = false;
 const peerQueue = [];
 function startPeerSession() {
@@ -407,7 +408,14 @@ ipcMain.handle("cg:peerInbox", (e) => (fromOurScreens(e) && peerSession ? peerSe
 ipcMain.handle("cg:listSessions", async (e) => (fromOurScreens(e) ? require("./sessions").list({ excludeSelf: true }) : []));
 ipcMain.handle("cg:sendToSession", async (e, req) => {
   if (!fromOurScreens(e)) return { error: "only the Classgrid app itself may send messages" };
-  try { return await require("./sessions").send({ target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle), replyTo: req && req.replyTo }); }
+  const lib = require("./sessions");
+  const r = { target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle), replyTo: req && req.replyTo };
+  // an answer (replyTo) that does not get there now is kept by the app and sent again (sessions.js createOutbox)
+  if (r.replyTo) {
+    if (!peerOutbox) peerOutbox = lib.createOutbox();
+    try { return await peerOutbox.sendAnswer(r); } catch (err) { return { error: err.message }; }
+  }
+  try { return await lib.send(r); }
   catch (err) { return { error: err.message }; }
 });
 // Studio's Review tab for a folder on this computer (runner.js keepBefore): an answer's changes, Reject, Undo

@@ -47,53 +47,23 @@ const loaders = new Set(); // each open panel's "load our screens again"
 const pages = new Set();
 // The Agent panel (right side) and the chats sidebar (the window's left edge, classgrid-left-strip.patch)
 const screens = { agent: null, chats: null };
-// Session-to-session messaging (desktop/sessions.js): this editor's session handle, and the messages and notices that
-// arrived while the Agent panel's page wasn't ready (it says so with "peerReady"; then they are flushed to it)
-const peer = { handle: null, queue: [], ready: new WeakSet(), views: new Set(), viewOf: new Map(), status: new Map(), lastBusy: null, sentFrom: new Map() };
-// Which Agent panel a message or notice goes to. A window can have two Agent panels open (the right side and the left
-// icon); every message used to go to the one that became visible last, so an answer to a message sent from the other
-// panel landed in a panel nobody was looking at, or waited there unread (owner, 2026-11-28: five messages answered,
-// no answer seen). Now: an answer goes to the panel whose chat sent the message (sentFrom, by message id), anything
-// else to the panel that ran the last turn, else the visible one.
-function peerTarget(event) {
-  const replyTo = event?.data?.replyTo;
-  const asked = replyTo ? peer.sentFrom.get(String(replyTo)) : null;
-  if (asked && peer.views.has(asked)) return asked;
-  // (a panel on screen and not answering first: a panel stuck "busy" or hidden held every answer unseen, 2026-11-28)
-  const shown = [...peer.views].filter((w) => peer.viewOf.get(w)?.visible && peer.status.get(w) !== "busy");
-  if (shown.includes(screens.agent)) return screens.agent;
-  if (shown.length) return shown[shown.length - 1];
-  if (peer.lastBusy && peer.views.has(peer.lastBusy)) return peer.lastBusy;
-  return screens.agent;
+// Session-to-session messaging (desktop/sessions.js): this editor's session handle, and the router that decides which
+// Agent panel gets a message, keeps the session busy while any panel runs a turn, and holds what came before a panel was
+// ready (sessions.js createPeerRouter: a window can have two Agent panels, owner 2026-11-28)
+const peer = { handle: null, viewOf: new Map(), router: null, outbox: null };
+function peerRouter() {
+  if (peer.router) return peer.router;
+  const lib = require(path.join(DESKTOP_DIR, "sessions.js"));
+  peer.router = lib.createPeerRouter({
+    post: (w, event) => { try { w.postMessage(event); } catch { /* panel gone */ } },
+    isVisible: (w) => !!peer.viewOf.get(w)?.visible,
+    primary: () => screens.agent,
+    getHandle: () => peer.handle,
+    isUnread: (id) => !!peer.handle?.peek().some((m) => String(m.id) === String(id)),
+  });
+  return peer.router;
 }
-function peerSend(event) {
-  const w = peerTarget(event);
-  if (w && peer.ready.has(w)) { w.postMessage(event); return; }
-  peer.queue.push(event);
-  if (peer.queue.length > 200) peer.queue.shift();
-}
-// A message this window sent, and the panel it came from (its answer goes back there)
-function peerSentFrom(id, webview) {
-  if (!id || !webview) return;
-  peer.sentFrom.set(String(id), webview);
-  if (peer.sentFrom.size > 200) peer.sentFrom.delete(peer.sentFrom.keys().next().value);
-}
-// The session is busy while any of its Agent panels runs a turn
-function peerStatus(webview, status) {
-  peer.status.set(webview, status);
-  if (status === "busy") peer.lastBusy = webview;
-  const busy = [...peer.status.values()].includes("busy");
-  peer.handle?.setStatus(busy ? "busy" : "idle");
-}
-function peerFlush(webview) {
-  peer.ready.add(webview);
-  // (what waited goes to this panel unless it belongs to another Agent panel that is ready: that one gets it)
-  const q = peer.queue.splice(0);
-  for (const e of q) {
-    const w = peerTarget(e);
-    (w && w !== webview && peer.ready.has(w) ? w : webview).postMessage(e);
-  }
-}
+const isAgentPage = (w) => !!w && peer.viewOf.has(w);
 function startSession(context, runner) {
   try {
     const file = path.join(DESKTOP_DIR, "sessions.js");
@@ -108,8 +78,8 @@ function startSession(context, runner) {
     if (!handle) return;
     peer.handle = handle;
     runner.setSessionHandle?.(handle);
-    handle.onMessage?.((m) => peerSend({ cgEvent: "peerMessage", data: { id: m.id, from: m.from, text: m.text, notifyIdle: !!m.notifyIdle, receivedAt: m.receivedAt || Date.now(), ...(m.notice ? { notice: m.notice } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}) } })); // (notice: "idle" / "exit", a "finished its turn" notice kept like a message)
-    handle.onNotice?.((n) => peerSend({ cgEvent: "peerNotice", data: { kind: n.kind, messageId: n.messageId, from: n.from } }));
+    handle.onMessage?.((m) => peerRouter().deliver({ cgEvent: "peerMessage", data: { id: m.id, from: m.from, text: m.text, notifyIdle: !!m.notifyIdle, receivedAt: m.receivedAt || Date.now(), ...(m.notice ? { notice: m.notice } : {}), ...(m.replyTo ? { replyTo: m.replyTo } : {}) } }, m.replyTo)); // (notice: "idle" / "exit", a "finished its turn" notice kept like a message)
+    handle.onNotice?.((n) => peerRouter().deliver({ cgEvent: "peerNotice", data: { kind: n.kind, messageId: n.messageId, from: n.from } }));
     context.subscriptions.push({ dispose: () => { try { handle.close(); } catch { /* already closed */ } } });
   } catch (err) {
     log?.appendLine(`[${new Date().toISOString()}] sessions: ${err?.message || err}`);
@@ -165,8 +135,8 @@ async function activate(context) {
   const agentProvider = {
     resolveWebviewView(view) {
       screens.agent = view.webview;
-      peer.views.add(view.webview);
       peer.viewOf.set(view.webview, view);
+      peerRouter().addScreen(view.webview);
       // (it opens on the chat that was open last time in this folder, like the editor brings back your files)
       const load = holdScreens(view.webview, () => {
         const last = lastChatFor(context.workspaceState.get(LAST_CHAT_KEY));
@@ -174,10 +144,8 @@ async function activate(context) {
       });
       view.onDidDispose(() => {
         loaders.delete(load); stopFetches(view.webview); if (screens.agent === view.webview) screens.agent = null;
-        peer.views.delete(view.webview);
+        peerRouter().removeScreen(view.webview);
         peer.viewOf.delete(view.webview);
-        if (peer.status.delete(view.webview)) peer.handle?.setStatus([...peer.status.values()].includes("busy") ? "busy" : "idle");
-        if (peer.lastBusy === view.webview) peer.lastBusy = null;
       });
       view.onDidChangeVisibility(() => { if (view.visible) screens.agent = view.webview; });
     },
@@ -335,7 +303,7 @@ function holdScreens(webview, startPath) {
   const load = () => {
     // The page that goes away doesn't need its calls' answers any more (a long answer would keep coming for nothing)
     stopFetches(webview);
-    peer.ready.delete(webview); // (the new page says peerReady again)
+    if (isAgentPage(webview)) peerRouter().reloaded(webview); // (the new page says peerReady again)
     // Signed out: our own sign-in screen (browser sign-in, like Antigravity and Claude Code)
     if (!storage.token) { webview.html = signedOutHtml(webview); return; }
     if (!fs.existsSync(path.join(APP_DIR, "index.html"))) { webview.html = signedOutHtml(webview, "missing"); return; }
@@ -1010,22 +978,30 @@ const HANDLERS = {
   runTool: async (p, req) => {
     const r = await parts.runner.runTool(req && typeof req === "object" ? req : {});
     // (a message sent from this panel's chat: its answer comes back to this panel)
-    if (req?.tool === "message_classgrid_session") peerSentFrom(/message id ([0-9a-f-]{8,})/i.exec(String(r?.text || ""))?.[1], p?.webview);
+    if (req?.tool === "message_classgrid_session" && isAgentPage(p?.webview)) peerRouter().sent(/message id ([0-9a-f-]{8,})/i.exec(String(r?.text || ""))?.[1], p.webview);
     return r;
   },
   // "Run in background" on a command the AI is waiting for (runner.js backgroundCommand)
   backgroundCommand: (_p, id) => parts.runner.backgroundCommand(String(id || "")),
   // Session messaging: the page is ready for peer messages (flush what waited), its busy/idle state, and the messages it showed
-  // (every Agent panel of this window, not only the one that became visible last: see peerTarget)
-  peerReady: (p) => { if (peer.views.has(p.webview)) peerFlush(p.webview); },
-  sessionStatus: (p, status) => { if (peer.views.has(p.webview) && (status === "busy" || status === "idle")) peerStatus(p.webview, status); },
-  peerRead: (p, ids) => { if (peer.views.has(p.webview) && Array.isArray(ids)) peer.handle?.markRead(ids.map(String)); },
+  // (every Agent panel of this window, not only the one that became visible last: sessions.js createPeerRouter)
+  peerReady: (p) => { if (isAgentPage(p.webview)) peerRouter().ready(p.webview); },
+  sessionStatus: (p, status) => { if (isAgentPage(p.webview)) peerRouter().status(p.webview, status); },
+  peerRead: (p, ids) => { if (isAgentPage(p.webview) && Array.isArray(ids)) peer.handle?.markRead(ids.map(String)); },
   // Unread messages still in the inbox (came while a turn ran and no later step picked them up): read when the turn ends
-  peerInbox: (p) => (peer.views.has(p.webview) && peer.handle ? peer.handle.peek() : []),
+  // (only this panel's own: an answer to a message the other panel sent, or what the other panel was given, stays theirs)
+  peerInbox: (p) => (isAgentPage(p.webview) && peer.handle ? peerRouter().inboxFor(p.webview, peer.handle.peek()) : []),
   // The chat screen sends a message itself: a session's whole answer back to the session that asked (replyTo)
   sendToSession: async (p, req) => {
-    if (!peer.views.has(p.webview) || !peer.handle) return { error: "this session is not set up for messaging other sessions" };
-    try { return await require(path.join(DESKTOP_DIR, "sessions.js")).send({ target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle), replyTo: req && req.replyTo, from: peer.handle.identity() }); }
+    if (!isAgentPage(p.webview) || !peer.handle) return { error: "this session is not set up for messaging other sessions" };
+    const lib = require(path.join(DESKTOP_DIR, "sessions.js"));
+    const r = { target: req && req.target, text: req && req.text, notifyIdle: !!(req && req.notifyIdle), replyTo: req && req.replyTo };
+    // an answer (replyTo) that does not get there now is kept by this window and sent again (sessions.js createOutbox)
+    if (r.replyTo && lib.createOutbox) {
+      if (!peer.outbox) peer.outbox = lib.createOutbox({ sendFn: (x) => lib.send({ ...x, from: peer.handle?.identity() }) });
+      try { return await peer.outbox.sendAnswer(r); } catch (err) { return { error: String(err?.message || err) }; }
+    }
+    try { return await lib.send({ ...r, from: peer.handle.identity() }); }
     catch (err) { return { error: String(err?.message || err) }; }
   },
   // Studio's Review tab for a folder on this computer: an answer's changes, and its files put back (runner.js keepBefore)

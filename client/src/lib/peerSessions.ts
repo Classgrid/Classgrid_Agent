@@ -132,7 +132,8 @@ export function peerPrompt(m: PeerMessage): string {
 export async function sendPeerAnswer(target: string, text: string, replyTo: string): Promise<boolean> {
   try {
     const r = await host()?.sendToSession?.({ target, text, replyTo });
-    return !!r && !r.error && r.status === "delivered";
+    // ("queued": the host keeps it and sends it again until it gets there: desktop/sessions.js createOutbox)
+    return !!r && !r.error && (r.status === "delivered" || r.status === "queued");
   } catch { return false; }
 }
 

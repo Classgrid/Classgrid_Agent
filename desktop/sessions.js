@@ -411,4 +411,160 @@ function register({ kind = "desktop", name, cwd, entrypoint, sessionId, stableKe
   return handle;
 }
 
-module.exports = { register, list, send, current, registryDir, promptFor };
+// ── a host with several chat screens ─────────────────────────────────────────────────────────────────────
+// The editor extension can show two Agent panels at once (the right side and the left icon), each its own page. Until
+// 2026-11-28 every message went to the panel that became visible last, and only that panel could say busy/idle,
+// send or read: an answer to a message sent from the other panel went where nobody looked, and a panel that went
+// "busy" there could never say "idle" again once the other became visible, so the session stayed busy and every
+// later answer was held (owner, same day: ten messages sent, every answer arrived, none was shown).
+// The router decides, for one host:
+//   - which screen gets a message: an answer (replyTo) goes to the screen whose chat sent the message (sent()); else a
+//     screen that is on screen and not running a turn, the primary one first; else the one that ran the last turn;
+//     else the primary one
+//   - busy/idle: the session is busy while ANY screen runs a turn (each screen's own state is kept)
+//   - what waits: an event for a screen that is not ready yet waits, and goes to its screen when one is ready
+// post(screen, event) delivers; isVisible(screen) and primary() describe the screens; handle is the session.
+function createPeerRouter({ post, isVisible = () => true, primary = () => null, getHandle = () => null, isUnread = () => true } = {}) {
+  const screens = new Set();
+  const ready = new Set();
+  const status = new Map();
+  const sentFrom = new Map();   // message id this window sent -> the screen whose chat sent it
+  const deliveredTo = new Map(); // message id that came in -> the screen it was given to (it is that screen's until read)
+  const queue = [];
+  const answers = new Map();    // replyTo -> the answer's event (an answer can come before sent() knows its message)
+  let lastBusy = null;
+  const sessionBusy = () => [...status.values()].includes("busy");
+  const sync = () => { try { getHandle()?.setStatus(sessionBusy() ? "busy" : "idle"); } catch { /* closed */ } };
+  const cap = (map) => { if (map.size > 500) map.delete(map.keys().next().value); };
+  function target(replyTo) {
+    const asked = replyTo ? sentFrom.get(String(replyTo)) : null;
+    if (asked && screens.has(asked)) return asked;
+    const free = [...screens].filter((s) => isVisible(s) && status.get(s) !== "busy");
+    const p = primary();
+    if (p && free.includes(p)) return p;
+    if (free.length) return free[free.length - 1];
+    if (lastBusy && screens.has(lastBusy)) return lastBusy;
+    return p && screens.has(p) ? p : [...screens].pop() || null;
+  }
+  // The screen a message in the inbox belongs to: the one it was given to, else where it would go now. Each screen
+  // takes only its own messages from the inbox (two panels took the same notice, or one took the other's answer).
+  function owner(m) {
+    const given = m && deliveredTo.get(String(m.id));
+    if (given && screens.has(given)) return given;
+    return target(m && m.replyTo);
+  }
+  const give = (w, event) => {
+    const id = event && event.data && event.data.id;
+    if (id) { deliveredTo.set(String(id), w); cap(deliveredTo); }
+    post(w, event);
+  };
+  return {
+    addScreen(s) { if (s) screens.add(s); },
+    removeScreen(s) {
+      screens.delete(s); ready.delete(s);
+      for (const [id, w] of sentFrom) if (w === s) sentFrom.delete(id);
+      for (const [id, w] of deliveredTo) if (w === s) deliveredTo.delete(id);
+      if (lastBusy === s) lastBusy = null;
+      if (status.delete(s)) sync();
+    },
+    has: (s) => screens.has(s),
+    // a screen's page was loaded again: it is not ready until it says so, and what it was given is given again
+    reloaded(s) {
+      ready.delete(s);
+      for (const [id, w] of deliveredTo) if (w === s) deliveredTo.delete(id);
+      if (status.delete(s)) sync();
+    },
+    // the screen's page listens now: what waited goes to its own screen when that one is ready, else to this one;
+    // only an answer whose own screen is still open (not ready yet) keeps waiting for it
+    ready(s) {
+      if (!screens.has(s)) return;
+      ready.add(s);
+      const waiting = queue.splice(0);
+      for (const q of waiting) {
+        const own = q.replyTo ? sentFrom.get(q.replyTo) : null;
+        const w = target(q.replyTo);
+        if (w && ready.has(w)) give(w, q.event);
+        else if (own && screens.has(own) && own !== s) queue.push(q);
+        else give(s, q.event);
+      }
+    },
+    status(s, st) {
+      if (!screens.has(s) || (st !== "busy" && st !== "idle")) return;
+      status.set(s, st);
+      if (st === "busy") lastBusy = s;
+      sync();
+    },
+    sent(id, s) {
+      if (!id || !screens.has(s)) return;
+      sentFrom.set(String(id), s);
+      cap(sentFrom);
+      // the answer came first (an instant answer, before the tool's step had returned) and went to another screen that
+      // has not started it: it is this screen's
+      const ev = answers.get(String(id));
+      const aid = ev && ev.data && String(ev.data.id);
+      if (aid && deliveredTo.get(aid) !== s && isUnread(aid)) {
+        if (ready.has(s)) give(s, ev);
+        else { deliveredTo.delete(aid); queue.push({ event: ev, replyTo: String(id) }); }
+      }
+    },
+    deliver(event, replyTo) {
+      if (replyTo) { answers.set(String(replyTo), event); cap(answers); }
+      const w = target(replyTo);
+      if (w && ready.has(w)) { give(w, event); return w; }
+      // (not ready: any ready screen takes it, except an answer whose own screen is open: it waits for that one)
+      const own = replyTo ? sentFrom.get(String(replyTo)) : null;
+      const anyReady = [...screens].find((x) => ready.has(x));
+      if (!(own && screens.has(own)) && anyReady) { give(anyReady, event); return anyReady; }
+      queue.push({ event, replyTo: replyTo ? String(replyTo) : null });
+      if (queue.length > 200) queue.shift();
+      return null;
+    },
+    // the messages in the inbox that are this screen's to start
+    inboxFor(s, messages) { return (messages || []).filter((m) => owner(m) === s); },
+    target,
+    owner,
+    busy: sessionBusy,
+    waiting: () => queue.length,
+  };
+}
+
+// ── answers that did not get there ───────────────────────────────────────────────────────────────────────
+// A session's answer to another session (replyTo) that could not be delivered (that window was reloading, closing for
+// a moment, its pipe busy) is kept by the HOST and sent again every few seconds for half an hour, so it survives the
+// chat screen that wrote it being closed (2026-11-28: an answer was lost when its panel closed before it got there).
+// The same answer (target + replyTo) is kept once. sendAnswer(req) tries now and returns the receipt, or
+// { status: "queued" } when it will be tried again.
+function createOutbox({ sendFn = send, everyMs = 10000, keepMs = 30 * 60 * 1000, setTimer = setInterval, clearTimer = clearInterval, now = () => Date.now() } = {}) {
+  const items = new Map();
+  let timer = null;
+  const key = (r) => `${r.target}|${r.replyTo || ""}`;
+  async function attempt(r) {
+    try { const out = await sendFn(r); return out && out.status === "delivered" ? out : null; } catch { return null; }
+  }
+  async function flush() {
+    for (const [k, it] of [...items]) {
+      if (now() - it.since > keepMs) { items.delete(k); continue; }
+      if (it.trying) continue;
+      it.trying = true;
+      const ok = await attempt(it.req);
+      it.trying = false;
+      if (ok) items.delete(k);
+    }
+    if (!items.size && timer) { clearTimer(timer); timer = null; }
+  }
+  return {
+    async sendAnswer(req) {
+      const ok = await attempt(req);
+      if (ok) { items.delete(key(req)); return ok; }
+      if (!req || !req.replyTo) return { status: "refused", reason: "not delivered" };
+      items.set(key(req), { req, since: now(), trying: false });
+      if (!timer) timer = setTimer(() => { void flush(); }, everyMs);
+      return { status: "queued" };
+    },
+    flush,
+    size: () => items.size,
+    stop() { if (timer) clearTimer(timer); timer = null; },
+  };
+}
+
+module.exports = { register, list, send, current, registryDir, promptFor, createPeerRouter, createOutbox };
