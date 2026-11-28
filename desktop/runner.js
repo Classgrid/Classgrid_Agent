@@ -1125,7 +1125,10 @@ async function messageClassgridSession(args) {
 function withPeerInbox(reply) {
   try {
     if (!sessionHandle || !reply || typeof reply.text !== "string") return reply;
-    const msgs = sessionHandle.takeInbox();
+    // Another session's ANSWER (replyTo) is not slipped into a step: it stays for the chat screen, which shows it and
+    // starts its own turn when this one ends. Slipped into a step, the person never saw it and the AI often missed it
+    // in the step's text (owner, 2026-11-28: ten messages sent, "no reply" each time while every answer had arrived).
+    const msgs = sessionHandle.peek().filter((m) => !m.replyTo);
     if (!msgs.length) return reply;
     const { promptFor } = sessionsLib();
     const add = msgs.map((m) => `\n\n${promptFor(m)}`).join("");

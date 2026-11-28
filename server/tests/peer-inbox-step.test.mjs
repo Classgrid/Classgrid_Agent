@@ -41,7 +41,9 @@ const read = [];
 runner.setSessionHandle({
     identity: () => ({ sessionId: "me", name: "Classgrid desktop", kind: "desktop", pipe: "none" }),
     takeInbox: () => inbox.splice(0),
-    markRead: (ids) => read.push(...ids),
+    peek: () => inbox.slice(),
+    // (as the real handle: what is marked read leaves the inbox)
+    markRead: (ids) => { read.push(...ids); for (const id of ids) { const i = inbox.findIndex((m) => m.id === id); if (i >= 0) inbox.splice(i, 1); } },
 });
 const message = (id, text) => ({ id, from, text, notifyIdle: false, receivedAt: Date.now() });
 
@@ -84,4 +86,15 @@ test("sending a message and the connection check never carry the inbox back", as
     assert.equal(ping.text, "ok");
     assert.equal(inbox.length, 1);
     assert.deepEqual(read, []);
+});
+
+test("another session's answer (replyTo) is never slipped into a step: it stays for the chat screen to show", async () => {
+    inbox.splice(0); read.splice(0);
+    inbox.push({ ...message("a1", "here is my answer"), replyTo: "sent-1" });
+    inbox.push(message("m9", "a new request"));
+    const r = await runner.runTool({ tool: "list_classgrid_sessions", args: {}, chat: "chat-1", peer: true });
+    assert.match(r.text, /a new request/);
+    assert.doesNotMatch(r.text, /here is my answer/);
+    assert.deepEqual(read, ["m9"]);
+    assert.deepEqual(inbox.map((m) => m.id), ["a1"]);
 });
