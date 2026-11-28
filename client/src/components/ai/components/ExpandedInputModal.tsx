@@ -36,17 +36,37 @@ export function ExpandedInputModal({ isOpen, onClose, onSave, value, onChange, t
     }
   }, [isOpen]); // Only run when it opens, don't run on value change to avoid jumping cursor
 
+  // Esc closes it, like every other dialog (it had no way out but the Close button, which the desktop app's browser
+  // pane can cover)
+  useEffect(() => {
+    if (!isOpen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); onClose(); } };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200">
-      <div className="dark:bg-[#212121] bg-white rounded-2xl w-full max-w-3xl h-[75vh] flex flex-col overflow-hidden relative shadow-2xl">
+    <div
+      className="fixed inset-0 z-[200] flex items-center justify-center bg-black/50 p-4 animate-in fade-in duration-200"
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
+      <div role="dialog" aria-modal="true" aria-label={title} className="dark:bg-[#212121] bg-white rounded-2xl w-full max-w-3xl h-[75vh] flex flex-col overflow-hidden relative shadow-2xl">
 
         {/* Header with bottom horizontal line */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-border/50 shrink-0">
           <h3 className="text-[15px] font-medium text-foreground">
             {title}
           </h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1.5 -mr-1.5 rounded-full text-muted-foreground hover:text-foreground hover:bg-muted transition-colors cursor-pointer"
+          >
+            <X className="size-4" />
+          </button>
         </div>
 
         {/* Content Area */}

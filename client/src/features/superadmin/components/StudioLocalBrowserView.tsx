@@ -36,6 +36,28 @@ export const hasLocalBrowser = () => typeof desktop()?.browserShow === "function
 // Things that open above the page (menus, dialogs, toasts): the native view would cover them, so it steps aside
 const OVERLAYS = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [data-radix-popper-content-wrapper], [data-sonner-toast]';
 
+// Any other box drawn over the browser's place (a full-window dialog of our own that has no dialog role, like the
+// "Pasted text" viewer): the page is drawn by the app ABOVE everything in the window, so it would hide that box's right
+// half and its Close button (2026-11-28). The window's own hit test finds it: at a few points of the browser's place,
+// the topmost element is not the place itself. Invisible layers (opacity 0, hidden) don't count.
+const shows = (el: Element | null) => {
+  for (let e = el; e && e !== document.body; e = e.parentElement) {
+    const s = getComputedStyle(e);
+    if (s.visibility === "hidden" || s.display === "none" || Number(s.opacity) === 0) return false;
+  }
+  return true;
+};
+// (points at a quarter, half and three quarters across and down: away from the edges, where a resize handle or a small
+// corner button may lie over the place and must not hide the page)
+const AT = [0.25, 0.5, 0.75];
+function coveredByPage(box: HTMLElement, r: DOMRect) {
+  const points = AT.flatMap((fx) => AT.map((fy) => [r.left + r.width * fx, r.top + r.height * fy] as [number, number]));
+  return points.some(([x, y]) => {
+    const top = document.elementFromPoint(x, y);
+    return !!top && !box.contains(top) && shows(top);
+  });
+}
+
 const host = (u?: string) => { try { return new URL(/^[a-z]+:/i.test(String(u)) ? String(u) : `https://${u}`).host; } catch { return u || ""; } };
 function pointerLabel(p: Pointer) {
   if (p.kind === "click") return "Clicking";
@@ -97,7 +119,7 @@ export function StudioLocalBrowserView({ paused = false }: { paused?: boolean })
         const covered = [...document.querySelectorAll(OVERLAYS)].some((el) => {
           const o = el.getBoundingClientRect();
           return o.width > 0 && o.height > 0 && o.left < r.right && o.right > r.left && o.top < r.bottom && o.bottom > r.top;
-        });
+        }) || coveredByPage(box, r);
         if (r.width >= 20 && r.height >= 20 && !covered) rect = { x: Math.round(r.left), y: Math.round(r.top), width: Math.round(r.width), height: Math.round(r.height) };
       }
       const next = rect ? JSON.stringify(rect) : "hide";
