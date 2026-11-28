@@ -49,7 +49,7 @@ const pages = new Set();
 const screens = { agent: null, chats: null };
 // Session-to-session messaging (desktop/sessions.js): this editor's session handle, and the messages and notices that
 // arrived while the Agent panel's page wasn't ready (it says so with "peerReady"; then they are flushed to it)
-const peer = { handle: null, queue: [], ready: new WeakSet(), views: new Set(), status: new Map(), lastBusy: null, sentFrom: new Map() };
+const peer = { handle: null, queue: [], ready: new WeakSet(), views: new Set(), viewOf: new Map(), status: new Map(), lastBusy: null, sentFrom: new Map() };
 // Which Agent panel a message or notice goes to. A window can have two Agent panels open (the right side and the left
 // icon); every message used to go to the one that became visible last, so an answer to a message sent from the other
 // panel landed in a panel nobody was looking at, or waited there unread (owner, 2026-11-28: five messages answered,
@@ -59,6 +59,10 @@ function peerTarget(event) {
   const replyTo = event?.data?.replyTo;
   const asked = replyTo ? peer.sentFrom.get(String(replyTo)) : null;
   if (asked && peer.views.has(asked)) return asked;
+  // (a panel on screen and not answering first: a panel stuck "busy" or hidden held every answer unseen, 2026-11-28)
+  const shown = [...peer.views].filter((w) => peer.viewOf.get(w)?.visible && peer.status.get(w) !== "busy");
+  if (shown.includes(screens.agent)) return screens.agent;
+  if (shown.length) return shown[shown.length - 1];
   if (peer.lastBusy && peer.views.has(peer.lastBusy)) return peer.lastBusy;
   return screens.agent;
 }
@@ -162,6 +166,7 @@ async function activate(context) {
     resolveWebviewView(view) {
       screens.agent = view.webview;
       peer.views.add(view.webview);
+      peer.viewOf.set(view.webview, view);
       // (it opens on the chat that was open last time in this folder, like the editor brings back your files)
       const load = holdScreens(view.webview, () => {
         const last = lastChatFor(context.workspaceState.get(LAST_CHAT_KEY));
@@ -170,6 +175,7 @@ async function activate(context) {
       view.onDidDispose(() => {
         loaders.delete(load); stopFetches(view.webview); if (screens.agent === view.webview) screens.agent = null;
         peer.views.delete(view.webview);
+        peer.viewOf.delete(view.webview);
         if (peer.status.delete(view.webview)) peer.handle?.setStatus([...peer.status.values()].includes("busy") ? "busy" : "idle");
         if (peer.lastBusy === view.webview) peer.lastBusy = null;
       });
