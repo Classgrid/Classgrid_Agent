@@ -4988,16 +4988,18 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                 : "You are a helper exploring a code project for another AI. Use the tools to look at the project (you can only read it). Read the actual code, not just file names. Then answer the task in full, with everything you found: what each relevant file and function does, how the parts work together step by step (frontend, API routes, backend, database, config), the important endpoints, data and settings, with file paths and line numbers. For example, if the task is to explore login, explain the whole flow from start to end: the frontend page and components, the form and what it sends, the API calls, the backend routes, controllers and services, checks and errors, tokens or sessions, the database models, and the config it uses. Never answer with only a list of file names. Don't guess; say what you could not find. Use tell_main to send the main AI a short note or question; follow any message it sends you.") + HELPER_REPORT_NOTE + sharedNote + browserNote + computerNote + worktreeNote + (helperRoot ? `\n\nThe project is the folder ${helperLocal.localPath} on the user's own Windows computer. execute_terminal_command runs Windows PowerShell in that folder (not bash: there is no /data folder and no grep; search with your file tools). Your file tools also take full paths outside it (like C:\\Users\\name\\Desktop\\folder\\file.txt): use the full path the task gives you.` : "");
                             await sleep(i * 1500); // start a little apart, so the model service isn't hit all at once
                             emitHelper({ helper: i, state: "running" });
-                            // The picked model first; if it fails, Claude Sonnet 5.5 takes over, then GLM 5.3
+                            // The picked model first; if it fails, Claude Haiku 5.5 takes over (owner, 2026-11-28: Cloudflare
+                            // failures go to Haiku only, never Sonnet), then GLM 5.3
                             // The Browser worker has to see the page: a model that can't see images is swapped for DeepSeek V4.1 Flash
                             const pickedFirst = h.browser && !CLAUDE_CHAT_MODELS.has(h.model) && !CF_VISION_MODELS.has(h.model) ? "@cf/deepseek-ai/deepseek-v4.1-flash-1017" : h.model;
                             // Cloudflare's free Neurons of the day are used up: a helper on a Cloudflare model works on Claude
-                            // Sonnet instead (services/cap-fallback.service.js; asked per helper, the cap can be reached mid-answer)
+                            // Haiku instead (services/cap-fallback.service.js; asked per helper, the cap can be reached mid-answer)
                             const helperStand = CLAUDE_CHAT_MODELS.has(pickedFirst) ? null
                                 : await import("../services/cap-fallback.service.js").then((m) => m.claudeWhenCapped("helper", { claudeOff: familyOff.has(modelFlagKey("claude-sonnet-5-5")), disabled: offModels })).catch(() => null);
                             const firstModel = helperStand || pickedFirst;
-                            // (Claude Sonnet takes over only where a helper may run on Claude: helperMayUse)
-                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) || !helperMayUse("claude-sonnet-5-5") ? HELPER_GLM_MODEL : "claude-sonnet-5-5", HELPER_GLM_MODEL])].filter((m, k) => k === 0 || !offModels.includes(m));
+                            // (Claude Haiku takes over only where a helper may run on Claude: helperMayUse; a failing Cloudflare
+                            // round already goes to Haiku inside streamChat, capStandIn)
+                            const models = [...new Set([firstModel, CLAUDE_CHAT_MODELS.has(firstModel) || !helperMayUse("claude-haiku-5-5") ? HELPER_GLM_MODEL : "claude-haiku-5-5", HELPER_GLM_MODEL])].filter((m, k) => k === 0 || !offModels.includes(m));
                             let lastError = "";
                             // When every model failed, the helper restarts by itself (up to 2 more times), carrying on from
                             // the files it already made
@@ -5052,7 +5054,7 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                         const askHelper = (extra = {}) => CLAUDE_CHAT_MODELS.has(model)
                                             // (the desktop app drives each helper's loop too, like the main answer's: local-loop.service.js)
                                             ? streamClaudeChat({ ...helperArgs, ...extra, ...meterHooks(model, `Helper ${h.no}`), model, toolsNow: () => defs, answerAtDepthLimit: true, maxContinuations: 3, toolDriver: localLoop ? localLoop.driverFor(h.no) : null })
-                                            // (capStandIn: the cap refuses a round of this helper: Claude Sonnet goes on with its work from where it
+                                            // (capStandIn: the cap refuses a round of this helper, or its Cloudflare model fails twice: Claude Haiku goes on with its work from where it
                                             // stands, instead of the helper starting again on the next model)
                                             : streamChat({ ...helperArgs, ...extra, ...meterHooks(model, `Helper ${h.no}`), capStandIn: capStandInFor("helper", `Helper ${h.no}`, (m) => { h.nowModel = m; return {}; }), provider: cloudflareStreamProvider(model, `${sessionId || "x"}-helper-${h.no}`), seesImages: CF_VISION_MODELS.has(model), maxTokens: 8192, maxContinuations: 6, answerAtDepthLimit: true, toolDriver: localLoop ? localLoop.driverFor(h.no) : null }); // a long report keeps going instead of being cut
                                         // A helper on a Claude model of the plan is charged the plan's way, counted on the Claude credits too
@@ -5891,13 +5893,16 @@ You work on the user's own Windows computer through their Classgrid desktop app,
                                     })
                                 });
                             } catch (capErr) {
-                                // The day is not used up, but the Cloudflare cap had no room for this picture: Claude Haiku looks at it
-                                const after = isCfNeuronCapError(capErr) ? capFallback.claudeFor("small", visionSwitches) : null;
+                                // The cap had no room for this picture, or Cloudflare failed: Claude Haiku looks at it (owner,
+                                // 2026-11-28: whenever Cloudflare fails, Haiku)
+                                const after = capFallback.claudeFor("small", visionSwitches);
                                 if (!after) throw capErr;
                                 return await claudeLooks(after);
                             }
 
                             if (!visionResponse.ok) {
+                                const after = capFallback.claudeFor("small", visionSwitches);
+                                if (after) return await claudeLooks(after);
                                 throw new Error(`Cloudflare Vision AI failed: ${visionResponse.statusText}`);
                             }
 
@@ -7951,11 +7956,9 @@ If a tool fails, never show the error message; say only: "Something went wrong o
                         console.log(`[AI-TOKEN] Charged detached ${claudeModel} usage: total=${claudeUsage.total_tokens}`);
                     };
 
-                    // (while Cloudflare is capped, see claudeByCap: a stand-in that gives nothing before any output is
-                    // followed once by the other Claude model, because the Cloudflare models below are refused by the cap)
-                    const claudeTries = !CLAUDE_CHAT_MODELS.has(requestedModel) ? []
-                        : claudeByCap ? [requestedModel, requestedModel === "claude-sonnet-5-5" ? "claude-haiku-5-5" : "claude-sonnet-5-5"].filter((m, k) => k === 0 || !capDisabled.includes(m))
-                        : [requestedModel];
+                    // (while Cloudflare is capped, see claudeByCap, the stand-in is Claude Haiku only: until 2026-11-28 one
+                    // that gave nothing was followed by Sonnet; the owner's rule is now Haiku only, never Sonnet)
+                    const claudeTries = !CLAUDE_CHAT_MODELS.has(requestedModel) ? [] : [requestedModel];
                     for (const claudeModelNow of claudeTries) {
                         if (streamed) break;
                         // (the rest of this block names the model it runs as `requestedModel`)

@@ -114,10 +114,18 @@ async function smallModel(user, system, text) {
             signal: AbortSignal.timeout(45000),
         }); // (room under the daily Neuron cap is held first and the usage counted after, cf-neuron-cap.service.js)
     } catch (e) {
-        // The day is not used up, but the cap had no room for this request: Claude Haiku checks
-        const after = isCfNeuronCapError(e) ? capFallback.claudeFor("small", switches) : null;
+        // The cap had no room for this request, or Cloudflare failed (an error, a timeout): Claude Haiku checks
+        // (owner, 2026-11-28: whenever Cloudflare fails, Haiku)
+        const after = capFallback.claudeFor("small", switches);
         if (!after) throw e;
         return claudeChecks(after);
+    }
+    if (!res.ok) {
+        const after = capFallback.claudeFor("small", switches);
+        if (after) {
+            console.warn(`[agent task] Cloudflare ${res.status}: ${after} checks instead`);
+            return claudeChecks(after);
+        }
     }
     const data = await res.json().catch(() => ({}));
     const usage = data.usage || {};

@@ -9,14 +9,15 @@ import { selectClientAuthMethod } from "@modelcontextprotocol/sdk/client/auth.js
 
 const ZOOM_ENV = { ZOOM_CLIENT_ID: "zoom-id", ZOOM_CLIENT_SECRET: "zoom-secret" };
 
-test("Canva (MCP) is a known app with Canva's own MCP address and the built-in plugin's logo", () => {
+// Canva is hidden everywhere since 2026-11-28 (utils/hidden-plugins.js): its entry stays in the catalog but is never offered
+test("Canva (MCP) stays in the catalog with Canva's own MCP address, but is hidden: never offered", () => {
     const canva = MCP_CATALOG.find((a) => a.id === "canva-mcp");
     assert.equal(canva.name, "Canva (MCP)");
     assert.equal(canva.url, "https://mcp.canva.com/mcp");
     assert.equal(canva.auth, "oauth");
     assert.equal(canva.logo, "https://cdn.classgrid.in/classgrid_intgration/canva.svg");
     assert.equal(canva.oauthClientEnv, undefined); // Canva signs our app up by itself
-    assert.ok(publicCatalog({}).some((a) => a.id === "canva-mcp"));
+    assert.ok(!publicCatalog({}).some((a) => a.id === "canva-mcp"));
 });
 
 test("Zoom (MCP) is offered only when the Zoom app's id and secret are set", () => {
@@ -50,9 +51,9 @@ test("Zoom's token endpoint takes only client_secret_basic, and the SDK picks it
 });
 
 test("the AI finds the MCP entries by their names, and not Zoom (MCP) before it is set up", () => {
-    assert.equal(findCatalogApp("Canva (MCP)", {})?.id, "canva-mcp");
-    assert.equal(findCatalogApp("canva-mcp", {})?.id, "canva-mcp");
-    assert.equal(findCatalogApp("canva mcp", {})?.id, "canva-mcp");
+    // (Canva is hidden: never found)
+    assert.equal(findCatalogApp("Canva (MCP)", {}), null);
+    assert.equal(findCatalogApp("canva-mcp", {}), null);
     assert.equal(findCatalogApp("Zoom (MCP)", ZOOM_ENV)?.id, "zoom-mcp");
     assert.equal(findCatalogApp("Zoom (MCP)", {}), null);
     // the others are found as before

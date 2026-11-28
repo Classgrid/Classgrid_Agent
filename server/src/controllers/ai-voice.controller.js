@@ -456,10 +456,10 @@ export const voiceTurn = async (req, res) => {
                     ? await claudeVoiceAnswer({ ...ask, model: answerModel })
                     : await fallbackVoiceAnswer({ ...ask, model: answerModel });
             } catch (e) {
-                // The day's free Neurons are not used up, but Cloudflare's cap had no room for this request (or was
-                // reached in the middle of the turn): Claude Haiku answers it and the rest of the turn, the same
-                // system's choice as the stand-in picked above (not a backup for a model that failed)
-                const stand = e?.code === "cf_neuron_cap" && !CLAUDE_CHAT_MODELS.has(answerModel)
+                // Cloudflare's cap had no room for this request (or was reached in the middle of the turn), or the
+                // Cloudflare model failed (an error, a timeout): Claude Haiku answers it and the rest of the turn
+                // (owner, 2026-11-28: "whenever Cloudflare fails send it to Haiku"; before, only the cap moved it)
+                const stand = !abort.signal.aborted && !CLAUDE_CHAT_MODELS.has(answerModel)
                     ? await import("../services/cap-fallback.service.js").then((m) => m.claudeFor("simple", capSwitches || {})).catch(() => null)
                     : null;
                 if (!stand) throw e;
