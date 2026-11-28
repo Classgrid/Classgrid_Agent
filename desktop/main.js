@@ -115,7 +115,7 @@ function rememberPlace(url) {
 const isOurs = (url) => { try { return OUR_HOSTS.has(new URL(url).hostname); } catch { return false; } };
 
 // The window buttons' colours, the same as our top bar (Studio's greys)
-const TITLE_BAR = { dark: { color: "#181818", symbolColor: "#ffffff" }, light: { color: "#f5f5f5", symbolColor: "#000000" } };
+const TITLE_BAR = { dark: { color: "#181818", symbolColor: "#ffffff" }, light: { color: "#f8f8f4", symbolColor: "#000000" } };
 // ...and the welcome screen's (splash/), which every window opens with
 const SPLASH_BAR = { dark: { color: "#000000", symbolColor: "#ffffff" }, light: { color: "#ffffff", symbolColor: "#000000" } };
 
