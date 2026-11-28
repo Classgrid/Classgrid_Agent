@@ -32,10 +32,10 @@ const CANVA_CLIENT_SECRET = () => process.env.CANVA_CLIENT_SECRET?.trim();
 const REDIRECT_URI = () => `${process.env.BACKEND_URL}/api/auth/canva/callback`;
 // Only the scopes canva_connector (services/canva.service.js) really uses, for Canva's review (owner, 2026-11-28).
 // They must all be turned on for the integration in the Canva Developer Portal, or the connect fails. Not asked for
-// (nothing calls them): app:read/write, brandtemplate:content:write, design:permission:*, folder:permission:*.
+// (nothing calls them): app:read/write, brandtemplate:content:write, design:meta:write, design:permission:*, folder:permission:*.
 const SCOPES = [
     "asset:read", "asset:write", "brandtemplate:content:read", "brandtemplate:meta:read",
-    "comment:read", "comment:write", "design:content:read", "design:content:write", "design:meta:read", "design:meta:write",
+    "comment:read", "comment:write", "design:content:read", "design:content:write", "design:meta:read",
     "folder:read", "folder:write", "profile:read",
 ];
 const STATE_KEY = (state) => `canva:oauth:${state}`;
