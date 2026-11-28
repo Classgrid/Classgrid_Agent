@@ -272,6 +272,7 @@ import { AgentMapButton } from "./AgentMap";
 
 import { isPeerContent, markPeerRead, parsePeerContent, peerInboxNow, peerNoticeText, peerPrompt, reportSessionStatus, sendPeerAnswer, subscribePeers, type PeerMessage } from "@/lib/peerSessions";
 import { createPeerTurns, PEER_TICK_MS } from "@/lib/peerTurns";
+import { peekPendingSend, takePendingSend } from "@/lib/pendingSend";
 
 // Session-to-session messaging: the AI panels that are open, the newest one is the one that answers other sessions
 const peerPanels: symbol[] = [];
@@ -2993,7 +2994,8 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   // messages in local storage, so a refresh brings it back (unless the address is for a saved chat). Closing deletes it.
   const [isIncognito, setIsIncognito] = useState(() => {
     try {
-      return variant === "full-page" && !routeSessionId && !new URLSearchParams(window.location.search).get("session") && !!loadIncognitoChat()?.length;
+      // (not when a message from the website is waiting: that one starts a new, normal chat; lib/pendingSend.ts)
+      return variant === "full-page" && !routeSessionId && !new URLSearchParams(window.location.search).get("session") && !peekPendingSend() && !!loadIncognitoChat()?.length;
     } catch { return false; }
   });
   const enteringIncognitoRef = useRef(false);
@@ -4691,6 +4693,14 @@ export function AskAiPanel({ open, onOpenChange, pageContext, variant = "in-flow
   useEffect(() => {
     askQuestionRef.current = askQuestion;
   }, [askQuestion]);
+
+  // A message from the website (chat.classgrid.in/c/studio?q=<text>&send=1, kept across a login: lib/pendingSend.ts)
+  // is sent to the AI by itself, once, in Studio's new chat. (This runs after the line above has set askQuestionRef.)
+  useEffect(() => {
+    if (!isStudio || variant !== "full-page" || routeSessionId) return;
+    const text = takePendingSend();
+    if (text) askQuestionRef.current?.(text);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Session-to-session messaging (desktop app / Classgrid Code; nothing happens on the website). What happens to a
   // message, an answer or a notice is decided in lib/peerTurns.ts (tested: server/tests/peer-turns.test.mjs); this

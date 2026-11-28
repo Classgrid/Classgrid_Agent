@@ -208,6 +208,7 @@ import { PlaygroundPage } from "@/features/superadmin/pages/PlaygroundPage";
 import { LiveDocPage } from "@/features/live-docs/LiveDocPage";
 import { DocsHomePage } from "@/features/live-docs/DocsHomePage";
 import { isChatHost } from "@/lib/chatHost";
+import { catchPendingSendLink } from "@/lib/pendingSend";
 
 
 
@@ -220,9 +221,11 @@ export function AppRouter() {
     !hostname.endsWith(".classgrid.in");
   const subdomain = hostname.split(".")[0];
   // "Ask Classgrid" links (chat.classgrid.in/?q=...) fill the message box: kept for the chat page, also across a login
+  // (with &send=1 the message is sent by itself instead, in Studio: lib/pendingSend.ts, below)
   try {
-    const q = new URLSearchParams(window.location.search).get("q");
-    if (q) sessionStorage.setItem("classgrid:pendingPrompt", q);
+    const query = new URLSearchParams(window.location.search);
+    const q = query.get("q");
+    if (q && query.get("send") !== "1") sessionStorage.setItem("classgrid:pendingPrompt", q);
   } catch { /* storage blocked: the link just opens the chat */ }
   // Only chat.classgrid.in (Classgrid AI) and the staff/billing addresses are live: every other *.classgrid.in
   // address (old school subdomains, typos) goes to chat.classgrid.in, same page
@@ -231,6 +234,10 @@ export function AppRouter() {
     window.location.replace(`https://chat.classgrid.in${window.location.pathname}${window.location.search}${window.location.hash}`);
     return null;
   }
+  // A message from the website to send in Studio (?q=<text>&send=1): kept for Studio's chat, also across a login, and
+  // taken out of the address so a refresh doesn't send it again (here, after the move to chat.classgrid.in above:
+  // this tab's storage belongs to one address)
+  catchPendingSendLink();
   const isSuperAdmin = subdomain === "superadmin";
   const isOnboarding = subdomain === "onboard" || subdomain === "onboarding" || window.location.pathname.startsWith("/onboard");
   const isBilling = subdomain === "billing" || subdomain === "studentbilling" || window.location.pathname.startsWith("/checkout");

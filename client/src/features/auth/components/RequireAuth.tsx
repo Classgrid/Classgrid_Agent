@@ -63,6 +63,7 @@ import { PresenceProvider } from "@/features/chat/context/PresenceContext";
 import { apiClient } from "@/lib/apiClient";
 import { OAUTH_CONSENT_PATH, peekOAuthConsentReturn, rememberOAuthConsentReturn } from "@/features/oauth/lib/oauthReturn";
 import { isChatHost } from "@/lib/chatHost";
+import { PENDING_SEND_PATH, peekPendingSend } from "@/lib/pendingSend";
 import { Spinner } from "@/components/marketing_ui/spinner";
 
 export function RequireAuth() {
@@ -157,6 +158,11 @@ export function RequireAuth() {
   if (user && path !== OAUTH_CONSENT_PATH) {
     const consentReturn = peekOAuthConsentReturn();
     if (consentReturn) return <Navigate to={consentReturn} replace />;
+  }
+  // Signed in with a message from the website waiting to be sent (?q=...&send=1, lib/pendingSend.ts): Studio sends it,
+  // so go there instead of the account's usual first page (/c/agent)
+  if (user && !path.startsWith(PENDING_SEND_PATH) && peekPendingSend()) {
+    return <Navigate to={PENDING_SEND_PATH} replace />;
   }
 
   // 🚨 STRICT ROLE GUARDS 🚨
