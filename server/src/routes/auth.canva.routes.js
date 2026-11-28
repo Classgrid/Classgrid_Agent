@@ -30,12 +30,13 @@ const router = express.Router();
 const CANVA_CLIENT_ID = () => process.env.CANVA_CLIENT_ID?.trim();
 const CANVA_CLIENT_SECRET = () => process.env.CANVA_CLIENT_SECRET?.trim();
 const REDIRECT_URI = () => `${process.env.BACKEND_URL}/api/auth/canva/callback`;
-// The scopes turned on for the Classgrid app in the Canva Developer Portal
+// Only the scopes canva_connector (services/canva.service.js) really uses, for Canva's review (owner, 2026-11-28).
+// They must all be turned on for the integration in the Canva Developer Portal, or the connect fails. Not asked for
+// (nothing calls them): app:read/write, brandtemplate:content:write, design:permission:*, folder:permission:*.
 const SCOPES = [
-    "app:read", "app:write", "asset:read", "asset:write", "brandtemplate:content:read", "brandtemplate:content:write", "brandtemplate:meta:read",
+    "asset:read", "asset:write", "brandtemplate:content:read", "brandtemplate:meta:read",
     "comment:read", "comment:write", "design:content:read", "design:content:write", "design:meta:read", "design:meta:write",
-    "design:permission:read", "design:permission:write", "folder:read", "folder:write",
-    "folder:permission:read", "folder:permission:write", "profile:read",
+    "folder:read", "folder:write", "profile:read",
 ];
 const STATE_KEY = (state) => `canva:oauth:${state}`;
 
