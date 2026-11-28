@@ -296,10 +296,17 @@
   html.studio-colors.studio-mode:not(.dark) .studio-chat :is([class^="!bg-[#fafafa]"], [class*=" !bg-[#fafafa]"]):not(.cg-incognito, .cg-incognito *) {
     background-color: #fbfbf8 !important;
   }
+  /* Light sidebar #f8f8f4 to go with the #fbfbf8 chat (owner, 2026-11-28; was #fafafa): the left sidebar, Studio's
+     right pane and the desktop title bar, which all use --sidebar-background */
+  html.desktop-app:not(.cg-editor):not(.dark),
+  html.studio-colors:not(.dark) {
+    --sidebar-background: #f8f8f4;
+  }
   /* (incognito on the website stays white, as before; the desktop app's incognito has its own rule further down) */
   html.studio-colors:not(.dark) .cg-incognito {
     --background: #ffffff;
     --color-background: #ffffff;
+    --sidebar-background: #fafafa;
   }
   /* Classgrid Code's light mode: soft greys, not bright white (the AI panel and its windows) */
   html.desktop-app.cg-editor:not(.dark) {
