@@ -2682,6 +2682,15 @@ export const streamAskAi = async (req, res) => {
             tailPrompt += `</schedule_context>\n\nYou can use the list_schedules, update_schedule, and delete_schedule tools to manage this schedule.`;
         }
 
+        // A plugin was just connected (the app's "[SYSTEM: I have connected X! ...]" note, sent when the person connects
+        // one in AI Hub). The note is a notice, not a request (owner, 2026-11-28: the AI started calling the new
+        // plugin's tools on its own each time one was connected). Only a task that was really waiting for this
+        // connection goes on; otherwise the AI says it is connected and asks what the person wants to do with it.
+        if (typeof body.question === "string" && CONNECTED_APP_NOTE.test(body.question.trim())) {
+            const app = (body.question.match(/connected (.*?)!/) || [])[1] || "the app";
+            tailPrompt += `\n\n<plugin_connected>\nThe user has just connected ${app} in AI Hub. This note is only a notice that the connection is ready; it is not a request to do anything.\n- If the user's last request in this chat could not be done because ${app} was not connected (you asked them to connect it, or a step stopped for it), carry on exactly that request now.\n- Otherwise do NOT call any ${app} tool or any other tool. Reply in two or three short sentences: tell the user ${app} is connected, name two or three things they can now ask you to do with it, and ask what they would like to do.\n</plugin_connected>`;
+        }
+
         // An app was connected while no chat was open: there is no task to carry on, so nothing runs and no chat is
         // made (it used to start an empty chat named "Gmail Connected" each time; older apps still send it)
         if (!sessionId && typeof body.question === "string" && CONNECTED_APP_NOTE.test(body.question.trim())) {
